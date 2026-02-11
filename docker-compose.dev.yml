@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: pm-arbitrage-postgres-dev
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_DB: pmarbitrage
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pm-arbitrage-network
+
+networks:
+  pm-arbitrage-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

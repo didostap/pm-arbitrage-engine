@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: pm-arbitrage-postgres
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_DB: pmarbitrage
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pm-arbitrage-network
+
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pm-arbitrage-engine
+    ports:
+      - '8080:8080'
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/pmarbitrage?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pm-arbitrage-network
+    restart: unless-stopped
+
+networks:
+  pm-arbitrage-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
