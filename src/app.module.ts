@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PersistenceModule } from './common/persistence.module';
+import { ConnectorModule } from './connectors/connector.module';
 import { CoreModule } from './core/core.module';
 
 @Module({
@@ -13,6 +14,7 @@ import { CoreModule } from './core/core.module';
     }),
     PersistenceModule,
     CoreModule,
+    ConnectorModule,
   ],
   controllers: [AppController],
   providers: [AppService],

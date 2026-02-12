@@ -24,10 +24,12 @@
     "@nestjs/platform-fastify": "^11.1.13",
     "@nestjs/schedule": "^6.1.1",
     "@prisma/client": "6",
+    "kalshi-typescript": "^3.6.0",
     "prisma": "6",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "viem": "^2.45.3"
+    "viem": "^2.45.3",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -41,6 +43,8 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/supertest": "^6.0.2",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

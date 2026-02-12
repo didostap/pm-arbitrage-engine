@@ -1,0 +1,50 @@
+export enum PlatformId {
+  KALSHI = 'kalshi',
+  POLYMARKET = 'polymarket',
+}
+
+export interface PlatformHealth {
+  platformId: PlatformId;
+  status: 'healthy' | 'degraded' | 'disconnected';
+  lastHeartbeat: Date | null;
+  latencyMs: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OrderParams {
+  contractId: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  price: number;
+  type: 'limit' | 'market';
+}
+
+export interface OrderResult {
+  orderId: string;
+  platformId: PlatformId;
+  status: 'filled' | 'partial' | 'pending' | 'rejected';
+  filledQuantity: number;
+  filledPrice: number;
+  timestamp: Date;
+}
+
+export interface CancelResult {
+  orderId: string;
+  status: 'cancelled' | 'not_found' | 'already_filled';
+}
+
+export interface Position {
+  contractId: string;
+  platformId: PlatformId;
+  side: 'yes' | 'no';
+  quantity: number;
+  averagePrice: number;
+  currentValue: number;
+}
+
+export interface FeeSchedule {
+  platformId: PlatformId;
+  makerFeePercent: number;
+  takerFeePercent: number;
+  description: string;
+}
