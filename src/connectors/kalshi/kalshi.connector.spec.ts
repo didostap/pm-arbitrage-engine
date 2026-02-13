@@ -105,8 +105,8 @@ describe('KalshiConnector', () => {
       mockGetMarketOrderbook.mockResolvedValue({
         data: {
           orderbook: {
-            true: [[62, 1000]],
-            false: [[38, 800]],
+            true: [[62, 1000]], // 62¢ YES bid
+            false: [[38, 800]], // 38¢ NO bid → 62¢ YES ask (1 - 0.38)
           },
         },
       });
@@ -115,8 +115,10 @@ describe('KalshiConnector', () => {
 
       expect(orderbook.platformId).toBe(PlatformId.KALSHI);
       expect(orderbook.contractId).toBe('CPI-22DEC-TN0.1');
-      expect(orderbook.bids).toEqual([{ price: 62, quantity: 1000 }]);
-      expect(orderbook.asks).toEqual([{ price: 62, quantity: 800 }]);
+      // YES bid 62¢ → 0.62
+      expect(orderbook.bids).toEqual([{ price: 0.62, quantity: 1000 }]);
+      // NO bid 38¢ → YES ask (1 - 0.38) = 0.62
+      expect(orderbook.asks).toEqual([{ price: 0.62, quantity: 800 }]);
     });
 
     it('should throw PlatformApiError on SDK error', async () => {

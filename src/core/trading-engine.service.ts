@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -10,6 +11,8 @@ export class TradingEngineService {
   private readonly SHUTDOWN_CHECK_INTERVAL_MS = 100; // Check interval for in-flight operations
   private isShuttingDown = false;
   private inflightOperations = 0;
+
+  constructor(private readonly dataIngestionService: DataIngestionService) {}
 
   /**
    * Execute one complete trading cycle (detection → risk → execution pipeline).
@@ -32,8 +35,15 @@ export class TradingEngineService {
         cycle: 'start',
       });
 
-      // Placeholder pipeline - actual implementation comes in later stories
-      await this.executePipelinePlaceholder();
+      // STEP 1: Data Ingestion (Story 1.4)
+      // NOTE: WebSocket updates run in parallel to this polling path for real-time data
+      await this.dataIngestionService.ingestCurrentOrderBooks();
+
+      // STEP 2: Arbitrage Detection (Epic 3)
+      // await this.detectionService.detectOpportunities();
+
+      // STEP 3: Risk Validation (Epic 4)
+      // STEP 4: Execution (Epic 5)
 
       const duration = Date.now() - startTime;
       this.logger.log({
@@ -109,22 +119,5 @@ export class TradingEngineService {
       timestamp: new Date().toISOString(),
       module: 'core',
     });
-  }
-
-  /**
-   * Placeholder for the trading pipeline.
-   * Future stories will implement: data ingestion → detection → risk → execution
-   *
-   * @private
-   */
-  private async executePipelinePlaceholder(): Promise<void> {
-    // Simulate processing time (100ms)
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Future implementation will call:
-    // - DataIngestionService.aggregateOrderBooks()
-    // - ArbitrageDetectionService.findOpportunities()
-    // - RiskManagementService.validatePosition()
-    // - ExecutionService.submitOrders()
   }
 }

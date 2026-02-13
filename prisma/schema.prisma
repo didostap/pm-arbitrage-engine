@@ -21,3 +21,37 @@ model SystemMetadata {
 
   @@map("system_metadata")
 }
+
+// Order book snapshots for audit trail and compliance (7-year retention)
+// DESIGN DECISION: Store full depth (bids/asks arrays as JSON) not just best prices
+// - Justification: Epic 3's edge calculator needs "liquidity depth at execution prices" (FR-AD-02)
+// - Storage cost: ~1-2KB per snapshot vs ~100 bytes for best-only
+// - Query pattern: Primarily time-series append, rare queries, acceptable trade-off
+model OrderBookSnapshot {
+  id              String   @id @default(uuid())
+  platform        String   // "kalshi" | "polymarket" (consistent with PlatformHealthLog)
+  contract_id     String   // Platform's contract identifier
+  bids            Json     // PriceLevel[] serialized: [{price: 0.60, quantity: 1000}, ...]
+  asks            Json     // PriceLevel[] serialized: [{price: 0.65, quantity: 800}, ...]
+  sequence_number Int?     // Optional WebSocket sequence tracking
+  created_at      DateTime @default(now()) @db.Timestamptz
+
+  @@index([platform, contract_id, created_at])
+  @@index([created_at]) // For retention policy cleanup (7-year window)
+  @@map("order_book_snapshots")
+}
+
+// Platform health logs for observability and degradation analysis
+model PlatformHealthLog {
+  id                 String   @id @default(uuid())
+  platform           String   // "kalshi" | "polymarket"
+  status             String   // "healthy" | "degraded" | "disconnected" (NOT "offline")
+  last_update        DateTime @db.Timestamptz
+  response_time_ms   Float?   // p95 latency
+  connection_state   String   // From connector.getHealth() metadata
+  created_at         DateTime @default(now()) @db.Timestamptz
+
+  @@index([platform, created_at])
+  @@index([created_at])
+  @@map("platform_health_logs")
+}

@@ -1,19 +1,33 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-misused-promises */
+
 /* eslint-disable @typescript-eslint/no-floating-promises */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TradingEngineService } from './trading-engine.service';
+import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
 
+  const mockDataIngestionService = {
+    ingestCurrentOrderBooks: vi.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TradingEngineService],
+      providers: [
+        TradingEngineService,
+        {
+          provide: DataIngestionService,
+          useValue: mockDataIngestionService,
+        },
+      ],
     }).compile();
 
     service = module.get<TradingEngineService>(TradingEngineService);
+
+    // Clear mocks
+    vi.clearAllMocks();
   });
 
   it('should be defined', () => {
@@ -52,11 +66,10 @@ describe('TradingEngineService', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      // Stub the pipeline to throw an error
-      vi.spyOn(
-        service as any,
-        'executePipelinePlaceholder',
-      ).mockRejectedValueOnce(new Error('Pipeline error'));
+      // Mock data ingestion to throw an error
+      mockDataIngestionService.ingestCurrentOrderBooks.mockRejectedValueOnce(
+        new Error('Pipeline error'),
+      );
 
       await expect(service.executeCycle()).resolves.not.toThrow();
       expect(service.isCycleInProgress()).toBe(false);
@@ -76,8 +89,8 @@ describe('TradingEngineService', () => {
     });
 
     it('should timeout if operations take too long', async () => {
-      // Mock a long-running cycle that won't complete in time
-      vi.spyOn(service as any, 'executePipelinePlaceholder').mockImplementation(
+      // Mock data ingestion to take a long time
+      mockDataIngestionService.ingestCurrentOrderBooks.mockImplementation(
         async () => {
           await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 second delay
         },

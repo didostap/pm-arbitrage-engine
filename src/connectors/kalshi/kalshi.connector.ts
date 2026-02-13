@@ -39,7 +39,7 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     );
     const baseUrl = this.configService.get<string>(
       'KALSHI_API_BASE_URL',
-      'https://demo-api.kalshi.co',
+      'https://demo-api.kalshi.co/trade-api/v2',
     );
 
     let privateKeyPem = '';
@@ -140,22 +140,30 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       this.lastHeartbeat = new Date();
       const orderbook = response.data.orderbook;
 
-      // Transform YES/NO bids to normalized bids/asks
-      // YES bids → bids, NO bids → asks (price inverted: 100 - price)
+      // Normalize: convert cents to decimal, transform NO bids to YES asks
       const yesBids = orderbook?.true ?? [];
       const noBids = orderbook?.false ?? [];
+
+      // YES bids → bids (convert cents to decimal)
+      const bids = yesBids.map(([priceCents, quantity]: number[]) => ({
+        price: (priceCents ?? 0) / 100, // 60¢ → 0.60
+        quantity: quantity ?? 0,
+      }));
+
+      // NO bids → asks (invert and convert: NO 35¢ → YES ask 0.65)
+      const asks = noBids.map(([priceCents, quantity]: number[]) => ({
+        price: 1 - (priceCents ?? 0) / 100,
+        quantity: quantity ?? 0,
+      }));
+
+      // Sort asks ascending
+      asks.sort((a, b) => a.price - b.price);
 
       return {
         platformId: PlatformId.KALSHI,
         contractId,
-        bids: yesBids.map(([price, quantity]: number[]) => ({
-          price: price ?? 0,
-          quantity: quantity ?? 0,
-        })),
-        asks: noBids.map(([price, quantity]: number[]) => ({
-          price: 100 - (price ?? 0),
-          quantity: quantity ?? 0,
-        })),
+        bids,
+        asks,
         timestamp: new Date(),
       };
     } catch (error) {
@@ -168,12 +176,12 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  submitOrder(params: OrderParams): Promise<OrderResult> {
+  submitOrder(_params: OrderParams): Promise<OrderResult> {
     throw new Error('submitOrder not implemented - Epic 5 Story 5.1');
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  cancelOrder(orderId: string): Promise<CancelResult> {
+  cancelOrder(_orderId: string): Promise<CancelResult> {
     throw new Error('cancelOrder not implemented - Epic 5 Story 5.1');
   }
 
