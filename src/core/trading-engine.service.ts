@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
+import {
+  withCorrelationId,
+  getCorrelationId,
+} from '../common/services/correlation-context';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -24,48 +28,56 @@ export class TradingEngineService {
       return;
     }
 
-    this.inflightOperations++;
-    const startTime = Date.now();
+    // Wrap cycle in correlation context
+    await withCorrelationId(async () => {
+      this.inflightOperations++;
+      const startTime = Date.now();
 
-    try {
-      this.logger.log({
-        message: 'Starting trading cycle',
-        timestamp: new Date().toISOString(),
-        module: 'core',
-        cycle: 'start',
-      });
+      try {
+        // IMPORTANT: For polling cycles (@Cron triggers), manually include correlationId
+        // customProps only works for HTTP-triggered code paths
+        this.logger.log({
+          message: 'Starting trading cycle',
+          correlationId: getCorrelationId(),
+          data: {
+            cycle: 'start',
+          },
+        });
 
-      // STEP 1: Data Ingestion (Story 1.4)
-      // NOTE: WebSocket updates run in parallel to this polling path for real-time data
-      await this.dataIngestionService.ingestCurrentOrderBooks();
+        // STEP 1: Data Ingestion (Story 1.4)
+        // NOTE: WebSocket updates run in parallel to this polling path for real-time data
+        await this.dataIngestionService.ingestCurrentOrderBooks();
 
-      // STEP 2: Arbitrage Detection (Epic 3)
-      // await this.detectionService.detectOpportunities();
+        // STEP 2: Arbitrage Detection (Epic 3)
+        // await this.detectionService.detectOpportunities();
 
-      // STEP 3: Risk Validation (Epic 4)
-      // STEP 4: Execution (Epic 5)
+        // STEP 3: Risk Validation (Epic 4)
+        // STEP 4: Execution (Epic 5)
 
-      const duration = Date.now() - startTime;
-      this.logger.log({
-        message: `Trading cycle completed in ${duration}ms`,
-        timestamp: new Date().toISOString(),
-        module: 'core',
-        cycle: 'complete',
-        durationMs: duration,
-      });
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      this.logger.error({
-        message: 'Trading cycle failed',
-        timestamp: new Date().toISOString(),
-        module: 'core',
-        cycle: 'error',
-        durationMs: duration,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    } finally {
-      this.inflightOperations--;
-    }
+        const duration = Date.now() - startTime;
+        this.logger.log({
+          message: `Trading cycle completed in ${duration}ms`,
+          correlationId: getCorrelationId(),
+          data: {
+            cycle: 'complete',
+            durationMs: duration,
+          },
+        });
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        this.logger.error({
+          message: 'Trading cycle failed',
+          correlationId: getCorrelationId(),
+          data: {
+            cycle: 'error',
+            durationMs: duration,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          },
+        });
+      } finally {
+        this.inflightOperations--;
+      }
+    });
   }
 
   /**
@@ -82,8 +94,7 @@ export class TradingEngineService {
   initiateShutdown(): void {
     this.logger.log({
       message: 'Trading engine shutdown initiated',
-      timestamp: new Date().toISOString(),
-      module: 'core',
+      correlationId: getCorrelationId(),
     });
     this.isShuttingDown = true;
   }
@@ -101,10 +112,11 @@ export class TradingEngineService {
       if (elapsed >= timeoutMs) {
         this.logger.warn({
           message: 'Shutdown timeout - forcing shutdown',
-          timestamp: new Date().toISOString(),
-          module: 'core',
-          inflightOperations: this.inflightOperations,
-          timeoutMs,
+          correlationId: getCorrelationId(),
+          data: {
+            inflightOperations: this.inflightOperations,
+            timeoutMs,
+          },
         });
         break;
       }
@@ -116,8 +128,7 @@ export class TradingEngineService {
 
     this.logger.log({
       message: 'All in-flight operations completed',
-      timestamp: new Date().toISOString(),
-      module: 'core',
+      correlationId: getCorrelationId(),
     });
   }
 }

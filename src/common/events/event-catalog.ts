@@ -1,0 +1,72 @@
+/**
+ * Centralized catalog of all domain event names.
+ * Use these constants when emitting or subscribing to events.
+ *
+ * Naming Convention:
+ * - Event names: dot.notation.lowercase
+ * - Constants: UPPER_SNAKE_CASE
+ * - Event classes: PascalCase matching the action (e.g., PlatformDegradedEvent)
+ *
+ * IMPORTANT: Events marked with [Epic X] are placeholders for future implementation.
+ * Only Epic 1 events have corresponding event classes in this story.
+ */
+
+export const EVENT_NAMES = {
+  // ============================================================================
+  // EPIC 1 EVENTS (Implemented in this story)
+  // ============================================================================
+
+  /** Emitted when platform health status is updated (every 30s) */
+  PLATFORM_HEALTH_UPDATED: 'platform.health.updated',
+
+  /** Emitted when platform transitions to degraded state */
+  PLATFORM_HEALTH_DEGRADED: 'platform.health.degraded',
+
+  /** Emitted when platform recovers from degraded state to healthy */
+  PLATFORM_HEALTH_RECOVERED: 'platform.health.recovered',
+
+  /** Emitted when platform disconnects completely */
+  PLATFORM_HEALTH_DISCONNECTED: 'platform.health.disconnected',
+
+  /** Emitted when order book is normalized and persisted */
+  ORDERBOOK_UPDATED: 'orderbook.updated',
+
+  // ============================================================================
+  // FUTURE EVENTS - Placeholders (Epic 3+)
+  // ============================================================================
+  // NOTE: Event classes for these do NOT exist yet. They will be created in their respective epics.
+
+  // [Epic 3] Detection Events
+  /** [Epic 3] Emitted when arbitrage opportunity meets minimum edge threshold */
+  OPPORTUNITY_IDENTIFIED: 'detection.opportunity.identified',
+
+  /** [Epic 3] Emitted when opportunity is filtered out (below threshold or insufficient liquidity) */
+  OPPORTUNITY_FILTERED: 'detection.opportunity.filtered',
+
+  // [Epic 5] Execution Events
+  /** [Epic 5] Emitted when order is filled on a platform */
+  ORDER_FILLED: 'execution.order.filled',
+
+  /** [Epic 5] Emitted when only one leg fills within timeout */
+  SINGLE_LEG_EXPOSURE: 'execution.single_leg.exposure',
+
+  /** [Epic 5] Emitted when exit threshold is hit (take-profit, stop-loss, time-based) */
+  EXIT_TRIGGERED: 'execution.exit.triggered',
+
+  // [Epic 4] Risk Events
+  /** [Epic 4] Emitted when risk limit is approaching (80% of threshold) */
+  LIMIT_APPROACHED: 'risk.limit.approached',
+
+  /** [Epic 4] Emitted when risk limit is breached (trading halt) */
+  LIMIT_BREACHED: 'risk.limit.breached',
+
+  // [All Epics] System Health Events
+  /** Emitted when critical system health issue detected (database failure, etc.) */
+  SYSTEM_HEALTH_CRITICAL: 'system.health.critical',
+} as const;
+
+/**
+ * Type-safe event name type derived from EVENT_NAMES object.
+ * Ensures only valid event names can be used in emit/subscribe calls.
+ */
+export type EventName = (typeof EVENT_NAMES)[keyof typeof EVENT_NAMES];
