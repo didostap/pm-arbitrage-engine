@@ -5,8 +5,12 @@ import {
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/prisma.service';
 import { TradingEngineService } from './trading-engine.service';
+import { syncAndMeasureDrift } from '../common/utils';
+import { EVENT_NAMES, TimeHaltEvent } from '../common/events';
+import { getCorrelationId } from '../common/services/correlation-context';
 
 /**
  * Manages engine lifecycle hooks for startup and graceful shutdown.
@@ -22,6 +26,7 @@ export class EngineLifecycleService
     private readonly prisma: PrismaService,
     private readonly tradingEngine: TradingEngineService,
     private readonly configService: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -39,6 +44,64 @@ export class EngineLifecycleService
         30000,
       );
       this.validateConfiguration(pollingInterval);
+
+      // Startup NTP validation
+      try {
+        const driftResult = await syncAndMeasureDrift();
+
+        this.logger.log({
+          message: 'Startup NTP validation complete',
+          timestamp: new Date().toISOString(),
+          module: 'core',
+          correlationId: getCorrelationId(),
+          data: {
+            driftMs: driftResult.driftMs,
+            serverUsed: driftResult.serverUsed,
+          },
+        });
+
+        if (driftResult.driftMs >= 1000) {
+          // Severe drift - halt trading
+          this.logger.error({
+            message:
+              'Severe clock drift detected at startup - trading will not start',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+            data: { driftMs: driftResult.driftMs, threshold: 1000 },
+          });
+          this.eventEmitter.emit(
+            EVENT_NAMES.TIME_DRIFT_HALT,
+            new TimeHaltEvent(
+              driftResult.driftMs,
+              driftResult.serverUsed,
+              new Date(),
+              'Startup drift >1000ms',
+            ),
+          );
+        } else if (driftResult.driftMs >= 500) {
+          // Critical warning but allow startup (operator intervention required)
+          this.logger.warn({
+            message:
+              'Critical clock drift detected at startup - operator intervention recommended',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+            data: { driftMs: driftResult.driftMs, threshold: 500 },
+          });
+        }
+      } catch (error) {
+        // Log error but don't block startup - NTP issues shouldn't prevent application from starting
+        this.logger.error({
+          message: 'Startup NTP validation failed',
+          timestamp: new Date().toISOString(),
+          module: 'core',
+          correlationId: getCorrelationId(),
+          data: {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          },
+        });
+      }
 
       const nodeEnv = process.env.NODE_ENV || 'development';
 

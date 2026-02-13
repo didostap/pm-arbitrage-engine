@@ -31,6 +31,18 @@ export const EVENT_NAMES = {
   /** Emitted when order book is normalized and persisted */
   ORDERBOOK_UPDATED: 'orderbook.updated',
 
+  /** Emitted when clock drift exceeds 100ms but below 500ms */
+  TIME_DRIFT_WARNING: 'time.drift.warning',
+
+  /** Emitted when clock drift exceeds 500ms but below 1000ms */
+  TIME_DRIFT_CRITICAL: 'time.drift.critical',
+
+  /** Emitted when clock drift exceeds 1000ms, triggers trading halt */
+  TIME_DRIFT_HALT: 'time.drift.halt',
+
+  /** Emitted when trading is halted for any reason (time drift, risk limits, etc.) */
+  SYSTEM_TRADING_HALTED: 'system.trading.halted',
+
   // ============================================================================
   // FUTURE EVENTS - Placeholders (Epic 3+)
   // ============================================================================

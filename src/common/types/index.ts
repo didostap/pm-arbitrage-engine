@@ -11,3 +11,4 @@ export type {
   NormalizedOrderBook,
   PriceLevel,
 } from './normalized-order-book.type.js';
+export type { DriftResult } from './ntp.type.js';

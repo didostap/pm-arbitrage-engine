@@ -3,9 +3,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SchedulerService } from './scheduler.service';
 import { TradingEngineService } from './trading-engine.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Mock the NTP utility to avoid real network calls in tests
+vi.mock('../common/utils', async () => {
+  const actual = await vi.importActual('../common/utils');
+  return {
+    ...actual,
+    syncAndMeasureDrift: vi.fn().mockResolvedValue({
+      driftMs: 50,
+      serverUsed: 'pool.ntp.org',
+      timestamp: new Date(),
+    }),
+  };
+});
 
 describe('SchedulerService', () => {
   let service: SchedulerService;
@@ -38,6 +52,12 @@ describe('SchedulerService', () => {
           useValue: {
             addInterval: vi.fn(),
             deleteInterval: vi.fn(),
+          },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: {
+            emit: vi.fn(),
           },
         },
       ],

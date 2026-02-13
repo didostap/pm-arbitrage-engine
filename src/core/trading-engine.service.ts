@@ -1,9 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 import {
   withCorrelationId,
   getCorrelationId,
 } from '../common/services/correlation-context';
+import {
+  EVENT_NAMES,
+  TimeHaltEvent,
+  TradingHaltedEvent,
+} from '../common/events';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -14,9 +21,13 @@ export class TradingEngineService {
   private readonly logger = new Logger(TradingEngineService.name);
   private readonly SHUTDOWN_CHECK_INTERVAL_MS = 100; // Check interval for in-flight operations
   private isShuttingDown = false;
+  private isHalted = false;
   private inflightOperations = 0;
 
-  constructor(private readonly dataIngestionService: DataIngestionService) {}
+  constructor(
+    private readonly dataIngestionService: DataIngestionService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Execute one complete trading cycle (detection → risk → execution pipeline).
@@ -25,6 +36,15 @@ export class TradingEngineService {
   async executeCycle(): Promise<void> {
     // Skip if shutting down
     if (this.isShuttingDown) {
+      return;
+    }
+
+    // Skip if halted due to time drift or other critical issue
+    if (this.isHalted) {
+      this.logger.warn({
+        message: 'Trading halted, skipping execution cycle',
+        correlationId: getCorrelationId(),
+      });
       return;
     }
 
@@ -128,6 +148,48 @@ export class TradingEngineService {
 
     this.logger.log({
       message: 'All in-flight operations completed',
+      correlationId: getCorrelationId(),
+    });
+  }
+
+  /**
+   * Handle time drift halt event.
+   * Sets halt flag and emits system-level trading halted event.
+   */
+  @OnEvent(EVENT_NAMES.TIME_DRIFT_HALT)
+  handleTimeHalt(event: TimeHaltEvent): void {
+    this.isHalted = true;
+
+    this.logger.error({
+      message: 'Trading halted due to severe clock drift',
+      correlationId: getCorrelationId(),
+      data: {
+        driftMs: event.driftMs,
+        haltReason: event.haltReason,
+        timestamp: event.timestamp,
+      },
+    });
+
+    // Emit system-level halt event for monitoring
+    this.eventEmitter.emit(
+      EVENT_NAMES.SYSTEM_TRADING_HALTED,
+      new TradingHaltedEvent(
+        'time_drift',
+        event.driftMs,
+        event.timestamp,
+        'critical',
+      ),
+    );
+  }
+
+  /**
+   * Resume trading after halt.
+   * Requires operator intervention via dashboard API endpoint (Epic 7).
+   */
+  resume(): void {
+    this.isHalted = false;
+    this.logger.log({
+      message: 'Trading resumed by operator',
       correlationId: getCorrelationId(),
     });
   }

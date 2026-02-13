@@ -2,10 +2,24 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EngineLifecycleService } from './engine-lifecycle.service';
 import { TradingEngineService } from './trading-engine.service';
 import { PrismaService } from '../common/prisma.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Mock the NTP utility to avoid real network calls in tests
+vi.mock('../common/utils', async () => {
+  const actual = await vi.importActual('../common/utils');
+  return {
+    ...actual,
+    syncAndMeasureDrift: vi.fn().mockResolvedValue({
+      driftMs: 50,
+      serverUsed: 'pool.ntp.org',
+      timestamp: new Date(),
+    }),
+  };
+});
 
 describe('EngineLifecycleService', () => {
   let service: EngineLifecycleService;
@@ -36,6 +50,12 @@ describe('EngineLifecycleService', () => {
           useValue: {
             initiateShutdown: vi.fn(),
             waitForShutdown: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: {
+            emit: vi.fn(),
           },
         },
       ],
@@ -107,6 +127,12 @@ describe('EngineLifecycleService', () => {
               waitForShutdown: vi.fn().mockResolvedValue(undefined),
             },
           },
+          {
+            provide: EventEmitter2,
+            useValue: {
+              emit: vi.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -143,6 +169,12 @@ describe('EngineLifecycleService', () => {
             useValue: {
               initiateShutdown: vi.fn(),
               waitForShutdown: vi.fn().mockResolvedValue(undefined),
+            },
+          },
+          {
+            provide: EventEmitter2,
+            useValue: {
+              emit: vi.fn(),
             },
           },
         ],

@@ -2,6 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-floating-promises */
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TradingEngineService } from './trading-engine.service';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -13,6 +14,10 @@ describe('TradingEngineService', () => {
     ingestCurrentOrderBooks: vi.fn().mockResolvedValue(undefined),
   };
 
+  const mockEventEmitter = {
+    emit: vi.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -20,6 +25,10 @@ describe('TradingEngineService', () => {
         {
           provide: DataIngestionService,
           useValue: mockDataIngestionService,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: mockEventEmitter,
         },
       ],
     }).compile();
