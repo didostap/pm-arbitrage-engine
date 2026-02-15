@@ -4,9 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { PolymarketConnector } from './polymarket.connector.js';
 import { PlatformId } from '../../common/types/index.js';
 import { PlatformApiError } from '../../common/errors/index.js';
+import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-book-normalizer.service.js';
 
 const mockCreateOrDeriveApiKey = vi.fn();
 const mockGetOrderBook = vi.fn();
+const mockNormalizePolymarket = vi.fn();
 
 // Mock @polymarket/clob-client
 vi.mock('@polymarket/clob-client', () => {
@@ -75,6 +77,12 @@ describe('PolymarketConnector', () => {
             }),
           },
         },
+        {
+          provide: OrderBookNormalizerService,
+          useValue: {
+            normalizePolymarket: mockNormalizePolymarket,
+          },
+        },
       ],
     }).compile();
 
@@ -132,6 +140,12 @@ describe('PolymarketConnector', () => {
               }),
             },
           },
+          {
+            provide: OrderBookNormalizerService,
+            useValue: {
+              normalizePolymarket: mockNormalizePolymarket,
+            },
+          },
         ],
       }).compile();
 
@@ -183,6 +197,20 @@ describe('PolymarketConnector', () => {
         ],
       });
 
+      mockNormalizePolymarket.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'token-123',
+        bids: [
+          { price: 0.62, quantity: 1000 },
+          { price: 0.6, quantity: 500 },
+        ],
+        asks: [
+          { price: 0.65, quantity: 800 },
+          { price: 0.68, quantity: 300 },
+        ],
+        timestamp: new Date(),
+      });
+
       // Access private field to simulate connected state
       (connector as unknown as { connected: boolean }).connected = true;
       (connector as unknown as { clobClient: unknown }).clobClient = {
@@ -205,6 +233,14 @@ describe('PolymarketConnector', () => {
       mockGetOrderBook.mockResolvedValue({
         bids: [],
         asks: [],
+      });
+
+      mockNormalizePolymarket.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'empty-token',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
       });
 
       (connector as unknown as { connected: boolean }).connected = true;

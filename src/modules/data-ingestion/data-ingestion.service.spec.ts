@@ -94,7 +94,7 @@ describe('DataIngestionService', () => {
       // Verify persistence
       expect(mockPrismaService.orderBookSnapshot.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          platform: PlatformId.KALSHI,
+          platform: 'KALSHI', // Uppercase to match DB enum
           contract_id: 'TEST-MARKET',
         }),
       });
@@ -195,7 +195,7 @@ describe('DataIngestionService', () => {
 
       expect(mockPrismaService.orderBookSnapshot.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          platform: PlatformId.KALSHI,
+          platform: 'KALSHI', // Uppercase to match DB enum
           contract_id: 'TEST-MARKET',
           sequence_number: 12345,
         }),

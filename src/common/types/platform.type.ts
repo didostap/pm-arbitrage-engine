@@ -42,9 +42,14 @@ export interface Position {
   currentValue: number;
 }
 
+/**
+ * Platform fee schedule for edge calculation.
+ * NOTE: Fee percentages use 0-100 scale (e.g., 2.0 = 2%), NOT decimal scale (0-1).
+ * Connectors must convert internal decimal constants (e.g., 0.02) to percentage (2.0).
+ */
 export interface FeeSchedule {
   platformId: PlatformId;
-  makerFeePercent: number;
-  takerFeePercent: number;
+  makerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
+  takerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
   description: string;
 }

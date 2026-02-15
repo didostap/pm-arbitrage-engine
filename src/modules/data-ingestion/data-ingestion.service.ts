@@ -1,11 +1,25 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Platform, Prisma } from '@prisma/client';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
 import { PlatformHealthService } from './platform-health.service';
 import { PrismaService } from '../../common/prisma.service';
-import { NormalizedOrderBook } from '../../common/types/normalized-order-book.type';
+import {
+  NormalizedOrderBook,
+  PriceLevel,
+} from '../../common/types/normalized-order-book.type';
 import { PlatformId } from '../../common/types/platform.type';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
+
+/** Serialize price levels to Prisma JSON: build JsonObject so types align without cast. */
+function priceLevelsToJsonArray(levels: PriceLevel[]): Prisma.JsonArray {
+  return levels.map((level) => {
+    const obj: Prisma.JsonObject = {};
+    obj['price'] = level.price;
+    obj['quantity'] = level.quantity;
+    return obj;
+  });
+}
 
 @Injectable()
 export class DataIngestionService implements OnModuleInit {
@@ -169,12 +183,10 @@ export class DataIngestionService implements OnModuleInit {
     try {
       await this.prisma.orderBookSnapshot.create({
         data: {
-          platform: book.platformId,
+          platform: book.platformId.toUpperCase() as Platform, // Convert lowercase to uppercase for DB enum
           contract_id: book.contractId,
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          bids: book.bids as any, // JSON serialization
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          asks: book.asks as any,
+          bids: priceLevelsToJsonArray(book.bids),
+          asks: priceLevelsToJsonArray(book.asks),
           sequence_number: book.sequenceNumber,
           created_at: new Date(),
         },

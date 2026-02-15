@@ -129,7 +129,7 @@ describe('Data Ingestion (e2e)', () => {
 
       // Verify health log was created
       const healthLog = await prisma.platformHealthLog.findFirst({
-        where: { platform: 'kalshi' },
+        where: { platform: 'KALSHI' }, // Use uppercase to match DB enum
         orderBy: { created_at: 'desc' },
       });
 
@@ -147,7 +147,7 @@ describe('Data Ingestion (e2e)', () => {
       await healthService.publishHealth();
 
       const healthLogs = await prisma.platformHealthLog.findMany({
-        where: { platform: 'kalshi' },
+        where: { platform: 'KALSHI' }, // Use uppercase to match DB enum
         orderBy: { created_at: 'desc' },
         take: 2,
       });

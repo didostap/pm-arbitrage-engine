@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Platform } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { PlatformId, PlatformHealth } from '../../common/types/platform.type';
 import {
@@ -43,7 +44,7 @@ export class PlatformHealthService {
       try {
         await this.prisma.platformHealthLog.create({
           data: {
-            platform: platform, // string enum value
+            platform: platform.toUpperCase() as Platform, // Convert lowercase to uppercase for DB enum
             status: health.status,
             last_update: health.lastHeartbeat || new Date(),
             response_time_ms: health.latencyMs,

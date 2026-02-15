@@ -10,6 +10,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Platform enum for type-safe platform identification
+enum Platform {
+  KALSHI
+  POLYMARKET
+}
+
 // Placeholder model for initial migration (required for Prisma to generate migration)
 // This will be removed in Story 1.4 when real tables are added
 model SystemMetadata {
@@ -29,7 +35,7 @@ model SystemMetadata {
 // - Query pattern: Primarily time-series append, rare queries, acceptable trade-off
 model OrderBookSnapshot {
   id              String   @id @default(uuid())
-  platform        String   // "kalshi" | "polymarket" (consistent with PlatformHealthLog)
+  platform        Platform // Platform enum: KALSHI | POLYMARKET
   contract_id     String   // Platform's contract identifier
   bids            Json     // PriceLevel[] serialized: [{price: 0.60, quantity: 1000}, ...]
   asks            Json     // PriceLevel[] serialized: [{price: 0.65, quantity: 800}, ...]
@@ -44,7 +50,7 @@ model OrderBookSnapshot {
 // Platform health logs for observability and degradation analysis
 model PlatformHealthLog {
   id                 String   @id @default(uuid())
-  platform           String   // "kalshi" | "polymarket"
+  platform           Platform // Platform enum: KALSHI | POLYMARKET
   status             String   // "healthy" | "degraded" | "disconnected" (NOT "offline")
   last_update        DateTime @db.Timestamptz
   response_time_ms   Float?   // p95 latency

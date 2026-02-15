@@ -1,10 +1,6 @@
 import { Logger } from '@nestjs/common';
 import WebSocket from 'ws';
-import {
-  NormalizedOrderBook,
-  PlatformId,
-  PriceLevel,
-} from '../../common/types/index.js';
+import { PlatformId, PriceLevel } from '../../common/types/index.js';
 import { RETRY_STRATEGIES } from '../../common/errors/index.js';
 import type {
   PolymarketOrderBookMessage,
@@ -28,7 +24,7 @@ export class PolymarketWebSocketClient {
   private readonly logger = new Logger(PolymarketWebSocketClient.name);
   private ws: WebSocket | null = null;
   private orderbookState = new Map<string, LocalOrderBookState>();
-  private subscribers: Array<(book: NormalizedOrderBook) => void> = [];
+  private subscribers: Array<(book: PolymarketOrderBookMessage) => void> = [];
   private subscriptions = new Set<string>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,7 +116,7 @@ export class PolymarketWebSocketClient {
     this.orderbookState.delete(tokenId);
   }
 
-  onUpdate(callback: (book: NormalizedOrderBook) => void): void {
+  onUpdate(callback: (book: PolymarketOrderBookMessage) => void): void {
     this.subscribers.push(callback);
   }
 
@@ -216,25 +212,34 @@ export class PolymarketWebSocketClient {
   private emitUpdate(tokenId: string, state: LocalOrderBookState): void {
     const staleness = Date.now() - state.timestamp;
     if (staleness > 30000) {
-      this.logger.warn({
-        message: 'Order book data may be stale',
+      this.logger.error({
+        message: 'Order book data too stale, discarding',
         module: 'connector',
         timestamp: new Date().toISOString(),
         platformId: PlatformId.POLYMARKET,
         metadata: { tokenId, stalenessMs: staleness },
       });
+      return; // Don't emit stale data (defensive: prevents trading on old prices)
     }
 
-    const normalized: NormalizedOrderBook = {
-      platformId: PlatformId.POLYMARKET,
-      contractId: tokenId,
-      bids: state.bids,
-      asks: state.asks,
-      timestamp: new Date(state.timestamp),
+    // Emit raw platform data (connector will normalize)
+    const rawBook: PolymarketOrderBookMessage = {
+      asset_id: tokenId,
+      market: '', // Not needed for normalization
+      timestamp: state.timestamp,
+      bids: state.bids.map((level) => ({
+        price: level.price.toString(),
+        size: level.quantity.toString(),
+      })),
+      asks: state.asks.map((level) => ({
+        price: level.price.toString(),
+        size: level.quantity.toString(),
+      })),
+      hash: '', // Not needed for normalization
     };
 
     for (const sub of this.subscribers) {
-      sub(normalized);
+      sub(rawBook);
     }
   }
 

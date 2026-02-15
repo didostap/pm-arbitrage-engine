@@ -82,7 +82,7 @@ describe('PlatformHealthService', () => {
 
       expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          platform: PlatformId.KALSHI,
+          platform: 'KALSHI', // Uppercase to match DB enum
           status: 'healthy',
         }),
       });

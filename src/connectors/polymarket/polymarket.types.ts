@@ -1,5 +1,9 @@
 /** Polymarket-specific types for WebSocket and API interactions. */
 
+/** Polymarket fee structure (CLOB fees, excludes on-chain gas) */
+export const POLYMARKET_TAKER_FEE = 0.02; // 2% taker fee
+export const POLYMARKET_MAKER_FEE = 0.0; // 0% maker fee
+
 export interface PolymarketWebSocketConfig {
   wsUrl: string;
 }

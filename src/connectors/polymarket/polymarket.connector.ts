@@ -16,7 +16,6 @@ import type {
   OrderResult,
   PlatformHealth,
   Position,
-  PriceLevel,
 } from '../../common/types/index.js';
 import { PlatformId } from '../../common/types/index.js';
 import {
@@ -25,8 +24,14 @@ import {
 } from '../../common/errors/index.js';
 import { withRetry } from '../../common/utils/index.js';
 import { RateLimiter } from '../../common/utils/rate-limiter.js';
+import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-book-normalizer.service.js';
 import { POLYMARKET_ERROR_CODES } from './polymarket-error-codes.js';
 import { PolymarketWebSocketClient } from './polymarket-websocket.client.js';
+import type { PolymarketOrderBookMessage } from './polymarket.types.js';
+import {
+  POLYMARKET_MAKER_FEE,
+  POLYMARKET_TAKER_FEE,
+} from './polymarket.types.js';
 
 @Injectable()
 export class PolymarketConnector
@@ -44,7 +49,10 @@ export class PolymarketConnector
   private readonly wsUrl: string;
   private readonly chainId: number;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly normalizer: OrderBookNormalizerService,
+  ) {
     this.privateKey = this.configService.get<string>(
       'POLYMARKET_PRIVATE_KEY',
       '',
@@ -208,32 +216,36 @@ export class PolymarketConnector
 
       this.lastHeartbeat = new Date();
 
-      // Polymarket prices are already decimal (0.00-1.00) — no conversion needed
-      const bids: PriceLevel[] = (response.bids ?? []).map(
-        (b: { price: string; size: string }) => ({
-          price: parseFloat(b.price),
-          quantity: parseFloat(b.size),
-        }),
-      );
-
-      const asks: PriceLevel[] = (response.asks ?? []).map(
-        (a: { price: string; size: string }) => ({
-          price: parseFloat(a.price),
-          quantity: parseFloat(a.size),
-        }),
-      );
-
-      // Sort bids descending, asks ascending
-      bids.sort((a, b) => b.price - a.price);
-      asks.sort((a, b) => a.price - b.price);
-
-      return {
-        platformId: PlatformId.POLYMARKET,
-        contractId,
-        bids,
-        asks,
-        timestamp: new Date(),
+      // Convert raw CLOB response to PolymarketOrderBookMessage
+      const rawBook: PolymarketOrderBookMessage = {
+        asset_id: contractId,
+        market: '',
+        timestamp: Date.now(),
+        bids: response.bids ?? [],
+        asks: response.asks ?? [],
+        hash: '',
       };
+
+      // Normalize via service (parsing + validation + latency tracking)
+      const normalized = this.normalizer.normalizePolymarket(rawBook);
+
+      if (!normalized) {
+        this.logger.error({
+          message: 'Failed to normalize Polymarket order book',
+          module: 'connector',
+          timestamp: new Date().toISOString(),
+          platformId: PlatformId.POLYMARKET,
+          metadata: { contractId },
+        });
+        throw new PlatformApiError(
+          POLYMARKET_ERROR_CODES.INVALID_REQUEST,
+          'Invalid order book data from Polymarket API',
+          PlatformId.POLYMARKET,
+          'error',
+        );
+      }
+
+      return normalized;
     } catch (error) {
       if (error instanceof PlatformApiError) throw error;
       throw this.mapError(error);
@@ -242,7 +254,23 @@ export class PolymarketConnector
 
   onOrderBookUpdate(callback: (book: NormalizedOrderBook) => void): void {
     if (this.wsClient) {
-      this.wsClient.onUpdate(callback);
+      this.wsClient.onUpdate((rawBook: PolymarketOrderBookMessage) => {
+        // Normalize raw platform data before invoking callback
+        const normalized = this.normalizer.normalizePolymarket(rawBook);
+
+        if (!normalized) {
+          this.logger.error({
+            message: 'Discarding invalid Polymarket book from WebSocket',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.POLYMARKET,
+            metadata: { contractId: rawBook.asset_id },
+          });
+          return; // Skip callback, don't propagate invalid data
+        }
+
+        callback(normalized); // Only invoke callback with valid normalized data
+      });
     }
   }
 
@@ -268,10 +296,13 @@ export class PolymarketConnector
   }
 
   getFeeSchedule(): FeeSchedule {
+    // TODO(Epic 5): Add gas estimation for on-chain settlement operations
+    // Gas only applies to withdrawals/settlements, not CLOB order matching
+    // Will implement in Story 5.1 (Order Submission & Position Tracking)
     return {
       platformId: PlatformId.POLYMARKET,
-      makerFeePercent: 0,
-      takerFeePercent: 2,
+      makerFeePercent: POLYMARKET_MAKER_FEE * 100, // Convert decimal (0.00) to percent (0)
+      takerFeePercent: POLYMARKET_TAKER_FEE * 100, // Convert decimal (0.02) to percent (2)
       description:
         'Polymarket: ~2% taker fee, 0% maker fee. No gas fees for CLOB operations.',
     };
