@@ -4,9 +4,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from './data-ingestion.service';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
+import { PolymarketConnector } from '../../connectors/polymarket/polymarket.connector';
 import { OrderBookNormalizerService } from './order-book-normalizer.service';
 import { PlatformHealthService } from './platform-health.service';
 import { PrismaService } from '../../common/prisma.service';
+import { SystemHealthError } from '../../common/errors/system-health-error';
 import { PlatformId } from '../../common/types/platform.type';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
 import { vi } from 'vitest';
@@ -15,6 +17,11 @@ describe('DataIngestionService', () => {
   let service: DataIngestionService;
 
   const mockKalshiConnector = {
+    onOrderBookUpdate: vi.fn(),
+    getOrderBook: vi.fn(),
+  };
+
+  const mockPolymarketConnector = {
     onOrderBookUpdate: vi.fn(),
     getOrderBook: vi.fn(),
   };
@@ -42,6 +49,7 @@ describe('DataIngestionService', () => {
       providers: [
         DataIngestionService,
         { provide: KalshiConnector, useValue: mockKalshiConnector },
+        { provide: PolymarketConnector, useValue: mockPolymarketConnector },
         {
           provide: OrderBookNormalizerService,
           useValue: mockNormalizer,
@@ -62,13 +70,33 @@ describe('DataIngestionService', () => {
     expect(service).toBeDefined();
   });
 
+  it('should inject both KalshiConnector and PolymarketConnector', () => {
+    expect(service['kalshiConnector']).toBeDefined();
+    expect(service['polymarketConnector']).toBeDefined();
+  });
+
   describe('onModuleInit()', () => {
-    it('should register WebSocket callback', async () => {
+    it('should register WebSocket callback for Kalshi', async () => {
       await service.onModuleInit();
 
       expect(mockKalshiConnector.onOrderBookUpdate).toHaveBeenCalledWith(
         expect.any(Function),
       );
+    });
+
+    it('should register WebSocket callback for Polymarket', async () => {
+      await service.onModuleInit();
+
+      expect(mockPolymarketConnector.onOrderBookUpdate).toHaveBeenCalledWith(
+        expect.any(Function),
+      );
+    });
+
+    it('should register both platform WebSocket callbacks', async () => {
+      await service.onModuleInit();
+
+      expect(mockKalshiConnector.onOrderBookUpdate).toHaveBeenCalled();
+      expect(mockPolymarketConnector.onOrderBookUpdate).toHaveBeenCalled();
     });
   });
 
@@ -130,6 +158,94 @@ describe('DataIngestionService', () => {
 
       await expect(service.ingestCurrentOrderBooks()).resolves.not.toThrow();
     });
+
+    it('should ingest from both Kalshi and Polymarket platforms', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'POLYMARKET-TOKEN',
+        bids: [{ price: 0.55, quantity: 1500 }],
+        asks: [{ price: 0.58, quantity: 1200 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      // Both connectors should be called
+      expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
+      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+
+      // Health tracking for both platforms
+      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        expect.any(Number),
+      );
+      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        expect.any(Number),
+      );
+    });
+
+    it('should handle Kalshi failure without affecting Polymarket ingestion', async () => {
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'POLYMARKET-TOKEN',
+        bids: [{ price: 0.55, quantity: 1500 }],
+        asks: [{ price: 0.58, quantity: 1200 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockRejectedValue(
+        new Error('Kalshi API error'),
+      );
+      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await expect(service.ingestCurrentOrderBooks()).resolves.not.toThrow();
+
+      // Polymarket should still be ingested
+      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        expect.any(Number),
+      );
+    });
+
+    it('should handle Polymarket failure without affecting Kalshi ingestion', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBook.mockRejectedValue(
+        new Error('Polymarket API error'),
+      );
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await expect(service.ingestCurrentOrderBooks()).resolves.not.toThrow();
+
+      // Kalshi should still be ingested
+      expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
+      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        expect.any(Number),
+      );
+    });
   });
 
   describe('processWebSocketUpdate()', () => {
@@ -175,6 +291,77 @@ describe('DataIngestionService', () => {
       await expect(
         service['processWebSocketUpdate'](normalizedBook),
       ).rejects.toThrow('DB error');
+    });
+
+    it('should process Polymarket WebSocket updates', async () => {
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'POLYMARKET-TOKEN',
+        bids: [{ price: 0.55, quantity: 1500 }],
+        asks: [{ price: 0.58, quantity: 1200 }],
+        timestamp: new Date(),
+        sequenceNumber: 67890,
+      };
+
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service['processWebSocketUpdate'](polymarketBook);
+
+      expect(mockPrismaService.orderBookSnapshot.create).toHaveBeenCalled();
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'orderbook.updated',
+        expect.any(OrderBookUpdatedEvent),
+      );
+      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        expect.any(Number),
+      );
+    });
+
+    it('should emit orderbook.updated events with distinct platformId values', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'POLYMARKET-TOKEN',
+        bids: [{ price: 0.55, quantity: 1500 }],
+        asks: [{ price: 0.58, quantity: 1200 }],
+        timestamp: new Date(),
+      };
+
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service['processWebSocketUpdate'](kalshiBook);
+      await service['processWebSocketUpdate'](polymarketBook);
+
+      // Extract all orderbook.updated events
+      /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+      const orderbookEvents = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === 'orderbook.updated',
+      );
+
+      expect(orderbookEvents).toHaveLength(2);
+
+      const kalshiEvent = orderbookEvents.find(
+        (call) => call[1].orderBook.platformId === PlatformId.KALSHI,
+      );
+
+      const polymarketEvent = orderbookEvents.find(
+        (call) => call[1].orderBook.platformId === PlatformId.POLYMARKET,
+      );
+
+      expect(kalshiEvent).toBeDefined();
+      expect(polymarketEvent).toBeDefined();
+      expect(kalshiEvent![1].orderBook.platformId).not.toBe(
+        polymarketEvent![1].orderBook.platformId,
+      );
+      /* eslint-enable @typescript-eslint/no-unsafe-member-access */
     });
   });
 
@@ -240,7 +427,7 @@ describe('DataIngestionService', () => {
       expect(service['consecutiveFailures']).toBe(1);
     });
 
-    it('should emit critical alert after 10 consecutive failures', async () => {
+    it('should throw SystemHealthError after 10 consecutive failures', async () => {
       const book = {
         platformId: PlatformId.KALSHI,
         contractId: 'TEST',
@@ -255,15 +442,15 @@ describe('DataIngestionService', () => {
 
       service['consecutiveFailures'] = 9;
 
-      await expect(service['persistSnapshot'](book)).rejects.toThrow();
-
-      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
-        'system.health.critical',
-        expect.objectContaining({
-          code: 4005,
-          severity: 'critical',
-        }),
-      );
+      const promise = service['persistSnapshot'](book);
+      await expect(promise).rejects.toThrow(SystemHealthError);
+      const err = await promise.catch((e: unknown) => e);
+      expect(err).toMatchObject({
+        code: 4005,
+        message: 'Persistent snapshot write failure',
+        severity: 'critical',
+        component: 'data-ingestion',
+      });
     });
 
     it('should throw error on persistence failure', async () => {

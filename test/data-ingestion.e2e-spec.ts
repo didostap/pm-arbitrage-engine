@@ -12,13 +12,16 @@ import { PersistenceModule } from '../src/common/persistence.module';
 import { ConnectorModule } from '../src/connectors/connector.module';
 import { DataIngestionModule } from '../src/modules/data-ingestion/data-ingestion.module';
 import { KalshiConnector } from '../src/connectors/kalshi/kalshi.connector';
+import { PolymarketConnector } from '../src/connectors/polymarket/polymarket.connector';
 import { DataIngestionService } from '../src/modules/data-ingestion/data-ingestion.service';
 import { PlatformHealthService } from '../src/modules/data-ingestion/platform-health.service';
 import { PrismaService } from '../src/common/prisma.service';
+import { PlatformId } from '../src/common/types/platform.type';
 
 describe('Data Ingestion (e2e)', () => {
   let app: NestFastifyApplication;
   let connector: KalshiConnector;
+  let polymarketConnector: PolymarketConnector;
   let ingestionService: DataIngestionService;
   let healthService: PlatformHealthService;
   let prisma: PrismaService;
@@ -44,6 +47,8 @@ describe('Data Ingestion (e2e)', () => {
     await app.init();
 
     connector = moduleFixture.get<KalshiConnector>(KalshiConnector);
+    polymarketConnector =
+      moduleFixture.get<PolymarketConnector>(PolymarketConnector);
     ingestionService =
       moduleFixture.get<DataIngestionService>(DataIngestionService);
     healthService = moduleFixture.get<PlatformHealthService>(
@@ -160,6 +165,75 @@ describe('Data Ingestion (e2e)', () => {
           healthLogs[1]?.created_at,
         );
       }
+    });
+
+    it('should persist health logs for both KALSHI and POLYMARKET platforms', async () => {
+      // Trigger health publication
+      await healthService.publishHealth();
+
+      // Verify health logs for both platforms
+      const kalshiHealthLog = await prisma.platformHealthLog.findFirst({
+        where: { platform: 'KALSHI' },
+        orderBy: { created_at: 'desc' },
+      });
+
+      const polymarketHealthLog = await prisma.platformHealthLog.findFirst({
+        where: { platform: 'POLYMARKET' },
+        orderBy: { created_at: 'desc' },
+      });
+
+      expect(kalshiHealthLog).toBeDefined();
+      expect(polymarketHealthLog).toBeDefined();
+
+      expect(['healthy', 'degraded', 'disconnected']).toContain(
+        kalshiHealthLog?.status,
+      );
+      expect(['healthy', 'degraded', 'disconnected']).toContain(
+        polymarketHealthLog?.status,
+      );
+    });
+  });
+
+  describe('Cross-Platform Data Aggregation', () => {
+    it('should verify both connectors are initialized', () => {
+      expect(connector).toBeDefined();
+      expect(polymarketConnector).toBeDefined();
+      expect(connector).toBeInstanceOf(KalshiConnector);
+      expect(polymarketConnector).toBeInstanceOf(PolymarketConnector);
+    });
+
+    it('should query aggregated health for both platforms', () => {
+      const aggregatedHealth = healthService.getAggregatedHealth();
+
+      expect(aggregatedHealth).toBeInstanceOf(Map);
+      expect(aggregatedHealth.size).toBe(2);
+      expect(aggregatedHealth.has(PlatformId.KALSHI)).toBe(true);
+      expect(aggregatedHealth.has(PlatformId.POLYMARKET)).toBe(true);
+
+      const kalshiHealth = aggregatedHealth.get(PlatformId.KALSHI);
+      const polymarketHealth = aggregatedHealth.get(PlatformId.POLYMARKET);
+
+      expect(kalshiHealth).toBeDefined();
+      expect(polymarketHealth).toBeDefined();
+      expect(kalshiHealth?.platformId).toBe(PlatformId.KALSHI);
+      expect(polymarketHealth?.platformId).toBe(PlatformId.POLYMARKET);
+    });
+
+    it('should query individual platform health independently', () => {
+      const kalshiHealth = healthService.getPlatformHealth(PlatformId.KALSHI);
+      const polymarketHealth = healthService.getPlatformHealth(
+        PlatformId.POLYMARKET,
+      );
+
+      expect(kalshiHealth.platformId).toBe(PlatformId.KALSHI);
+      expect(polymarketHealth.platformId).toBe(PlatformId.POLYMARKET);
+
+      expect(['healthy', 'degraded', 'disconnected']).toContain(
+        kalshiHealth.status,
+      );
+      expect(['healthy', 'degraded', 'disconnected']).toContain(
+        polymarketHealth.status,
+      );
     });
   });
 });

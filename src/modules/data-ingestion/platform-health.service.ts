@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Platform } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../common/prisma.service';
 import { PlatformId, PlatformHealth } from '../../common/types/platform.type';
 import {
@@ -9,6 +9,8 @@ import {
   PlatformRecoveredEvent,
   PlatformDisconnectedEvent,
 } from '../../common/events/platform.events';
+import { toPlatformEnum } from '../../common/utils';
+import { withCorrelationId } from '../../common/services/correlation-context';
 
 @Injectable()
 export class PlatformHealthService {
@@ -34,63 +36,91 @@ export class PlatformHealthService {
    */
   @Cron('*/30 * * * * *') // Every 30 seconds
   async publishHealth(): Promise<void> {
-    const platforms = [PlatformId.KALSHI]; // Expand in Epic 2
+    // Wrap in correlation context so events get correlationId from async storage
+    return withCorrelationId(async () => {
+      const correlationId = randomUUID();
+      const platforms = [PlatformId.KALSHI, PlatformId.POLYMARKET];
 
-    for (const platform of platforms) {
-      const previousStatus = this.previousStatus.get(platform) || 'healthy';
-      const health = this.calculateHealth(platform);
+      for (const platform of platforms) {
+        const previousStatus = this.previousStatus.get(platform) || 'healthy';
+        const health = this.calculateHealth(platform);
 
-      // Persist to database (AWAIT to handle errors - not fire-and-forget)
-      try {
-        await this.prisma.platformHealthLog.create({
-          data: {
-            platform: platform.toUpperCase() as Platform, // Convert lowercase to uppercase for DB enum
-            status: health.status,
-            last_update: health.lastHeartbeat || new Date(),
-            response_time_ms: health.latencyMs,
-            connection_state:
-              (health.metadata?.connectionState as string) || 'unknown',
-            created_at: new Date(),
-          },
-        });
-      } catch (error) {
-        this.logger.error({
-          message: 'Failed to persist health log',
-          module: 'data-ingestion',
-          platform,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        // Continue processing - persistence failure shouldn't block monitoring
+        // Persist to database (AWAIT to handle errors - not fire-and-forget)
+        try {
+          await this.prisma.platformHealthLog.create({
+            data: {
+              platform: toPlatformEnum(platform),
+              status: health.status,
+              last_update: health.lastHeartbeat || new Date(),
+              response_time_ms: health.latencyMs,
+              connection_state:
+                (health.metadata?.connectionState as string) || 'unknown',
+              created_at: new Date(),
+            },
+          });
+        } catch (error) {
+          this.logger.error({
+            message: 'Failed to persist health log',
+            module: 'data-ingestion',
+            correlationId,
+            platform,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+          // Continue processing - persistence failure shouldn't block monitoring
+        }
+
+        // Emit base health update event
+        this.eventEmitter.emit('platform.health.updated', health);
+
+        // Emit transition events (degradation AND recovery)
+        if (health.status === 'degraded' && previousStatus !== 'degraded') {
+          this.eventEmitter.emit(
+            'platform.health.degraded',
+            new PlatformDegradedEvent(platform, health, previousStatus),
+          );
+        } else if (
+          health.status === 'healthy' &&
+          previousStatus === 'degraded'
+        ) {
+          // Emit recovery event when transitioning back to healthy
+          this.eventEmitter.emit(
+            'platform.health.recovered',
+            new PlatformRecoveredEvent(platform, health, previousStatus),
+          );
+        } else if (
+          health.status === 'disconnected' &&
+          previousStatus !== 'disconnected'
+        ) {
+          this.eventEmitter.emit(
+            'platform.health.disconnected',
+            new PlatformDisconnectedEvent(platform, health),
+          );
+        }
+
+        // Update previous status for next check
+        this.previousStatus.set(platform, health.status);
       }
+    });
+  }
 
-      // Emit base health update event
-      this.eventEmitter.emit('platform.health.updated', health);
-
-      // Emit transition events (degradation AND recovery)
-      if (health.status === 'degraded' && previousStatus !== 'degraded') {
-        this.eventEmitter.emit(
-          'platform.health.degraded',
-          new PlatformDegradedEvent(platform, health, previousStatus),
-        );
-      } else if (health.status === 'healthy' && previousStatus === 'degraded') {
-        // Emit recovery event when transitioning back to healthy
-        this.eventEmitter.emit(
-          'platform.health.recovered',
-          new PlatformRecoveredEvent(platform, health, previousStatus),
-        );
-      } else if (
-        health.status === 'disconnected' &&
-        previousStatus !== 'disconnected'
-      ) {
-        this.eventEmitter.emit(
-          'platform.health.disconnected',
-          new PlatformDisconnectedEvent(platform, health),
-        );
-      }
-
-      // Update previous status for next check
-      this.previousStatus.set(platform, health.status);
+  /**
+   * Get aggregated health for all registered platforms.
+   * Returns current health status for each platform.
+   */
+  getAggregatedHealth(): Map<PlatformId, PlatformHealth> {
+    const healthMap = new Map<PlatformId, PlatformHealth>();
+    for (const platform of [PlatformId.KALSHI, PlatformId.POLYMARKET]) {
+      healthMap.set(platform, this.calculateHealth(platform));
     }
+    return healthMap;
+  }
+
+  /**
+   * Get health for a specific platform.
+   * Enables downstream modules to check platform availability before use.
+   */
+  getPlatformHealth(platformId: PlatformId): PlatformHealth {
+    return this.calculateHealth(platformId);
   }
 
   /**

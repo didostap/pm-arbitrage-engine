@@ -4,7 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PlatformHealthService } from './platform-health.service';
 import { PrismaService } from '../../common/prisma.service';
-import { PlatformId } from '../../common/types/platform.type';
+import { PlatformId, PlatformHealth } from '../../common/types/platform.type';
 import {
   PlatformDegradedEvent,
   PlatformRecoveredEvent,
@@ -160,6 +160,99 @@ describe('PlatformHealthService', () => {
         expect.any(Object),
       );
     });
+
+    it('should publish health for both KALSHI and POLYMARKET platforms', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Record updates for both platforms
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 120);
+
+      await service.publishHealth();
+
+      // Should persist health logs for both platforms
+      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            platform: 'KALSHI',
+          }),
+        }),
+      );
+      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            platform: 'POLYMARKET',
+          }),
+        }),
+      );
+    });
+
+    it('should emit degraded event for Polymarket when stale', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Kalshi healthy, Polymarket stale
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, sixtyOneSecondsAgo);
+
+      await service.publishHealth();
+
+      // Should emit degraded event for Polymarket
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'platform.health.degraded',
+        expect.objectContaining({
+          platformId: PlatformId.POLYMARKET,
+        }),
+      );
+    });
+
+    it('should emit recovered event for Polymarket when recovered', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Start Polymarket degraded (no updates)
+      await service.publishHealth();
+
+      // Clear previous calls
+      vi.clearAllMocks();
+
+      // Now record fresh update for Polymarket (make healthy)
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Should emit recovered event for Polymarket
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'platform.health.recovered',
+        expect.objectContaining({
+          platformId: PlatformId.POLYMARKET,
+        }),
+      );
+    });
+
+    it('should handle mixed health states (one healthy, one degraded)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Kalshi healthy
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      // Polymarket degraded (stale)
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, sixtyOneSecondsAgo);
+
+      await service.publishHealth();
+
+      // Should emit health.updated for both platforms
+      const healthUpdatedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === 'platform.health.updated',
+      );
+      expect(healthUpdatedCalls).toHaveLength(2);
+
+      // Should have one healthy and one degraded status
+      const statuses = healthUpdatedCalls.map(
+        (call) => (call[1] as PlatformHealth).status,
+      );
+      expect(statuses).toContain('healthy');
+      expect(statuses).toContain('degraded');
+    });
   });
 
   describe('calculateHealth()', () => {
@@ -233,6 +326,64 @@ describe('PlatformHealthService', () => {
 
       expect(health.latencyMs).toBeGreaterThan(0);
       expect(typeof health.latencyMs).toBe('number');
+    });
+  });
+
+  describe('getAggregatedHealth()', () => {
+    it('should return health for all platforms', () => {
+      // Record updates for both platforms
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 120);
+
+      const aggregatedHealth = service.getAggregatedHealth();
+
+      expect(aggregatedHealth).toBeInstanceOf(Map);
+      expect(aggregatedHealth.size).toBe(2);
+      expect(aggregatedHealth.has(PlatformId.KALSHI)).toBe(true);
+      expect(aggregatedHealth.has(PlatformId.POLYMARKET)).toBe(true);
+    });
+
+    it('should return current health status for each platform', () => {
+      // Kalshi healthy
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      // Polymarket degraded (stale)
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, sixtyOneSecondsAgo);
+
+      const aggregatedHealth = service.getAggregatedHealth();
+
+      const kalshiHealth = aggregatedHealth.get(PlatformId.KALSHI);
+      const polymarketHealth = aggregatedHealth.get(PlatformId.POLYMARKET);
+
+      expect(kalshiHealth?.status).toBe('healthy');
+      expect(polymarketHealth?.status).toBe('degraded');
+    });
+  });
+
+  describe('getPlatformHealth()', () => {
+    it('should return health for specific platform', () => {
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      const health = service.getPlatformHealth(PlatformId.KALSHI);
+
+      expect(health.platformId).toBe(PlatformId.KALSHI);
+      expect(health.status).toBe('healthy');
+    });
+
+    it('should return independent health for each platform', () => {
+      // Kalshi healthy
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      // Polymarket degraded (stale)
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, sixtyOneSecondsAgo);
+
+      const kalshiHealth = service.getPlatformHealth(PlatformId.KALSHI);
+      const polymarketHealth = service.getPlatformHealth(PlatformId.POLYMARKET);
+
+      expect(kalshiHealth.status).toBe('healthy');
+      expect(polymarketHealth.status).toBe('degraded');
     });
   });
 

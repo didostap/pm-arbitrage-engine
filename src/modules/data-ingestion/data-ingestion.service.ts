@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Platform, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
+import { PolymarketConnector } from '../../connectors/polymarket/polymarket.connector';
 import { PlatformHealthService } from './platform-health.service';
 import { PrismaService } from '../../common/prisma.service';
 import {
@@ -10,6 +12,12 @@ import {
 } from '../../common/types/normalized-order-book.type';
 import { PlatformId } from '../../common/types/platform.type';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
+import { SystemHealthError } from '../../common/errors';
+import { toPlatformEnum } from '../../common/utils';
+
+/** Placeholder token ID for Polymarket polling - will be replaced by Epic 3 contract pairs */
+const POLYMARKET_PLACEHOLDER_TOKEN_ID =
+  '110251828161543119357013227499774714771527179764174739487025581227481937033858';
 
 /** Serialize price levels to Prisma JSON: build JsonObject so types align without cast. */
 function priceLevelsToJsonArray(levels: PriceLevel[]): Prisma.JsonArray {
@@ -28,14 +36,21 @@ export class DataIngestionService implements OnModuleInit {
 
   constructor(
     private readonly kalshiConnector: KalshiConnector,
+    private readonly polymarketConnector: PolymarketConnector,
     private readonly healthService: PlatformHealthService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * Module initialization lifecycle hook.
+   * Registers WebSocket callbacks for real-time order book updates from both platforms.
+   */
   // eslint-disable-next-line @typescript-eslint/require-await
   async onModuleInit() {
-    // Register WebSocket callback for real-time updates (already normalized by connector)
+    const correlationId = randomUUID();
+
+    // Register WebSocket callbacks for real-time updates (already normalized by connectors)
 
     this.kalshiConnector.onOrderBookUpdate(
       (normalizedBook: NormalizedOrderBook) => {
@@ -44,6 +59,22 @@ export class DataIngestionService implements OnModuleInit {
           this.logger.error({
             message: 'WebSocket update processing failed',
             module: 'data-ingestion',
+            correlationId: randomUUID(), // WebSocket callback - new correlation per update
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+          });
+        });
+      },
+    );
+
+    this.polymarketConnector.onOrderBookUpdate(
+      (normalizedBook: NormalizedOrderBook) => {
+        // Process asynchronously, don't block WebSocket
+        this.processWebSocketUpdate(normalizedBook).catch((error) => {
+          this.logger.error({
+            message: 'WebSocket update processing failed',
+            module: 'data-ingestion',
+            correlationId: randomUUID(), // WebSocket callback - new correlation per update
             error: error instanceof Error ? error.message : 'Unknown error',
             timestamp: new Date().toISOString(),
           });
@@ -53,8 +84,9 @@ export class DataIngestionService implements OnModuleInit {
 
     this.logger.log({
       message:
-        'DataIngestionService initialized - WebSocket callback registered',
+        'DataIngestionService initialized - WebSocket callbacks registered (Kalshi, Polymarket)',
       module: 'data-ingestion',
+      correlationId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -64,25 +96,29 @@ export class DataIngestionService implements OnModuleInit {
    * Fetches current orderbooks from all connected platforms.
    */
   async ingestCurrentOrderBooks(): Promise<void> {
+    const correlationId = randomUUID();
+
     this.logger.log({
       message: 'Ingesting current order books (polling)',
       module: 'data-ingestion',
+      correlationId,
       timestamp: new Date().toISOString(),
     });
 
+    // Ingest Kalshi (isolated try/catch)
     try {
       // For MVP, we'll use a placeholder market ticker
       // In production, this would iterate over configured market tickers
-      const marketTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
+      const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
 
-      for (const ticker of marketTickers) {
+      for (const ticker of kalshiTickers) {
         const startTime = Date.now();
 
         try {
           // Connector returns already normalized data
           const normalized = await this.kalshiConnector.getOrderBook(ticker);
 
-          await this.persistSnapshot(normalized);
+          await this.persistSnapshot(normalized, correlationId);
 
           this.eventEmitter.emit(
             'orderbook.updated',
@@ -95,6 +131,7 @@ export class DataIngestionService implements OnModuleInit {
           this.logger.log({
             message: 'Order book ingested (polling)',
             module: 'data-ingestion',
+            correlationId,
             timestamp: new Date().toISOString(),
             contractId: normalized.contractId,
             latencyMs: latency,
@@ -110,6 +147,7 @@ export class DataIngestionService implements OnModuleInit {
           this.logger.error({
             message: 'Failed to ingest order book',
             module: 'data-ingestion',
+            correlationId,
             ticker,
             error: error instanceof Error ? error.message : 'Unknown error',
             timestamp: new Date().toISOString(),
@@ -118,8 +156,69 @@ export class DataIngestionService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error({
-        message: 'Order book ingestion failed',
+        message: 'Kalshi order book ingestion failed',
         module: 'data-ingestion',
+        correlationId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Ingest Polymarket (isolated try/catch)
+    try {
+      // Placeholder token IDs - these will fail against real API
+      // Real token IDs will come from Epic 3 contract pair configuration
+      const polymarketTokens = [POLYMARKET_PLACEHOLDER_TOKEN_ID];
+
+      for (const tokenId of polymarketTokens) {
+        const startTime = Date.now();
+
+        try {
+          // Connector returns already normalized data
+          const normalized =
+            await this.polymarketConnector.getOrderBook(tokenId);
+
+          await this.persistSnapshot(normalized, correlationId);
+
+          this.eventEmitter.emit(
+            'orderbook.updated',
+            new OrderBookUpdatedEvent(normalized),
+          );
+
+          const latency = Date.now() - startTime;
+          this.healthService.recordUpdate(PlatformId.POLYMARKET, latency);
+
+          this.logger.log({
+            message: 'Order book ingested (polling)',
+            module: 'data-ingestion',
+            correlationId,
+            timestamp: new Date().toISOString(),
+            contractId: normalized.contractId,
+            latencyMs: latency,
+            metadata: {
+              platformId: normalized.platformId,
+              bidLevels: normalized.bids.length,
+              askLevels: normalized.asks.length,
+              bestBid: normalized.bids[0]?.price,
+              bestAsk: normalized.asks[0]?.price,
+            },
+          });
+        } catch (error) {
+          this.logger.error({
+            message: 'Failed to ingest order book',
+            module: 'data-ingestion',
+            correlationId,
+            tokenId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Polymarket order book ingestion failed',
+        module: 'data-ingestion',
+        correlationId,
         error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString(),
       });
@@ -133,11 +232,12 @@ export class DataIngestionService implements OnModuleInit {
   private async processWebSocketUpdate(
     normalized: NormalizedOrderBook,
   ): Promise<void> {
+    const correlationId = randomUUID();
     const startTime = Date.now();
 
     try {
       // Persist (with error handling, NOT fire-and-forget)
-      await this.persistSnapshot(normalized);
+      await this.persistSnapshot(normalized, correlationId);
 
       // Emit event
       this.eventEmitter.emit(
@@ -145,13 +245,14 @@ export class DataIngestionService implements OnModuleInit {
         new OrderBookUpdatedEvent(normalized),
       );
 
-      // Track latency for health monitoring
+      // Track latency for health monitoring (use platformId from normalized data)
       const latency = Date.now() - startTime;
-      this.healthService.recordUpdate(PlatformId.KALSHI, latency);
+      this.healthService.recordUpdate(normalized.platformId, latency);
 
       this.logger.log({
         message: 'Order book normalized (WebSocket)',
         module: 'data-ingestion',
+        correlationId,
         timestamp: new Date().toISOString(),
         latencyMs: latency,
         contractId: normalized.contractId,
@@ -168,6 +269,7 @@ export class DataIngestionService implements OnModuleInit {
       this.logger.error({
         message: 'WebSocket order book processing failed',
         module: 'data-ingestion',
+        correlationId,
         error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString(),
       });
@@ -179,11 +281,16 @@ export class DataIngestionService implements OnModuleInit {
    * Persists normalized orderbook snapshot to database.
    * CRITICAL: Awaits persistence, logs errors, tracks failures.
    */
-  private async persistSnapshot(book: NormalizedOrderBook): Promise<void> {
+  private async persistSnapshot(
+    book: NormalizedOrderBook,
+    correlationId?: string,
+  ): Promise<void> {
+    const cid = correlationId || randomUUID();
+
     try {
       await this.prisma.orderBookSnapshot.create({
         data: {
-          platform: book.platformId.toUpperCase() as Platform, // Convert lowercase to uppercase for DB enum
+          platform: toPlatformEnum(book.platformId),
           contract_id: book.contractId,
           bids: priceLevelsToJsonArray(book.bids),
           asks: priceLevelsToJsonArray(book.asks),
@@ -197,6 +304,7 @@ export class DataIngestionService implements OnModuleInit {
       this.logger.error({
         message: 'Snapshot persistence failed',
         module: 'data-ingestion',
+        correlationId: cid,
         contractId: book.contractId,
         failures: this.consecutiveFailures,
         error: error instanceof Error ? error.message : 'Unknown',
@@ -205,11 +313,16 @@ export class DataIngestionService implements OnModuleInit {
 
       // Critical alert after sustained failures
       if (this.consecutiveFailures >= 10) {
-        this.eventEmitter.emit('system.health.critical', {
-          code: 4005,
-          message: 'Persistent snapshot write failure',
-          severity: 'critical',
-        });
+        // Throw SystemHealthError which will be caught by global exception filter
+        // and routed appropriately (Telegram + audit + potential halt)
+        throw new SystemHealthError(
+          4005,
+          'Persistent snapshot write failure',
+          'critical',
+          'data-ingestion',
+          undefined,
+          { consecutiveFailures: this.consecutiveFailures },
+        );
       }
 
       throw error; // Re-throw to let caller handle
