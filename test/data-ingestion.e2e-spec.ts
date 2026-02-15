@@ -17,6 +17,7 @@ import { DataIngestionService } from '../src/modules/data-ingestion/data-ingesti
 import { PlatformHealthService } from '../src/modules/data-ingestion/platform-health.service';
 import { PrismaService } from '../src/common/prisma.service';
 import { PlatformId } from '../src/common/types/platform.type';
+import { DegradationProtocolService } from '../src/modules/data-ingestion/degradation-protocol.service';
 
 describe('Data Ingestion (e2e)', () => {
   let app: NestFastifyApplication;
@@ -24,6 +25,7 @@ describe('Data Ingestion (e2e)', () => {
   let polymarketConnector: PolymarketConnector;
   let ingestionService: DataIngestionService;
   let healthService: PlatformHealthService;
+  let degradationService: DegradationProtocolService;
   let prisma: PrismaService;
 
   beforeAll(async () => {
@@ -53,6 +55,9 @@ describe('Data Ingestion (e2e)', () => {
       moduleFixture.get<DataIngestionService>(DataIngestionService);
     healthService = moduleFixture.get<PlatformHealthService>(
       PlatformHealthService,
+    );
+    degradationService = moduleFixture.get<DegradationProtocolService>(
+      DegradationProtocolService,
     );
     prisma = moduleFixture.get<PrismaService>(PrismaService);
   });
@@ -234,6 +239,100 @@ describe('Data Ingestion (e2e)', () => {
       expect(['healthy', 'degraded', 'disconnected']).toContain(
         polymarketHealth.status,
       );
+    });
+  });
+
+  describe('Degradation Protocol (e2e)', () => {
+    beforeEach(() => {
+      // Clean up any degradation state from previous tests
+      if (degradationService.isDegraded(PlatformId.KALSHI)) {
+        degradationService.deactivateProtocol(PlatformId.KALSHI);
+      }
+      if (degradationService.isDegraded(PlatformId.POLYMARKET)) {
+        degradationService.deactivateProtocol(PlatformId.POLYMARKET);
+      }
+    });
+
+    it('should activate and deactivate degradation protocol', () => {
+      // Initially not degraded (after cleanup)
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(false);
+
+      // Activate protocol
+      degradationService.activateProtocol(
+        PlatformId.KALSHI,
+        'websocket_timeout',
+      );
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(true);
+
+      // Edge threshold multiplier should be 1.5 for healthy platform
+      expect(
+        degradationService.getEdgeThresholdMultiplier(PlatformId.POLYMARKET),
+      ).toBe(1.5);
+
+      // Edge threshold multiplier should be 1.0 for degraded platform
+      expect(
+        degradationService.getEdgeThresholdMultiplier(PlatformId.KALSHI),
+      ).toBe(1.0);
+
+      // Deactivate protocol
+      degradationService.deactivateProtocol(PlatformId.KALSHI);
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(false);
+
+      // All multipliers back to 1.0
+      expect(
+        degradationService.getEdgeThresholdMultiplier(PlatformId.POLYMARKET),
+      ).toBe(1.0);
+    });
+
+    it('should detect 81s WebSocket timeout via publishHealth', async () => {
+      // Simulate WebSocket silence by setting last update to 82s ago
+      const eightyTwoSecondsAgo = Date.now() - 82_000;
+      healthService['lastUpdateTime'].set(
+        PlatformId.KALSHI,
+        eightyTwoSecondsAgo,
+      );
+
+      await healthService.publishHealth();
+
+      // Protocol should be activated
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(true);
+
+      // Clean up
+      degradationService.deactivateProtocol(PlatformId.KALSHI);
+    });
+
+    it('should recover when fresh data arrives after degradation', async () => {
+      // Set up degradation
+      degradationService.activateProtocol(
+        PlatformId.KALSHI,
+        'websocket_timeout',
+      );
+      healthService['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+
+      // Simulate fresh data arrival (WebSocket resumes)
+      healthService.recordUpdate(PlatformId.KALSHI, 50);
+
+      await healthService.publishHealth();
+
+      // Protocol should be deactivated (fresh data within 30s)
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(false);
+    });
+
+    it('should track polling cycles during degradation', () => {
+      degradationService.activateProtocol(
+        PlatformId.KALSHI,
+        'websocket_timeout',
+      );
+
+      degradationService.incrementPollingCycle(PlatformId.KALSHI);
+      degradationService.incrementPollingCycle(PlatformId.KALSHI);
+      degradationService.incrementPollingCycle(PlatformId.KALSHI);
+
+      const state = degradationService.getDegradationState(PlatformId.KALSHI);
+      expect(state?.pollingCycleCount).toBe(3);
+
+      // Clean up
+      degradationService.deactivateProtocol(PlatformId.KALSHI);
     });
   });
 });

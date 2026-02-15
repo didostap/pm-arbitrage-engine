@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../common/prisma.service';
 import { PlatformId, PlatformHealth } from '../../common/types/platform.type';
+import { EVENT_NAMES } from '../../common/events/event-catalog';
 import {
   PlatformDegradedEvent,
   PlatformRecoveredEvent,
@@ -11,12 +12,15 @@ import {
 } from '../../common/events/platform.events';
 import { toPlatformEnum } from '../../common/utils';
 import { withCorrelationId } from '../../common/services/correlation-context';
+import { DegradationProtocolService } from './degradation-protocol.service';
 
 @Injectable()
 export class PlatformHealthService {
   private readonly logger = new Logger(PlatformHealthService.name);
   private readonly STALENESS_THRESHOLD = 60_000; // 60 seconds
   private readonly DEGRADED_LATENCY_THRESHOLD = 2000; // 2 seconds
+  private readonly WEBSOCKET_TIMEOUT_THRESHOLD = 81_000; // 81 seconds (FR-DI-03)
+  private readonly DATA_FRESHNESS_THRESHOLD = 30_000; // 30 seconds for recovery validation
 
   private lastUpdateTime: Map<PlatformId, number> = new Map();
   private latencySamples: Map<PlatformId, number[]> = new Map();
@@ -28,6 +32,7 @@ export class PlatformHealthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly degradationService: DegradationProtocolService,
   ) {}
 
   /**
@@ -70,12 +75,12 @@ export class PlatformHealthService {
         }
 
         // Emit base health update event
-        this.eventEmitter.emit('platform.health.updated', health);
+        this.eventEmitter.emit(EVENT_NAMES.PLATFORM_HEALTH_UPDATED, health);
 
         // Emit transition events (degradation AND recovery)
         if (health.status === 'degraded' && previousStatus !== 'degraded') {
           this.eventEmitter.emit(
-            'platform.health.degraded',
+            EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
             new PlatformDegradedEvent(platform, health, previousStatus),
           );
         } else if (
@@ -84,16 +89,52 @@ export class PlatformHealthService {
         ) {
           // Emit recovery event when transitioning back to healthy
           this.eventEmitter.emit(
-            'platform.health.recovered',
+            EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
             new PlatformRecoveredEvent(platform, health, previousStatus),
           );
+
+          // Recovery validation for degradation protocol (Task 4)
+          if (this.degradationService.isDegraded(platform)) {
+            const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+            const dataAge = Date.now() - lastUpdate;
+
+            if (dataAge <= this.DATA_FRESHNESS_THRESHOLD) {
+              this.degradationService.deactivateProtocol(platform);
+            } else {
+              this.logger.warn({
+                message: 'Recovery rejected: data stale',
+                module: 'data-ingestion',
+                correlationId,
+                platformId: platform,
+                dataAgeMs: dataAge,
+                freshnessThresholdMs: this.DATA_FRESHNESS_THRESHOLD,
+              });
+            }
+          }
         } else if (
           health.status === 'disconnected' &&
           previousStatus !== 'disconnected'
         ) {
           this.eventEmitter.emit(
-            'platform.health.disconnected',
+            EVENT_NAMES.PLATFORM_HEALTH_DISCONNECTED,
             new PlatformDisconnectedEvent(platform, health),
+          );
+        }
+
+        // 81s WebSocket timeout detection (FR-DI-03)
+        // This is ADDITIONAL to the 60s staleness check above
+        const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+        const wsAge = Date.now() - lastUpdate;
+        if (
+          wsAge > this.WEBSOCKET_TIMEOUT_THRESHOLD &&
+          !this.degradationService.isDegraded(platform)
+        ) {
+          const lastDataTimestamp =
+            lastUpdate > 0 ? new Date(lastUpdate) : undefined;
+          this.degradationService.activateProtocol(
+            platform,
+            'websocket_timeout',
+            lastDataTimestamp,
           );
         }
 

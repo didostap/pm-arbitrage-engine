@@ -44,3 +44,38 @@ export class PlatformDisconnectedEvent extends BaseEvent {
     super(correlationId);
   }
 }
+
+/**
+ * Event emitted when degradation protocol is activated for a platform.
+ * Downstream modules (execution, detection) subscribe to this event.
+ */
+export class DegradationProtocolActivatedEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly reason: string,
+    public readonly lastDataTimestamp: Date | null,
+    public readonly activatedAt: Date,
+    public readonly healthyPlatforms: PlatformId[],
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
+ * Event emitted when degradation protocol is deactivated (platform recovered).
+ */
+export class DegradationProtocolDeactivatedEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly outageDurationMs: number,
+    public readonly recoveredAt: Date,
+    public readonly impactSummary: {
+      pollingCycleCount: number;
+      reason: string;
+    },
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}

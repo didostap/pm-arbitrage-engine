@@ -11,9 +11,11 @@ import {
   PriceLevel,
 } from '../../common/types/normalized-order-book.type';
 import { PlatformId } from '../../common/types/platform.type';
+import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
 import { SystemHealthError } from '../../common/errors';
 import { toPlatformEnum } from '../../common/utils';
+import { DegradationProtocolService } from './degradation-protocol.service';
 
 /** Placeholder token ID for Polymarket polling - will be replaced by Epic 3 contract pairs */
 const POLYMARKET_PLACEHOLDER_TOKEN_ID =
@@ -38,6 +40,7 @@ export class DataIngestionService implements OnModuleInit {
     private readonly kalshiConnector: KalshiConnector,
     private readonly polymarketConnector: PolymarketConnector,
     private readonly healthService: PlatformHealthService,
+    private readonly degradationService: DegradationProtocolService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -105,124 +108,131 @@ export class DataIngestionService implements OnModuleInit {
       timestamp: new Date().toISOString(),
     });
 
-    // Ingest Kalshi (isolated try/catch)
-    try {
-      // For MVP, we'll use a placeholder market ticker
-      // In production, this would iterate over configured market tickers
-      const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
+    // Ingest Kalshi (isolated try/catch) — skip if degraded
+    if (!this.degradationService.isDegraded(PlatformId.KALSHI)) {
+      try {
+        // For MVP, we'll use a placeholder market ticker
+        // In production, this would iterate over configured market tickers
+        const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
 
-      for (const ticker of kalshiTickers) {
-        const startTime = Date.now();
+        for (const ticker of kalshiTickers) {
+          const startTime = Date.now();
 
-        try {
-          // Connector returns already normalized data
-          const normalized = await this.kalshiConnector.getOrderBook(ticker);
+          try {
+            // Connector returns already normalized data
+            const normalized = await this.kalshiConnector.getOrderBook(ticker);
 
-          await this.persistSnapshot(normalized, correlationId);
+            await this.persistSnapshot(normalized, correlationId);
 
-          this.eventEmitter.emit(
-            'orderbook.updated',
-            new OrderBookUpdatedEvent(normalized),
-          );
+            this.eventEmitter.emit(
+              EVENT_NAMES.ORDERBOOK_UPDATED,
+              new OrderBookUpdatedEvent(normalized),
+            );
 
-          const latency = Date.now() - startTime;
-          this.healthService.recordUpdate(PlatformId.KALSHI, latency);
+            const latency = Date.now() - startTime;
+            this.healthService.recordUpdate(PlatformId.KALSHI, latency);
 
-          this.logger.log({
-            message: 'Order book ingested (polling)',
-            module: 'data-ingestion',
-            correlationId,
-            timestamp: new Date().toISOString(),
-            contractId: normalized.contractId,
-            latencyMs: latency,
-            metadata: {
-              platformId: normalized.platformId,
-              bidLevels: normalized.bids.length,
-              askLevels: normalized.asks.length,
-              bestBid: normalized.bids[0]?.price,
-              bestAsk: normalized.asks[0]?.price,
-            },
-          });
-        } catch (error) {
-          this.logger.error({
-            message: 'Failed to ingest order book',
-            module: 'data-ingestion',
-            correlationId,
-            ticker,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date().toISOString(),
-          });
+            this.logger.log({
+              message: 'Order book ingested (polling)',
+              module: 'data-ingestion',
+              correlationId,
+              timestamp: new Date().toISOString(),
+              contractId: normalized.contractId,
+              latencyMs: latency,
+              metadata: {
+                platformId: normalized.platformId,
+                bidLevels: normalized.bids.length,
+                askLevels: normalized.asks.length,
+                bestBid: normalized.bids[0]?.price,
+                bestAsk: normalized.asks[0]?.price,
+              },
+            });
+          } catch (error) {
+            this.logger.error({
+              message: 'Failed to ingest order book',
+              module: 'data-ingestion',
+              correlationId,
+              ticker,
+              error: error instanceof Error ? error.message : 'Unknown error',
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
+      } catch (error) {
+        this.logger.error({
+          message: 'Kalshi order book ingestion failed',
+          module: 'data-ingestion',
+          correlationId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date().toISOString(),
+        });
       }
-    } catch (error) {
-      this.logger.error({
-        message: 'Kalshi order book ingestion failed',
-        module: 'data-ingestion',
-        correlationId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    } // end Kalshi degradation check
 
-    // Ingest Polymarket (isolated try/catch)
-    try {
-      // Placeholder token IDs - these will fail against real API
-      // Real token IDs will come from Epic 3 contract pair configuration
-      const polymarketTokens = [POLYMARKET_PLACEHOLDER_TOKEN_ID];
+    // Ingest Polymarket (isolated try/catch) — skip if degraded
+    if (!this.degradationService.isDegraded(PlatformId.POLYMARKET)) {
+      try {
+        // Placeholder token IDs - these will fail against real API
+        // Real token IDs will come from Epic 3 contract pair configuration
+        const polymarketTokens = [POLYMARKET_PLACEHOLDER_TOKEN_ID];
 
-      for (const tokenId of polymarketTokens) {
-        const startTime = Date.now();
+        for (const tokenId of polymarketTokens) {
+          const startTime = Date.now();
 
-        try {
-          // Connector returns already normalized data
-          const normalized =
-            await this.polymarketConnector.getOrderBook(tokenId);
+          try {
+            // Connector returns already normalized data
+            const normalized =
+              await this.polymarketConnector.getOrderBook(tokenId);
 
-          await this.persistSnapshot(normalized, correlationId);
+            await this.persistSnapshot(normalized, correlationId);
 
-          this.eventEmitter.emit(
-            'orderbook.updated',
-            new OrderBookUpdatedEvent(normalized),
-          );
+            this.eventEmitter.emit(
+              EVENT_NAMES.ORDERBOOK_UPDATED,
+              new OrderBookUpdatedEvent(normalized),
+            );
 
-          const latency = Date.now() - startTime;
-          this.healthService.recordUpdate(PlatformId.POLYMARKET, latency);
+            const latency = Date.now() - startTime;
+            this.healthService.recordUpdate(PlatformId.POLYMARKET, latency);
 
-          this.logger.log({
-            message: 'Order book ingested (polling)',
-            module: 'data-ingestion',
-            correlationId,
-            timestamp: new Date().toISOString(),
-            contractId: normalized.contractId,
-            latencyMs: latency,
-            metadata: {
-              platformId: normalized.platformId,
-              bidLevels: normalized.bids.length,
-              askLevels: normalized.asks.length,
-              bestBid: normalized.bids[0]?.price,
-              bestAsk: normalized.asks[0]?.price,
-            },
-          });
-        } catch (error) {
-          this.logger.error({
-            message: 'Failed to ingest order book',
-            module: 'data-ingestion',
-            correlationId,
-            tokenId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date().toISOString(),
-          });
+            this.logger.log({
+              message: 'Order book ingested (polling)',
+              module: 'data-ingestion',
+              correlationId,
+              timestamp: new Date().toISOString(),
+              contractId: normalized.contractId,
+              latencyMs: latency,
+              metadata: {
+                platformId: normalized.platformId,
+                bidLevels: normalized.bids.length,
+                askLevels: normalized.asks.length,
+                bestBid: normalized.bids[0]?.price,
+                bestAsk: normalized.asks[0]?.price,
+              },
+            });
+          } catch (error) {
+            this.logger.error({
+              message: 'Failed to ingest order book',
+              module: 'data-ingestion',
+              correlationId,
+              tokenId,
+              error: error instanceof Error ? error.message : 'Unknown error',
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
+      } catch (error) {
+        this.logger.error({
+          message: 'Polymarket order book ingestion failed',
+          module: 'data-ingestion',
+          correlationId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date().toISOString(),
+        });
       }
-    } catch (error) {
-      this.logger.error({
-        message: 'Polymarket order book ingestion failed',
-        module: 'data-ingestion',
-        correlationId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    } // end Polymarket degradation check
+
+    // Poll degraded platforms via REST fallback
+    await this.pollDegradedPlatforms(correlationId);
   }
 
   /**
@@ -241,7 +251,7 @@ export class DataIngestionService implements OnModuleInit {
 
       // Emit event
       this.eventEmitter.emit(
-        'orderbook.updated',
+        EVENT_NAMES.ORDERBOOK_UPDATED,
         new OrderBookUpdatedEvent(normalized),
       );
 
@@ -274,6 +284,69 @@ export class DataIngestionService implements OnModuleInit {
         timestamp: new Date().toISOString(),
       });
       throw error; // Re-throw to be caught by onModuleInit handler
+    }
+  }
+
+  /**
+   * Polls degraded platforms via REST fallback.
+   * Called from ingestCurrentOrderBooks(), NOT a separate cron.
+   * Tags data with platformHealth: 'degraded' and tracks polling cycles.
+   */
+  private async pollDegradedPlatforms(correlationId: string): Promise<void> {
+    const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
+
+    const connectors = [
+      {
+        connector: this.kalshiConnector,
+        contracts: kalshiTickers,
+        platformId: PlatformId.KALSHI,
+      },
+      {
+        connector: this.polymarketConnector,
+        contracts: [POLYMARKET_PLACEHOLDER_TOKEN_ID],
+        platformId: PlatformId.POLYMARKET,
+      },
+    ];
+
+    for (const { connector, contracts, platformId } of connectors) {
+      if (!this.degradationService.isDegraded(platformId)) continue;
+
+      for (const contractId of contracts) {
+        try {
+          const startTime = Date.now();
+          const book = await connector.getOrderBook(contractId);
+          book.platformHealth = 'degraded';
+          await this.persistSnapshot(book, correlationId);
+          this.eventEmitter.emit(
+            EVENT_NAMES.ORDERBOOK_UPDATED,
+            new OrderBookUpdatedEvent(book),
+          );
+          const latency = Date.now() - startTime;
+          this.healthService.recordUpdate(platformId, latency);
+          this.degradationService.incrementPollingCycle(platformId);
+
+          this.logger.log({
+            message: 'Order book ingested (degraded polling)',
+            module: 'data-ingestion',
+            correlationId,
+            contractId: book.contractId,
+            platformId,
+            latencyMs: latency,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          this.logger.error({
+            message: 'Degraded polling failed',
+            module: 'data-ingestion',
+            correlationId,
+            platformId,
+            contractId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+          });
+          // Log but don't crash — platform is already degraded
+        }
+      }
     }
   }
 

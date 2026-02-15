@@ -12,6 +12,7 @@ import { SystemHealthError } from '../../common/errors/system-health-error';
 import { PlatformId } from '../../common/types/platform.type';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
 import { vi } from 'vitest';
+import { DegradationProtocolService } from './degradation-protocol.service';
 
 describe('DataIngestionService', () => {
   let service: DataIngestionService;
@@ -44,6 +45,13 @@ describe('DataIngestionService', () => {
     emit: vi.fn(),
   };
 
+  const mockDegradationService = {
+    isDegraded: vi.fn().mockReturnValue(false),
+    activateProtocol: vi.fn(),
+    deactivateProtocol: vi.fn(),
+    incrementPollingCycle: vi.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,6 +63,10 @@ describe('DataIngestionService', () => {
           useValue: mockNormalizer,
         },
         { provide: PlatformHealthService, useValue: mockHealthService },
+        {
+          provide: DegradationProtocolService,
+          useValue: mockDegradationService,
+        },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
@@ -469,6 +481,128 @@ describe('DataIngestionService', () => {
       await expect(service['persistSnapshot'](book)).rejects.toThrow(
         'DB error',
       );
+    });
+  });
+
+  describe('degradation polling fallback', () => {
+    it('should skip degraded platforms in normal ingestion loop', async () => {
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'POLYMARKET-TOKEN',
+        bids: [{ price: 0.55, quantity: 1500 }],
+        asks: [{ price: 0.58, quantity: 1200 }],
+        timestamp: new Date(),
+      };
+      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+
+      // Kalshi connector should return a book for degraded polling
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+
+      await service.ingestCurrentOrderBooks();
+
+      // Kalshi normal polling should be skipped (degraded)
+      // But Kalshi degraded polling should still call getOrderBook
+      // Polymarket normal polling should proceed
+      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+    });
+
+    it('should call pollDegradedPlatforms for degraded platforms', async () => {
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      const degradedBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-DEGRADED',
+        bids: [{ price: 0.5, quantity: 500 }],
+        asks: [{ price: 0.55, quantity: 400 }],
+        timestamp: new Date(),
+      };
+      mockKalshiConnector.getOrderBook.mockResolvedValue(degradedBook);
+      mockPolymarketConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'PM-TOKEN',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      });
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      // Should call incrementPollingCycle for degraded Kalshi
+      expect(mockDegradationService.incrementPollingCycle).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+      );
+    });
+
+    it('should set platformHealth to degraded on polled order books', async () => {
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      const degradedBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-DEGRADED',
+        bids: [{ price: 0.5, quantity: 500 }],
+        asks: [{ price: 0.55, quantity: 400 }],
+        timestamp: new Date(),
+      };
+      mockKalshiConnector.getOrderBook.mockResolvedValue(degradedBook);
+      mockPolymarketConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'PM-TOKEN',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      });
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      // The book passed to persistSnapshot should have platformHealth: 'degraded'
+      expect(degradedBook).toHaveProperty('platformHealth', 'degraded');
+    });
+
+    it('should not poll when platform recovers (isDegraded returns false)', async () => {
+      mockDegradationService.isDegraded.mockReturnValue(false);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+      const polymarketBook = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'PM-TOKEN',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      };
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+
+      await service.ingestCurrentOrderBooks();
+
+      // incrementPollingCycle should NOT be called (no degraded platforms)
+      expect(
+        mockDegradationService.incrementPollingCycle,
+      ).not.toHaveBeenCalled();
     });
   });
 });

@@ -10,6 +10,7 @@ import {
   PlatformRecoveredEvent,
 } from '../../common/events/platform.events';
 import { vi } from 'vitest';
+import { DegradationProtocolService } from './degradation-protocol.service';
 
 describe('PlatformHealthService', () => {
   let service: PlatformHealthService;
@@ -24,12 +25,22 @@ describe('PlatformHealthService', () => {
     emit: vi.fn(),
   };
 
+  const mockDegradationService = {
+    isDegraded: vi.fn().mockReturnValue(false),
+    activateProtocol: vi.fn(),
+    deactivateProtocol: vi.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlatformHealthService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        {
+          provide: DegradationProtocolService,
+          useValue: mockDegradationService,
+        },
       ],
     }).compile();
 
@@ -417,6 +428,95 @@ describe('PlatformHealthService', () => {
 
       // p95 of 2 samples at index floor(2 * 0.95) = 1
       expect(p95).toBeGreaterThan(0);
+    });
+  });
+
+  describe('WebSocket timeout detection (81s)', () => {
+    it('should trigger degradation protocol at 81s timeout', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Set last update to 82s ago (beyond 81s threshold)
+      const eightyTwoSecondsAgo = Date.now() - 82_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, eightyTwoSecondsAgo);
+
+      await service.publishHealth();
+
+      expect(mockDegradationService.activateProtocol).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        'websocket_timeout',
+        expect.any(Date),
+      );
+    });
+
+    it('should NOT trigger protocol below 81s (60s staleness emits degraded but not protocol)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Set last update to 70s ago (above 60s staleness, below 81s timeout)
+      const seventySecondsAgo = Date.now() - 70_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, seventySecondsAgo);
+      // Keep Polymarket fresh so it doesn't trigger the protocol either
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      await service.publishHealth();
+
+      expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
+    });
+
+    it('should not re-activate protocol if already degraded', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      mockDegradationService.isDegraded.mockReturnValue(true);
+
+      // Set both platforms to 82s ago so both are timed out
+      const eightyTwoSecondsAgo = Date.now() - 82_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, eightyTwoSecondsAgo);
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, eightyTwoSecondsAgo);
+
+      await service.publishHealth();
+
+      // Should NOT activate because isDegraded returns true for all
+      expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Recovery validation', () => {
+    it('should deactivate protocol when data is fresh on recovery', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      // First, make Kalshi degraded (previous status)
+      service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+
+      // Now record fresh update (makes healthy)
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      await service.publishHealth();
+
+      expect(mockDegradationService.deactivateProtocol).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+      );
+    });
+
+    it('should reject recovery when data is stale (>30s)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      // Make previousStatus degraded
+      service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+
+      // Set last update to 35s ago (stale for recovery validation, but within 60s staleness threshold)
+      // We need to make calculateHealth return 'healthy', so last update must be within 60s
+      // But for recovery validation, data must be >30s old
+      const thirtyFiveSecondsAgo = Date.now() - 35_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, thirtyFiveSecondsAgo);
+
+      await service.publishHealth();
+
+      // Recovery validation should reject (data is >30s old)
+      expect(mockDegradationService.deactivateProtocol).not.toHaveBeenCalled();
     });
   });
 });

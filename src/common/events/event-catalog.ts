@@ -44,6 +44,16 @@ export const EVENT_NAMES = {
   SYSTEM_TRADING_HALTED: 'system.trading.halted',
 
   // ============================================================================
+  // EPIC 2 EVENTS (Story 2.4 - Degradation Protocol)
+  // ============================================================================
+
+  /** Emitted when degradation protocol activates for a platform (81s WebSocket timeout) */
+  DEGRADATION_PROTOCOL_ACTIVATED: 'degradation.protocol.activated',
+
+  /** Emitted when degradation protocol deactivates (platform recovered) */
+  DEGRADATION_PROTOCOL_DEACTIVATED: 'degradation.protocol.deactivated',
+
+  // ============================================================================
   // FUTURE EVENTS - Placeholders (Epic 3+)
   // ============================================================================
   // NOTE: Event classes for these do NOT exist yet. They will be created in their respective epics.

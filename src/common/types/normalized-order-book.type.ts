@@ -12,4 +12,5 @@ export interface NormalizedOrderBook {
   asks: PriceLevel[];
   timestamp: Date;
   sequenceNumber?: number;
+  platformHealth?: 'healthy' | 'degraded' | 'offline';
 }
