@@ -18,12 +18,14 @@
     "test:cov": "vitest run --coverage"
   },
   "dependencies": {
+    "@ethersproject/wallet": "^5.8.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
     "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/platform-fastify": "^11.1.13",
     "@nestjs/schedule": "^6.1.1",
+    "@polymarket/clob-client": "^5.2.3",
     "@prisma/client": "6",
     "kalshi-typescript": "^3.6.0",
     "nestjs-pino": "^4.1.0",
