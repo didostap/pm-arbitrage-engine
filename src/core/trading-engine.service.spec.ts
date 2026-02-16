@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TradingEngineService } from './trading-engine.service';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 import { DetectionService } from '../modules/arbitrage-detection/detection.service';
+import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calculator.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('TradingEngineService', () => {
@@ -24,6 +25,20 @@ describe('TradingEngineService', () => {
     }),
   };
 
+  const mockEdgeCalculator = {
+    processDislocations: vi.fn().mockReturnValue({
+      opportunities: [],
+      filtered: [],
+      summary: {
+        totalInput: 0,
+        totalFiltered: 0,
+        totalActionable: 0,
+        skippedErrors: 0,
+        processingDurationMs: 0,
+      },
+    }),
+  };
+
   const mockEventEmitter = {
     emit: vi.fn(),
   };
@@ -39,6 +54,10 @@ describe('TradingEngineService', () => {
         {
           provide: DetectionService,
           useValue: mockDetectionService,
+        },
+        {
+          provide: EdgeCalculatorService,
+          useValue: mockEdgeCalculator,
         },
         {
           provide: EventEmitter2,

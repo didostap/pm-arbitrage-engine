@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
 import { DetectionService } from '../modules/arbitrage-detection/detection.service';
+import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calculator.service';
 import {
   withCorrelationId,
   getCorrelationId,
@@ -28,6 +29,7 @@ export class TradingEngineService {
   constructor(
     private readonly dataIngestionService: DataIngestionService,
     private readonly detectionService: DetectionService,
+    private readonly edgeCalculator: EdgeCalculatorService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -81,6 +83,21 @@ export class TradingEngineService {
             evaluated: detectionResult.pairsEvaluated,
             skipped: detectionResult.pairsSkipped,
             durationMs: detectionResult.cycleDurationMs,
+          },
+        });
+
+        // STEP 2b: Edge Calculation & Opportunity Filtering (Story 3.3)
+        const edgeResult = this.edgeCalculator.processDislocations(
+          detectionResult.dislocations,
+        );
+        this.logger.log({
+          message: `Edge calculation: ${edgeResult.summary.totalActionable} actionable opportunities`,
+          correlationId: getCorrelationId(),
+          data: {
+            totalInput: edgeResult.summary.totalInput,
+            filtered: edgeResult.summary.totalFiltered,
+            actionable: edgeResult.summary.totalActionable,
+            durationMs: edgeResult.summary.processingDurationMs,
           },
         });
 
