@@ -9,6 +9,7 @@ import { PersistenceModule } from './common/persistence.module';
 import { ConnectorModule } from './connectors/connector.module';
 import { CoreModule } from './core/core.module';
 import { DataIngestionModule } from './modules/data-ingestion/data-ingestion.module';
+import { ContractMatchingModule } from './modules/contract-matching/contract-matching.module';
 import { loggerConfig } from './common/config/logger.config';
 
 @Module({
@@ -31,6 +32,7 @@ import { loggerConfig } from './common/config/logger.config';
     CoreModule,
     ConnectorModule,
     DataIngestionModule,
+    ContractMatchingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -57,6 +57,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
 
+# Operator-specific contract pairs config (not tracked)
+config/contract-pairs.yaml
+
 # Kalshi credentials
 secrets/
 *.pem
