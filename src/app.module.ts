@@ -12,6 +12,8 @@ import { DataIngestionModule } from './modules/data-ingestion/data-ingestion.mod
 import { ContractMatchingModule } from './modules/contract-matching/contract-matching.module';
 import { loggerConfig } from './common/config/logger.config';
 
+import { ArbitrageDetectionModule } from './modules/arbitrage-detection/arbitrage-detection.module';
+
 @Module({
   imports: [
     // CRITICAL: LoggerModule MUST be first to replace default logger early
@@ -33,6 +35,7 @@ import { loggerConfig } from './common/config/logger.config';
     ConnectorModule,
     DataIngestionModule,
     ContractMatchingModule,
+    ArbitrageDetectionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

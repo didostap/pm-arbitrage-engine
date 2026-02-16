@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
+import { DetectionService } from '../modules/arbitrage-detection/detection.service';
 import {
   withCorrelationId,
   getCorrelationId,
@@ -26,6 +27,7 @@ export class TradingEngineService {
 
   constructor(
     private readonly dataIngestionService: DataIngestionService,
+    private readonly detectionService: DetectionService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -69,7 +71,18 @@ export class TradingEngineService {
         await this.dataIngestionService.ingestCurrentOrderBooks();
 
         // STEP 2: Arbitrage Detection (Epic 3)
-        // await this.detectionService.detectOpportunities();
+        const detectionResult =
+          await this.detectionService.detectDislocations();
+        this.logger.log({
+          message: `Detection: ${detectionResult.dislocations.length} dislocations found`,
+          correlationId: getCorrelationId(),
+          data: {
+            dislocations: detectionResult.dislocations.length,
+            evaluated: detectionResult.pairsEvaluated,
+            skipped: detectionResult.pairsSkipped,
+            durationMs: detectionResult.cycleDurationMs,
+          },
+        });
 
         // STEP 3: Risk Validation (Epic 4)
         // STEP 4: Execution (Epic 5)

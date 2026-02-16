@@ -5,6 +5,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TradingEngineService } from './trading-engine.service';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
+import { DetectionService } from '../modules/arbitrage-detection/detection.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('TradingEngineService', () => {
@@ -12,6 +13,15 @@ describe('TradingEngineService', () => {
 
   const mockDataIngestionService = {
     ingestCurrentOrderBooks: vi.fn().mockResolvedValue(undefined),
+  };
+
+  const mockDetectionService = {
+    detectDislocations: vi.fn().mockResolvedValue({
+      dislocations: [],
+      pairsEvaluated: 0,
+      pairsSkipped: 0,
+      cycleDurationMs: 0,
+    }),
   };
 
   const mockEventEmitter = {
@@ -25,6 +35,10 @@ describe('TradingEngineService', () => {
         {
           provide: DataIngestionService,
           useValue: mockDataIngestionService,
+        },
+        {
+          provide: DetectionService,
+          useValue: mockDetectionService,
         },
         {
           provide: EventEmitter2,
