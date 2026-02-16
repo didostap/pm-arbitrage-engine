@@ -115,6 +115,10 @@ export class PolymarketConnector
       const tempClient = new ClobClient(this.clobApiUrl, this.chainId, signer);
 
       // Step 3: Derive API credentials (L1 → L2)
+      // NOTE: @polymarket/clob-client swallows HTTP errors in its error handler
+      // and returns { error: string, status: number } instead of throwing.
+      // This means createOrDeriveApiKey() returns { key: undefined, secret: undefined, passphrase: undefined }
+      // on auth failure. We must validate the returned credentials explicitly.
       let apiCreds: { key: string; secret: string; passphrase: string };
       try {
         apiCreds = await tempClient.createOrDeriveApiKey();
@@ -130,6 +134,15 @@ export class PolymarketConnector
             maxDelayMs: 1000,
             backoffMultiplier: 1,
           },
+        );
+      }
+
+      if (!apiCreds?.key || !apiCreds?.secret || !apiCreds?.passphrase) {
+        throw new PlatformApiError(
+          POLYMARKET_ERROR_CODES.API_KEY_DERIVATION_FAILED,
+          'API key derivation returned invalid credentials (key/secret/passphrase undefined). Check POLYMARKET_PRIVATE_KEY configuration.',
+          PlatformId.POLYMARKET,
+          'critical',
         );
       }
 

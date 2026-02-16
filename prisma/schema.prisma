@@ -61,3 +61,23 @@ model PlatformHealthLog {
   @@index([created_at])
   @@map("platform_health_logs")
 }
+
+// Contract match pairs tracking operator-approved cross-platform matches
+model ContractMatch {
+  matchId                    String    @id @default(uuid()) @map("match_id")
+  polymarketContractId       String    @map("polymarket_contract_id")
+  kalshiContractId           String    @map("kalshi_contract_id")
+  polymarketDescription      String?   @map("polymarket_description")
+  kalshiDescription          String?   @map("kalshi_description")
+  operatorApproved           Boolean   @default(false) @map("operator_approved")
+  operatorApprovalTimestamp  DateTime? @map("operator_approval_timestamp") @db.Timestamptz
+  operatorRationale          String?   @map("operator_rationale")
+  firstTradedTimestamp       DateTime? @map("first_traded_timestamp") @db.Timestamptz
+  totalCyclesTraded          Int       @default(0) @map("total_cycles_traded")
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([polymarketContractId, kalshiContractId])
+  @@index([operatorApproved])
+  @@map("contract_matches")
+}

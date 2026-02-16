@@ -212,14 +212,6 @@ export class DetectionService {
     };
   }
 
-  private getConnector(
-    platformId: PlatformId,
-  ): KalshiConnector | PolymarketConnector {
-    return platformId === PlatformId.KALSHI
-      ? this.kalshiConnector
-      : this.polymarketConnector;
-  }
-
   private buildDislocation(
     pairConfig: ContractPairConfig,
     buyPlatformId: PlatformId,
