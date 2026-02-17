@@ -130,6 +130,9 @@ devDependencies:
   eslint-plugin-prettier:
     specifier: ^5.2.2
     version: 5.5.5(eslint-config-prettier@10.1.8)(eslint@9.39.2)(prettier@3.8.1)
+  fast-check:
+    specifier: ^4.5.3
+    version: 4.5.3
   globals:
     specifier: ^16.0.0
     version: 16.5.0
@@ -4576,6 +4579,13 @@ packages:
     dependencies:
       pure-rand: 6.1.0
     dev: false
+
+  /fast-check@4.5.3:
+    resolution: {integrity: sha512-IE9csY7lnhxBnA8g/WI5eg/hygA6MGWJMSNfFRrBlXUciADEhS1EDB0SIsMSvzubzIlOBbVITSsypCsW717poA==}
+    engines: {node: '>=12.17.0'}
+    dependencies:
+      pure-rand: 7.0.1
+    dev: true
 
   /fast-copy@3.0.2:
     resolution: {integrity: sha512-dl0O9Vhju8IrcLndv2eU4ldt1ftXMqqfgN4H1cpmGV7P6jeB9FwpN9a2c8DPGE1Ys88rNUJVYDHq73CGAGOPfQ==}
