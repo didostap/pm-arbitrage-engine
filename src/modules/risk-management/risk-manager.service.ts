@@ -14,6 +14,8 @@ import {
   EVENT_NAMES,
   LimitApproachedEvent,
   LimitBreachedEvent,
+  OverrideAppliedEvent,
+  OverrideDeniedEvent,
 } from '../../common/events';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PrismaService } from '../../common/prisma.service';
@@ -284,6 +286,125 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       maxPositionSizeUsd,
       currentOpenPairs: this.openPositionCount,
     });
+  }
+
+  private determineRejectionReason(): string | null {
+    if (this.openPositionCount >= this.config.maxOpenPairs) {
+      return `Max open pairs limit reached (${this.openPositionCount}/${this.config.maxOpenPairs})`;
+    }
+    // Position sizing is always a potential rejection for override context
+    return 'Position sizing limit';
+  }
+
+  async processOverride(
+    opportunityId: string,
+    rationale: string,
+  ): Promise<RiskDecision> {
+    // FIRST: Check if daily loss halt is active — cannot be overridden
+    if (
+      this.tradingHalted &&
+      this.haltReason === HALT_REASONS.DAILY_LOSS_LIMIT
+    ) {
+      const denialReason = 'Override denied: daily loss halt active';
+
+      this.eventEmitter.emit(
+        EVENT_NAMES.OVERRIDE_DENIED,
+        new OverrideDeniedEvent(opportunityId, rationale, denialReason),
+      );
+
+      try {
+        await this.prisma.riskOverrideLog.create({
+          data: {
+            opportunityId,
+            rationale,
+            approved: false,
+            originalRejectionReason:
+              'Trading halted: daily loss limit breached',
+            denialReason,
+          },
+        });
+      } catch (error) {
+        this.logger.error({
+          message: 'Failed to persist override denial log',
+          data: {
+            opportunityId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+
+      this.logger.log({
+        message: 'Override denied: daily loss halt active',
+        data: { opportunityId, rationale },
+      });
+
+      return {
+        approved: false,
+        reason: denialReason,
+        maxPositionSizeUsd: new FinancialDecimal(0),
+        currentOpenPairs: this.openPositionCount,
+        dailyPnl: this.dailyPnl,
+      };
+    }
+
+    // Determine what would have rejected this opportunity
+    const originalRejectionReason =
+      this.determineRejectionReason() ?? 'Position sizing limit';
+
+    // Calculate full position cap (ignoring current capital deployed and open pairs)
+    const maxPositionSizeUsd = new FinancialDecimal(
+      this.config.bankrollUsd,
+    ).mul(new FinancialDecimal(this.config.maxPositionPct));
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.OVERRIDE_APPLIED,
+      new OverrideAppliedEvent(
+        opportunityId,
+        rationale,
+        originalRejectionReason,
+        maxPositionSizeUsd.toNumber(),
+      ),
+    );
+
+    try {
+      await this.prisma.riskOverrideLog.create({
+        data: {
+          opportunityId,
+          rationale,
+          approved: true,
+          originalRejectionReason,
+          overrideAmountUsd: maxPositionSizeUsd.toFixed(),
+        },
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to persist override approval log',
+        data: {
+          opportunityId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+
+    this.logger.log({
+      message: 'Override approved',
+      data: {
+        opportunityId,
+        rationale,
+        originalRejectionReason,
+        overrideAmountUsd: maxPositionSizeUsd.toString(),
+      },
+    });
+
+    return {
+      approved: true,
+      reason: 'Override approved by operator',
+      maxPositionSizeUsd,
+      currentOpenPairs: this.openPositionCount,
+      dailyPnl: this.dailyPnl,
+      overrideApplied: true,
+      overrideRationale: rationale,
+    };
   }
 
   async updateDailyPnl(pnlDelta: unknown): Promise<void> {

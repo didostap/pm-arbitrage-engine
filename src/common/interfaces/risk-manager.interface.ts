@@ -17,4 +17,13 @@ export interface IRiskManager {
    * Check if trading is currently halted.
    */
   isTradingHalted(): boolean;
+  /**
+   * Process an operator override for a rejected opportunity.
+   * @param opportunityId - The opportunity to override
+   * @param rationale - Operator's reason for the override (min 10 chars)
+   */
+  processOverride(
+    opportunityId: string,
+    rationale: string,
+  ): Promise<RiskDecision>;
 }

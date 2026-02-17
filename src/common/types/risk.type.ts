@@ -6,6 +6,8 @@ export interface RiskDecision {
   maxPositionSizeUsd: Decimal;
   currentOpenPairs: number;
   dailyPnl?: Decimal;
+  overrideApplied?: boolean;
+  overrideRationale?: string;
 }
 
 export interface RiskExposure {

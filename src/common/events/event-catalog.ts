@@ -82,6 +82,12 @@ export const EVENT_NAMES = {
   /** [Epic 4] Emitted when risk limit is breached (trading halt) */
   LIMIT_BREACHED: 'risk.limit.breached',
 
+  /** [Story 4.3] Emitted when operator override is approved */
+  OVERRIDE_APPLIED: 'risk.override.applied',
+
+  /** [Story 4.3] Emitted when operator override is denied (daily loss halt) */
+  OVERRIDE_DENIED: 'risk.override.denied',
+
   // [All Epics] System Health Events
   /** Emitted when critical system health issue detected (database failure, etc.) */
   SYSTEM_HEALTH_CRITICAL: 'system.health.critical',

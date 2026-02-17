@@ -22,3 +22,26 @@ export class LimitBreachedEvent extends BaseEvent {
     super(correlationId);
   }
 }
+
+export class OverrideAppliedEvent extends BaseEvent {
+  constructor(
+    public readonly opportunityId: string,
+    public readonly rationale: string,
+    public readonly originalRejectionReason: string,
+    public readonly overrideAmountUsd: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class OverrideDeniedEvent extends BaseEvent {
+  constructor(
+    public readonly opportunityId: string,
+    public readonly rationale: string,
+    public readonly denialReason: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}

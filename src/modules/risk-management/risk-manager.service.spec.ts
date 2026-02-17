@@ -101,6 +101,9 @@ describe('RiskManagerService', () => {
       findFirst: ReturnType<typeof vi.fn>;
       upsert: ReturnType<typeof vi.fn>;
     };
+    riskOverrideLog: {
+      create: ReturnType<typeof vi.fn>;
+    };
   };
 
   const defaultConfig: Record<string, number> = {
@@ -128,6 +131,9 @@ describe('RiskManagerService', () => {
       riskState: {
         findFirst: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({}),
+      },
+      riskOverrideLog: {
+        create: vi.fn().mockResolvedValue({}),
       },
     };
 
@@ -721,6 +727,136 @@ describe('RiskManagerService', () => {
       expect(error.currentValue).toBe(10);
       expect(error.threshold).toBe(10);
       expect(error.name).toBe('RiskLimitError');
+    });
+  });
+
+  describe('processOverride', () => {
+    it('should return approved decision when no halt active', async () => {
+      const decision = await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(decision.approved).toBe(true);
+      expect(decision.reason).toBe('Override approved by operator');
+    });
+
+    it('should return denied when daily loss halt active', async () => {
+      // Trigger halt via large loss
+      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+      expect(service.isTradingHalted()).toBe(true);
+
+      const decision = await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toBe('Override denied: daily loss halt active');
+    });
+
+    it('should emit OverrideAppliedEvent on success', async () => {
+      await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'risk.override.applied',
+        expect.objectContaining({
+          opportunityId: 'opp-123',
+          rationale: 'High conviction based on analysis',
+        }),
+      );
+    });
+
+    it('should emit OverrideDeniedEvent on daily loss denial', async () => {
+      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+
+      await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'risk.override.denied',
+        expect.objectContaining({
+          opportunityId: 'opp-123',
+          denialReason: 'Override denied: daily loss halt active',
+        }),
+      );
+    });
+
+    it('should persist override log to DB on success', async () => {
+      await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          opportunityId: 'opp-123',
+          rationale: 'High conviction based on analysis',
+          approved: true,
+        }),
+      });
+    });
+
+    it('should persist denial log to DB on denial', async () => {
+      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+
+      await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          opportunityId: 'opp-123',
+          approved: false,
+          denialReason: 'Override denied: daily loss halt active',
+        }),
+      });
+    });
+
+    it('should set overrideApplied: true in returned decision', async () => {
+      const decision = await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(decision.overrideApplied).toBe(true);
+    });
+
+    it('should set overrideRationale in returned decision', async () => {
+      const decision = await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(decision.overrideRationale).toBe(
+        'High conviction based on analysis',
+      );
+    });
+
+    it('should correctly derive originalRejectionReason when open pairs at limit', async () => {
+      // Set open position count to max
+      (service as any).openPositionCount = 10;
+
+      await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          originalRejectionReason: 'Max open pairs limit reached (10/10)',
+        }),
+      });
+    });
+
+    it('should return full position cap regardless of current capital deployed', async () => {
+      // Deploy some capital
+      (service as any).totalCapitalDeployed = new FinancialDecimal(5000);
+      (service as any).openPositionCount = 5;
+
+      const decision = await service.processOverride(
+        'opp-123',
+        'High conviction based on analysis',
+      );
+      // bankrollUsd (10000) * maxPositionPct (0.03) = 300
+      expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
     });
   });
 });

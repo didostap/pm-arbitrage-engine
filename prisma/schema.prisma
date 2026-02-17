@@ -97,3 +97,17 @@ model RiskState {
 
   @@map("risk_states")
 }
+
+// Operator risk override audit trail
+model RiskOverrideLog {
+  id                      Int      @id @default(autoincrement())
+  opportunityId           String   @map("opportunity_id")
+  rationale               String
+  approved                Boolean
+  originalRejectionReason String   @map("original_rejection_reason")
+  overrideAmountUsd       Decimal? @map("override_amount_usd") @db.Decimal(18, 8)
+  denialReason            String?  @map("denial_reason")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  @@map("risk_override_logs")
+}
