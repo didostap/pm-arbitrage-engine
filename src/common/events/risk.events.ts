@@ -45,3 +45,36 @@ export class OverrideDeniedEvent extends BaseEvent {
     super(correlationId);
   }
 }
+
+export class BudgetReservedEvent extends BaseEvent {
+  constructor(
+    public readonly reservationId: string,
+    public readonly opportunityId: string,
+    public readonly reservedCapitalUsd: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class BudgetCommittedEvent extends BaseEvent {
+  constructor(
+    public readonly reservationId: string,
+    public readonly opportunityId: string,
+    public readonly committedCapitalUsd: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class BudgetReleasedEvent extends BaseEvent {
+  constructor(
+    public readonly reservationId: string,
+    public readonly opportunityId: string,
+    public readonly releasedCapitalUsd: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}

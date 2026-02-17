@@ -14,6 +14,10 @@ import {
   TradingHaltedEvent,
 } from '../common/events';
 import { type IRiskManager } from '../common/interfaces/risk-manager.interface';
+import { type IExecutionQueue } from '../common/interfaces/execution-queue.interface';
+import { RankedOpportunity } from '../common/types/risk.type';
+import { FinancialDecimal } from '../common/utils/financial-math';
+import { EXECUTION_QUEUE_TOKEN } from '../modules/execution/execution.constants';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -33,6 +37,8 @@ export class TradingEngineService {
     private readonly edgeCalculator: EdgeCalculatorService,
     private readonly eventEmitter: EventEmitter2,
     @Inject('IRiskManager') private readonly riskManager: IRiskManager,
+    @Inject(EXECUTION_QUEUE_TOKEN)
+    private readonly executionQueue: IExecutionQueue,
   ) {}
 
   /**
@@ -103,7 +109,8 @@ export class TradingEngineService {
           },
         });
 
-        // STEP 3: Risk Validation (Epic 4)
+        // STEP 3: Risk Pre-filter (cheap pre-screen before execution queue)
+        const approvedOpportunities: RankedOpportunity[] = [];
         for (const opportunity of edgeResult.opportunities) {
           const decision = await this.riskManager.validatePosition(opportunity);
           this.logger.log({
@@ -119,9 +126,42 @@ export class TradingEngineService {
               currentOpenPairs: decision.currentOpenPairs,
             },
           });
+
+          if (decision.approved) {
+            approvedOpportunities.push({
+              opportunity,
+              netEdge: opportunity.netEdge,
+              reservationRequest: {
+                opportunityId: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}:${Date.now()}`,
+                recommendedPositionSizeUsd: new FinancialDecimal(
+                  decision.maxPositionSizeUsd,
+                ),
+                pairId: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}`,
+              },
+            });
+          }
         }
 
-        // STEP 4: Execution (Epic 5)
+        // STEP 4: Sequential Execution via Queue (Story 4.4)
+        if (approvedOpportunities.length > 0) {
+          // Sort by netEdge descending (highest edge first)
+          approvedOpportunities.sort((a, b) =>
+            b.netEdge.minus(a.netEdge).toNumber(),
+          );
+
+          const queueResults = await this.executionQueue.processOpportunities(
+            approvedOpportunities,
+          );
+          this.logger.log({
+            message: `Execution queue processed ${queueResults.length} opportunities`,
+            correlationId: getCorrelationId(),
+            data: {
+              total: queueResults.length,
+              committed: queueResults.filter((r) => r.committed).length,
+              failed: queueResults.filter((r) => !r.committed).length,
+            },
+          });
+        }
 
         const duration = Date.now() - startTime;
         this.logger.log({

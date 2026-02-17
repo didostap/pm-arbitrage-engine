@@ -9,6 +9,7 @@ import { DetectionService } from '../modules/arbitrage-detection/detection.servi
 import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calculator.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FinancialDecimal } from '../common/utils/financial-math';
+import { EXECUTION_QUEUE_TOKEN } from '../modules/execution/execution.constants';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
@@ -55,6 +56,10 @@ describe('TradingEngineService', () => {
     getOpenPositionCount: vi.fn().mockReturnValue(0),
   };
 
+  const mockExecutionQueue = {
+    processOpportunities: vi.fn().mockResolvedValue([]),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,6 +83,10 @@ describe('TradingEngineService', () => {
         {
           provide: 'IRiskManager',
           useValue: mockRiskManager,
+        },
+        {
+          provide: EXECUTION_QUEUE_TOKEN,
+          useValue: mockExecutionQueue,
         },
       ],
     }).compile();

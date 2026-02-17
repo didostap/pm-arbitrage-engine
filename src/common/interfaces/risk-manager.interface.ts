@@ -1,4 +1,9 @@
-import { RiskDecision, RiskExposure } from '../types/risk.type.js';
+import {
+  BudgetReservation,
+  ReservationRequest,
+  RiskDecision,
+  RiskExposure,
+} from '../types/risk.type.js';
 
 export interface IRiskManager {
   /**
@@ -26,4 +31,16 @@ export interface IRiskManager {
     opportunityId: string,
     rationale: string,
   ): Promise<RiskDecision>;
+  /**
+   * Atomically validate budget availability and reserve risk budget for an opportunity.
+   */
+  reserveBudget(request: ReservationRequest): Promise<BudgetReservation>;
+  /**
+   * Commit a reservation — budget permanently allocated to new position.
+   */
+  commitReservation(reservationId: string): Promise<void>;
+  /**
+   * Release a reservation — budget returned to available pool.
+   */
+  releaseReservation(reservationId: string): Promise<void>;
 }

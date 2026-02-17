@@ -88,6 +88,15 @@ export const EVENT_NAMES = {
   /** [Story 4.3] Emitted when operator override is denied (daily loss halt) */
   OVERRIDE_DENIED: 'risk.override.denied',
 
+  /** [Story 4.4] Emitted when risk budget is reserved for an opportunity */
+  BUDGET_RESERVED: 'risk.budget.reserved',
+
+  /** [Story 4.4] Emitted when budget reservation is committed (execution success) */
+  BUDGET_COMMITTED: 'risk.budget.committed',
+
+  /** [Story 4.4] Emitted when budget reservation is released (execution failure) */
+  BUDGET_RELEASED: 'risk.budget.released',
+
   // [All Epics] System Health Events
   /** Emitted when critical system health issue detected (database failure, etc.) */
   SYSTEM_HEALTH_CRITICAL: 'system.health.critical',

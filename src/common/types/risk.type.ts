@@ -25,3 +25,32 @@ export interface RiskConfig {
   maxOpenPairs: number;
   dailyLossPct: number;
 }
+
+export interface ReservationRequest {
+  opportunityId: string;
+  recommendedPositionSizeUsd: Decimal;
+  pairId: string;
+}
+
+export interface BudgetReservation {
+  reservationId: string;
+  opportunityId: string;
+  reservedPositionSlots: number;
+  reservedCapitalUsd: Decimal;
+  correlationExposure: Decimal;
+  createdAt: Date;
+}
+
+export interface RankedOpportunity {
+  opportunity: unknown;
+  netEdge: Decimal;
+  reservationRequest: ReservationRequest;
+}
+
+export interface ExecutionQueueResult {
+  opportunityId: string;
+  reserved: boolean;
+  executed: boolean;
+  committed: boolean;
+  error?: string;
+}

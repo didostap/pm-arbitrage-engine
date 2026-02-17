@@ -5,6 +5,8 @@ import { Cron } from '@nestjs/schedule';
 import Decimal from 'decimal.js';
 import { IRiskManager } from '../../common/interfaces/risk-manager.interface';
 import {
+  BudgetReservation,
+  ReservationRequest,
   RiskConfig,
   RiskDecision,
   RiskExposure,
@@ -16,9 +18,17 @@ import {
   LimitBreachedEvent,
   OverrideAppliedEvent,
   OverrideDeniedEvent,
+  BudgetReservedEvent,
+  BudgetCommittedEvent,
+  BudgetReleasedEvent,
 } from '../../common/events';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PrismaService } from '../../common/prisma.service';
+import {
+  RiskLimitError,
+  RISK_ERROR_CODES,
+} from '../../common/errors/risk-limit-error';
+import { randomUUID } from 'crypto';
 
 const HALT_REASONS = {
   DAILY_LOSS_LIMIT: 'daily_loss_limit',
@@ -36,6 +46,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   private haltReason: HaltReason = null;
   private dailyLossApproachEmitted = false;
   private lastResetTimestamp: Date | null = null;
+  private reservations = new Map<string, BudgetReservation>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -46,6 +57,30 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   async onModuleInit(): Promise<void> {
     this.validateConfig();
     await this.initializeStateFromDb();
+    await this.clearStaleReservations();
+  }
+
+  private async clearStaleReservations(): Promise<void> {
+    this.reservations.clear();
+    try {
+      await this.prisma.riskState.updateMany({
+        where: { singletonKey: 'default' },
+        data: {
+          reservedCapital: '0',
+          reservedPositionSlots: 0,
+        },
+      });
+      this.logger.log({
+        message: 'Stale reservations cleared on startup',
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to clear stale reservations on startup',
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private validateConfig(): void {
@@ -197,6 +232,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
   private async persistState(): Promise<void> {
     try {
+      const reservedPositionSlots = this.getReservedPositionSlots();
+      const reservedCapital = this.getReservedCapital().toFixed();
       await this.prisma.riskState.upsert({
         where: { singletonKey: 'default' },
         update: {
@@ -206,6 +243,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           lastResetTimestamp: this.lastResetTimestamp,
           tradingHalted: this.tradingHalted,
           haltReason: this.haltReason,
+          reservedCapital,
+          reservedPositionSlots,
         },
         create: {
           singletonKey: 'default',
@@ -215,6 +254,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           lastResetTimestamp: this.lastResetTimestamp,
           tradingHalted: this.tradingHalted,
           haltReason: this.haltReason,
+          reservedCapital,
+          reservedPositionSlots,
         },
       });
     } catch (error) {
@@ -247,18 +288,44 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       this.config.bankrollUsd,
     ).mul(new FinancialDecimal(this.config.maxPositionPct));
 
-    // Check max open pairs limit
-    if (this.openPositionCount >= this.config.maxOpenPairs) {
+    // Check max open pairs limit (including reserved slots)
+    const effectiveOpenPairs =
+      this.openPositionCount + this.getReservedPositionSlots();
+    if (effectiveOpenPairs >= this.config.maxOpenPairs) {
       this.logger.warn({
         message: 'Opportunity rejected: max open pairs exceeded',
         data: {
           currentOpenPairs: this.openPositionCount,
+          reservedSlots: this.getReservedPositionSlots(),
           maxOpenPairs: this.config.maxOpenPairs,
         },
       });
       return Promise.resolve({
         approved: false,
-        reason: `Max open pairs limit reached (${this.openPositionCount}/${this.config.maxOpenPairs})`,
+        reason: `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
+        maxPositionSizeUsd,
+        currentOpenPairs: this.openPositionCount,
+      });
+    }
+
+    // Check available capital (including reserved capital) — cheap pre-screen
+    const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
+    const reservedCapital = this.getReservedCapital();
+    const availableCapital = new FinancialDecimal(
+      bankrollUsd.minus(this.totalCapitalDeployed).minus(reservedCapital),
+    );
+    if (availableCapital.lt(maxPositionSizeUsd)) {
+      this.logger.warn({
+        message: 'Opportunity rejected: insufficient available capital',
+        data: {
+          availableCapital: availableCapital.toString(),
+          requiredCapital: maxPositionSizeUsd.toString(),
+          reservedCapital: reservedCapital.toString(),
+        },
+      });
+      return Promise.resolve({
+        approved: false,
+        reason: `Insufficient available capital (${availableCapital.toFixed(2)} < ${maxPositionSizeUsd.toFixed(2)})`,
         maxPositionSizeUsd,
         currentOpenPairs: this.openPositionCount,
       });
@@ -266,9 +333,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
     // Check if approaching limit (80% threshold)
     const approachThreshold = Math.floor(this.config.maxOpenPairs * 0.8);
-    if (this.openPositionCount >= approachThreshold) {
-      const percentUsed =
-        (this.openPositionCount / this.config.maxOpenPairs) * 100;
+    if (effectiveOpenPairs >= approachThreshold) {
+      const percentUsed = (effectiveOpenPairs / this.config.maxOpenPairs) * 100;
       this.eventEmitter.emit(
         EVENT_NAMES.LIMIT_APPROACHED,
         new LimitApproachedEvent(
@@ -289,8 +355,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   private determineRejectionReason(): string | null {
-    if (this.openPositionCount >= this.config.maxOpenPairs) {
-      return `Max open pairs limit reached (${this.openPositionCount}/${this.config.maxOpenPairs})`;
+    const effectiveOpenPairs =
+      this.openPositionCount + this.getReservedPositionSlots();
+    if (effectiveOpenPairs >= this.config.maxOpenPairs) {
+      return `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`;
     }
     // Position sizing is always a potential rejection for override context
     return 'Position sizing limit';
@@ -491,11 +559,16 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     const dailyLossLimitUsd = new FinancialDecimal(this.config.bankrollUsd).mul(
       new FinancialDecimal(this.config.dailyLossPct),
     );
+    const reserved: Decimal = this.getReservedCapital();
     return {
-      openPairCount: this.openPositionCount,
-      totalCapitalDeployed: this.totalCapitalDeployed,
+      openPairCount: this.openPositionCount + this.getReservedPositionSlots(),
+      totalCapitalDeployed: new FinancialDecimal(
+        this.totalCapitalDeployed.add(reserved),
+      ),
       bankrollUsd,
-      availableCapital: bankrollUsd.minus(this.totalCapitalDeployed),
+      availableCapital: new FinancialDecimal(
+        bankrollUsd.minus(this.totalCapitalDeployed).minus(reserved),
+      ),
       dailyPnl: this.dailyPnl,
       dailyLossLimitUsd,
     };
@@ -503,5 +576,190 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
   getOpenPositionCount(): number {
     return this.openPositionCount;
+  }
+
+  async reserveBudget(request: ReservationRequest): Promise<BudgetReservation> {
+    // Check halt
+    if (this.tradingHalted) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        'Budget reservation failed: trading halted',
+        'error',
+        'budget_reservation',
+        0,
+        0,
+      );
+    }
+
+    const maxPositionSizeUsd = new FinancialDecimal(
+      this.config.bankrollUsd,
+    ).mul(new FinancialDecimal(this.config.maxPositionPct));
+
+    // Use the lesser of recommended size and config max — avoid over-reserving
+    const reserveAmount = request.recommendedPositionSizeUsd.lte(
+      maxPositionSizeUsd,
+    )
+      ? new FinancialDecimal(request.recommendedPositionSizeUsd)
+      : maxPositionSizeUsd;
+
+    // Check max open pairs (including reserved slots)
+    const effectiveOpenPairs =
+      this.openPositionCount + this.getReservedPositionSlots();
+    if (effectiveOpenPairs >= this.config.maxOpenPairs) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        `Budget reservation failed: max open pairs reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
+        'error',
+        'budget_reservation',
+        effectiveOpenPairs,
+        this.config.maxOpenPairs,
+      );
+    }
+
+    // Check available capital (including reserved capital)
+    const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
+    const availableCapital = new FinancialDecimal(
+      bankrollUsd
+        .minus(this.totalCapitalDeployed)
+        .minus(this.getReservedCapital()),
+    );
+    if (availableCapital.lt(reserveAmount)) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        'Budget reservation failed: insufficient available capital',
+        'error',
+        'budget_reservation',
+        availableCapital.toNumber(),
+        reserveAmount.toNumber(),
+      );
+    }
+
+    const reservation: BudgetReservation = {
+      reservationId: randomUUID(),
+      opportunityId: request.opportunityId,
+      reservedPositionSlots: 1,
+      reservedCapitalUsd: reserveAmount,
+      correlationExposure: new FinancialDecimal(0),
+      createdAt: new Date(),
+    };
+
+    this.reservations.set(reservation.reservationId, reservation);
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.BUDGET_RESERVED,
+      new BudgetReservedEvent(
+        reservation.reservationId,
+        reservation.opportunityId,
+        reservation.reservedCapitalUsd.toString(),
+      ),
+    );
+
+    this.logger.log({
+      message: 'Budget reserved for opportunity',
+      data: {
+        reservationId: reservation.reservationId,
+        opportunityId: request.opportunityId,
+        reservedCapitalUsd: maxPositionSizeUsd.toString(),
+      },
+    });
+
+    await this.persistState();
+    return reservation;
+  }
+
+  async commitReservation(reservationId: string): Promise<void> {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        `Cannot commit reservation: ${reservationId} not found`,
+        'error',
+        'budget_reservation',
+        0,
+        0,
+      );
+    }
+
+    // Move reservation to permanent state
+    this.openPositionCount += reservation.reservedPositionSlots;
+    this.totalCapitalDeployed = new FinancialDecimal(
+      this.totalCapitalDeployed.add(
+        new FinancialDecimal(reservation.reservedCapitalUsd),
+      ),
+    );
+    this.reservations.delete(reservationId);
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.BUDGET_COMMITTED,
+      new BudgetCommittedEvent(
+        reservationId,
+        reservation.opportunityId,
+        reservation.reservedCapitalUsd.toString(),
+      ),
+    );
+
+    this.logger.log({
+      message: 'Budget reservation committed',
+      data: {
+        reservationId,
+        opportunityId: reservation.opportunityId,
+        newOpenPositionCount: this.openPositionCount,
+        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+      },
+    });
+
+    await this.persistState();
+  }
+
+  async releaseReservation(reservationId: string): Promise<void> {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        `Cannot release reservation: ${reservationId} not found`,
+        'error',
+        'budget_reservation',
+        0,
+        0,
+      );
+    }
+
+    this.reservations.delete(reservationId);
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.BUDGET_RELEASED,
+      new BudgetReleasedEvent(
+        reservationId,
+        reservation.opportunityId,
+        reservation.reservedCapitalUsd.toString(),
+      ),
+    );
+
+    this.logger.log({
+      message: 'Budget reservation released',
+      data: {
+        reservationId,
+        opportunityId: reservation.opportunityId,
+        releasedCapitalUsd: reservation.reservedCapitalUsd.toString(),
+      },
+    });
+
+    await this.persistState();
+  }
+
+  private getReservedPositionSlots(): number {
+    let total = 0;
+    for (const reservation of this.reservations.values()) {
+      total += reservation.reservedPositionSlots;
+    }
+    return total;
+  }
+
+  private getReservedCapital(): Decimal {
+    let total: Decimal = new FinancialDecimal(0);
+    for (const reservation of this.reservations.values()) {
+      total = total.add(new FinancialDecimal(reservation.reservedCapitalUsd));
+    }
+    return total;
   }
 }

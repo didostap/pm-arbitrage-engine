@@ -100,6 +100,7 @@ describe('RiskManagerService', () => {
     riskState: {
       findFirst: ReturnType<typeof vi.fn>;
       upsert: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
     riskOverrideLog: {
       create: ReturnType<typeof vi.fn>;
@@ -131,6 +132,7 @@ describe('RiskManagerService', () => {
       riskState: {
         findFirst: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       riskOverrideLog: {
         create: vi.fn().mockResolvedValue({}),
@@ -857,6 +859,243 @@ describe('RiskManagerService', () => {
       );
       // bankrollUsd (10000) * maxPositionPct (0.03) = 300
       expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+    });
+  });
+
+  describe('budget reservation', () => {
+    const makeReservationRequest = (overrides?: Record<string, unknown>) => ({
+      opportunityId: 'opp-1',
+      recommendedPositionSizeUsd: new FinancialDecimal(300),
+      pairId: 'pair-1',
+      ...overrides,
+    });
+
+    it('should reserve budget when budget is available', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+      expect(reservation).toBeDefined();
+      expect(reservation.reservationId).toBeDefined();
+      expect(reservation.opportunityId).toBe('opp-1');
+      expect(reservation.reservedPositionSlots).toBe(1);
+      // maxPositionSizeUsd = 10000 * 0.03 = 300
+      expect(reservation.reservedCapitalUsd.toNumber()).toBe(300);
+      expect(reservation.correlationExposure.toNumber()).toBe(0);
+    });
+
+    it('should emit BUDGET_RESERVED event on successful reservation', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.BUDGET_RESERVED,
+        expect.objectContaining({
+          reservationId: reservation.reservationId,
+          opportunityId: 'opp-1',
+        }),
+      );
+    });
+
+    it('should fail reservation when trading is halted', async () => {
+      // Halt trading via large loss
+      await service.updateDailyPnl(new FinancialDecimal(-600));
+
+      await expect(
+        service.reserveBudget(makeReservationRequest()),
+      ).rejects.toThrow(RiskLimitError);
+    });
+
+    it('should fail reservation when max open pairs reached (including reserved slots)', async () => {
+      // Config: maxOpenPairs=10, bankroll=10000, maxPositionPct=0.03 → maxPositionSize=300
+      // Fill 9 real positions
+      (service as any).openPositionCount = 9;
+
+      // Reserve one slot → effective = 10
+      await service.reserveBudget(
+        makeReservationRequest({ opportunityId: 'opp-fill' }),
+      );
+
+      // Next reservation should fail
+      await expect(
+        service.reserveBudget(
+          makeReservationRequest({ opportunityId: 'opp-overflow' }),
+        ),
+      ).rejects.toThrow(RiskLimitError);
+    });
+
+    it('should fail reservation when insufficient capital after existing reservations', async () => {
+      // bankroll=10000, need to exhaust capital via reservations
+      // Each reservation takes 300 (10000 * 0.03)
+      // But maxOpenPairs=10 so we can only have 10 slots
+      // Let's increase bankroll scenario: set open capital very low
+      (service as any).totalCapitalDeployed = new FinancialDecimal(9800);
+
+      await expect(
+        service.reserveBudget(makeReservationRequest()),
+      ).rejects.toThrow(RiskLimitError);
+    });
+
+    it('should reduce available budget for subsequent validatePosition calls', async () => {
+      // maxOpenPairs=10, openPositionCount=9
+      (service as any).openPositionCount = 9;
+
+      // Reserve 1 slot → effective = 10
+      await service.reserveBudget(makeReservationRequest());
+
+      // validatePosition should now reject (effective 10/10)
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+      );
+      expect(decision.approved).toBe(false);
+    });
+
+    it('should commit reservation and convert to permanent state', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+
+      const prevCount = (service as any).openPositionCount;
+      const prevCapital = (service as any).totalCapitalDeployed;
+
+      await service.commitReservation(reservation.reservationId);
+
+      expect((service as any).openPositionCount).toBe(prevCount + 1);
+      expect((service as any).totalCapitalDeployed.toNumber()).toBe(
+        prevCapital.add(new FinancialDecimal(300)).toNumber(),
+      );
+    });
+
+    it('should emit BUDGET_COMMITTED event on commit', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+      mockEventEmitter.emit.mockClear();
+
+      await service.commitReservation(reservation.reservationId);
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.BUDGET_COMMITTED,
+        expect.objectContaining({
+          reservationId: reservation.reservationId,
+        }),
+      );
+    });
+
+    it('should throw when committing invalid reservation ID', async () => {
+      await expect(service.commitReservation('non-existent')).rejects.toThrow(
+        RiskLimitError,
+      );
+    });
+
+    it('should release reservation and return budget to pool', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+
+      await service.releaseReservation(reservation.reservationId);
+
+      // After release, validatePosition should approve again (assuming open count still allows)
+      const exposure = service.getCurrentExposure();
+      // No more reserved capital
+      expect(exposure.availableCapital.toNumber()).toBe(10000);
+    });
+
+    it('should emit BUDGET_RELEASED event on release', async () => {
+      const reservation = await service.reserveBudget(makeReservationRequest());
+      mockEventEmitter.emit.mockClear();
+
+      await service.releaseReservation(reservation.reservationId);
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.BUDGET_RELEASED,
+        expect.objectContaining({
+          reservationId: reservation.reservationId,
+        }),
+      );
+    });
+
+    it('should throw when releasing invalid reservation ID', async () => {
+      await expect(service.releaseReservation('non-existent')).rejects.toThrow(
+        RiskLimitError,
+      );
+    });
+
+    it('should track multiple concurrent reservations correctly', async () => {
+      const r1 = await service.reserveBudget(
+        makeReservationRequest({ opportunityId: 'opp-1' }),
+      );
+      const r2 = await service.reserveBudget(
+        makeReservationRequest({ opportunityId: 'opp-2' }),
+      );
+
+      const exposure = service.getCurrentExposure();
+      // 2 reserved slots, 600 reserved capital
+      expect(exposure.openPairCount).toBe(2);
+      expect(exposure.totalCapitalDeployed.toNumber()).toBe(600);
+      expect(exposure.availableCapital.toNumber()).toBe(10000 - 600);
+
+      // Release one
+      await service.releaseReservation(r1.reservationId);
+      const exposure2 = service.getCurrentExposure();
+      expect(exposure2.openPairCount).toBe(1);
+      expect(exposure2.availableCapital.toNumber()).toBe(10000 - 300);
+
+      // Commit the other
+      await service.commitReservation(r2.reservationId);
+      expect((service as any).openPositionCount).toBe(1);
+    });
+
+    it('should include reservation totals in getCurrentExposure', async () => {
+      await service.reserveBudget(makeReservationRequest());
+
+      const exposure = service.getCurrentExposure();
+      expect(exposure.openPairCount).toBe(1); // 0 open + 1 reserved
+      expect(exposure.totalCapitalDeployed.toNumber()).toBe(300); // 0 deployed + 300 reserved
+      expect(exposure.availableCapital.toNumber()).toBe(10000 - 300);
+    });
+
+    it('should clear stale reservations on startup (onModuleInit)', () => {
+      // This is tested implicitly — onModuleInit calls clearStaleReservations
+      // which calls updateMany to reset DB columns
+      expect(mockPrisma.riskState.updateMany).toHaveBeenCalledWith({
+        where: { singletonKey: 'default' },
+        data: {
+          reservedCapital: '0',
+          reservedPositionSlots: 0,
+        },
+      });
+    });
+
+    it('should persist reservation totals in persistState', async () => {
+      await service.reserveBudget(makeReservationRequest());
+
+      // persistState is called internally — check upsert was called with reservation data
+      const lastUpsertCall = mockPrisma.riskState.upsert.mock.calls.at(-1);
+      const updateData = lastUpsertCall?.[0]?.update;
+      expect(updateData).toBeDefined();
+      expect(updateData.reservedCapital).toBe('300');
+      expect(updateData.reservedPositionSlots).toBe(1);
+    });
+
+    it('should reserve recommendedPositionSizeUsd when smaller than config max', async () => {
+      // Config max = 10000 * 0.03 = 300; recommended = 150
+      const reservation = await service.reserveBudget(
+        makeReservationRequest({
+          recommendedPositionSizeUsd: new FinancialDecimal(150),
+        }),
+      );
+      expect(reservation.reservedCapitalUsd.toNumber()).toBe(150);
+    });
+
+    it('should cap reservation at config max when recommended exceeds it', async () => {
+      // Config max = 300; recommended = 500
+      const reservation = await service.reserveBudget(
+        makeReservationRequest({
+          recommendedPositionSizeUsd: new FinancialDecimal(500),
+        }),
+      );
+      expect(reservation.reservedCapitalUsd.toNumber()).toBe(300);
+    });
+
+    it('should reject validatePosition when insufficient capital including reservations', async () => {
+      // Deploy most capital, leaving less than maxPositionSize
+      (service as any).totalCapitalDeployed = new FinancialDecimal(9800);
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toContain('Insufficient available capital');
     });
   });
 });
