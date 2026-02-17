@@ -90,6 +90,8 @@ model RiskState {
   openPositionCount     Int       @default(0) @map("open_position_count")
   lastResetTimestamp    DateTime? @map("last_reset_timestamp") @db.Timestamptz
   totalCapitalDeployed  Decimal   @default(0) @map("total_capital_deployed") @db.Decimal(20, 8)
+  tradingHalted         Boolean   @default(false) @map("trading_halted")
+  haltReason            String?   @map("halt_reason")
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 

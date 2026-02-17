@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
 import { EngineLifecycleService } from './engine-lifecycle.service';
 import { TradingEngineService } from './trading-engine.service';
 import { SchedulerService } from './scheduler.service';
@@ -13,7 +12,6 @@ import { RiskManagementModule } from '../modules/risk-management/risk-management
  */
 @Module({
   imports: [
-    ScheduleModule.forRoot(), // Required for scheduler functionality
     DataIngestionModule, // Provides DataIngestionService for TradingEngineService
     ArbitrageDetectionModule, // Provides DetectionService for TradingEngineService
     RiskManagementModule, // Provides IRiskManager for TradingEngineService

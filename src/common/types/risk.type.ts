@@ -5,6 +5,7 @@ export interface RiskDecision {
   reason: string;
   maxPositionSizeUsd: Decimal;
   currentOpenPairs: number;
+  dailyPnl?: Decimal;
 }
 
 export interface RiskExposure {
@@ -12,10 +13,13 @@ export interface RiskExposure {
   totalCapitalDeployed: Decimal;
   bankrollUsd: Decimal;
   availableCapital: Decimal;
+  dailyPnl: Decimal;
+  dailyLossLimitUsd: Decimal;
 }
 
 export interface RiskConfig {
   bankrollUsd: number;
   maxPositionPct: number;
   maxOpenPairs: number;
+  dailyLossPct: number;
 }

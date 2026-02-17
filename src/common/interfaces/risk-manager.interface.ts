@@ -8,4 +8,13 @@ export interface IRiskManager {
   validatePosition(opportunity: unknown): Promise<RiskDecision>;
   getCurrentExposure(): RiskExposure;
   getOpenPositionCount(): number;
+  /**
+   * Update daily P&L with a realized profit/loss delta.
+   * @param pnlDelta - Decimal amount (positive = gain, negative = loss)
+   */
+  updateDailyPnl(pnlDelta: unknown): Promise<void>;
+  /**
+   * Check if trading is currently halted.
+   */
+  isTradingHalted(): boolean;
 }
