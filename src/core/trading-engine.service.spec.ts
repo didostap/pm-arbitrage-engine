@@ -8,6 +8,7 @@ import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.s
 import { DetectionService } from '../modules/arbitrage-detection/detection.service';
 import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calculator.service';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { FinancialDecimal } from '../common/utils/financial-math';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
@@ -43,6 +44,17 @@ describe('TradingEngineService', () => {
     emit: vi.fn(),
   };
 
+  const mockRiskManager = {
+    validatePosition: vi.fn().mockResolvedValue({
+      approved: true,
+      reason: 'Position within risk limits',
+      maxPositionSizeUsd: new FinancialDecimal(300),
+      currentOpenPairs: 0,
+    }),
+    getCurrentExposure: vi.fn(),
+    getOpenPositionCount: vi.fn().mockReturnValue(0),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -62,6 +74,10 @@ describe('TradingEngineService', () => {
         {
           provide: EventEmitter2,
           useValue: mockEventEmitter,
+        },
+        {
+          provide: 'IRiskManager',
+          useValue: mockRiskManager,
         },
       ],
     }).compile();
@@ -155,6 +171,72 @@ describe('TradingEngineService', () => {
       const duration = Date.now() - startTime;
 
       expect(duration).toBeLessThan(100); // Should resolve quickly
+    });
+  });
+
+  describe('risk validation integration', () => {
+    it('should call validatePosition for each opportunity', async () => {
+      const mockOpportunity = {
+        dislocation: {
+          pairConfig: {
+            polymarketContractId: 'poly-1',
+            kalshiContractId: 'kalshi-1',
+          },
+        },
+        netEdge: new FinancialDecimal(0.05),
+      };
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpportunity, mockOpportunity],
+        filtered: [],
+        summary: {
+          totalInput: 2,
+          totalFiltered: 0,
+          totalActionable: 2,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+
+      await service.executeCycle();
+      expect(mockRiskManager.validatePosition).toHaveBeenCalledTimes(2);
+    });
+
+    it('should log approved and rejected decisions separately', async () => {
+      const mockOpportunity = {
+        dislocation: {
+          pairConfig: {
+            polymarketContractId: 'poly-1',
+            kalshiContractId: 'kalshi-1',
+          },
+        },
+        netEdge: new FinancialDecimal(0.05),
+      };
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpportunity],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+      mockRiskManager.validatePosition.mockResolvedValueOnce({
+        approved: false,
+        reason: 'Max open pairs limit reached',
+        maxPositionSizeUsd: new FinancialDecimal(300),
+        currentOpenPairs: 10,
+      });
+
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.executeCycle();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('Opportunity rejected'),
+        }),
+      );
     });
   });
 

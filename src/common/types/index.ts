@@ -12,3 +12,4 @@ export type {
   PriceLevel,
 } from './normalized-order-book.type.js';
 export type { DriftResult } from './ntp.type.js';
+export type { RiskDecision, RiskExposure, RiskConfig } from './risk.type.js';

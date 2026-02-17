@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
@@ -13,6 +13,7 @@ import {
   TimeHaltEvent,
   TradingHaltedEvent,
 } from '../common/events';
+import { type IRiskManager } from '../common/interfaces/risk-manager.interface';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -31,6 +32,7 @@ export class TradingEngineService {
     private readonly detectionService: DetectionService,
     private readonly edgeCalculator: EdgeCalculatorService,
     private readonly eventEmitter: EventEmitter2,
+    @Inject('IRiskManager') private readonly riskManager: IRiskManager,
   ) {}
 
   /**
@@ -102,6 +104,23 @@ export class TradingEngineService {
         });
 
         // STEP 3: Risk Validation (Epic 4)
+        for (const opportunity of edgeResult.opportunities) {
+          const decision = await this.riskManager.validatePosition(opportunity);
+          this.logger.log({
+            message: decision.approved
+              ? 'Opportunity approved by risk manager'
+              : `Opportunity rejected: ${decision.reason}`,
+            correlationId: getCorrelationId(),
+            data: {
+              pair: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}`,
+              netEdge: opportunity.netEdge.toString(),
+              approved: decision.approved,
+              maxPositionSizeUsd: decision.maxPositionSizeUsd.toString(),
+              currentOpenPairs: decision.currentOpenPairs,
+            },
+          });
+        }
+
         // STEP 4: Execution (Epic 5)
 
         const duration = Date.now() - startTime;

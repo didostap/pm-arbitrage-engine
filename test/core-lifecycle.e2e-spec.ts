@@ -7,6 +7,11 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma.service';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// Risk management env vars required by RiskManagerService.onModuleInit
+process.env.RISK_BANKROLL_USD = '10000';
+process.env.RISK_MAX_POSITION_PCT = '0.03';
+process.env.RISK_MAX_OPEN_PAIRS = '10';
+
 /**
  * End-to-end test for complete engine lifecycle:
  * startup → polling cycle → graceful shutdown
@@ -22,6 +27,21 @@ describe('Core Lifecycle (e2e)', () => {
       $disconnect: vi.fn().mockResolvedValue(undefined),
       onModuleInit: vi.fn().mockResolvedValue(undefined),
       onModuleDestroy: vi.fn().mockResolvedValue(undefined),
+      riskState: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      platformHealthLog: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      orderBookSnapshot: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      contractMatch: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -72,6 +92,21 @@ describe('Core Lifecycle (e2e)', () => {
       $disconnect: vi.fn().mockResolvedValue(undefined),
       onModuleInit: vi.fn().mockResolvedValue(undefined),
       onModuleDestroy: vi.fn().mockResolvedValue(undefined),
+      riskState: {
+        findFirst: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      platformHealthLog: {
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      orderBookSnapshot: {
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      contractMatch: {
+        findUnique: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
     };
 
     const failingModule = await Test.createTestingModule({
