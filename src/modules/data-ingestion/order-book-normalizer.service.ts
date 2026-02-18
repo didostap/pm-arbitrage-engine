@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   NormalizedOrderBook,
   PriceLevel,
-} from '../../common/types/normalized-order-book.type';
-import { PlatformId } from '../../common/types/platform.type';
+} from '../../common/types/normalized-order-book.type.js';
+import { PlatformId } from '../../common/types/platform.type.js';
+import { normalizeKalshiLevels } from '../../common/utils/index.js';
 import type { KalshiOrderBook } from '../../connectors/kalshi/kalshi-websocket.client';
 import type { PolymarketOrderBookMessage } from '../../connectors/polymarket/polymarket.types';
 
@@ -23,23 +24,9 @@ export class OrderBookNormalizerService {
   normalize(kalshiBook: KalshiOrderBook): NormalizedOrderBook | null {
     const startTime = Date.now();
 
-    // 1. Transform YES bids (already in correct format)
-    const bids: PriceLevel[] = kalshiBook.yes.map(([priceCents, qty]) => ({
-      price: priceCents / 100, // 60¢ → 0.60
-      quantity: qty,
-    }));
+    const { bids, asks } = normalizeKalshiLevels(kalshiBook.yes, kalshiBook.no);
 
-    // 2. Transform NO bids to YES asks
-    // NO bid at 35¢ = someone will sell YES at 65¢ (1 - 0.35)
-    const asks: PriceLevel[] = kalshiBook.no.map(([priceCents, qty]) => ({
-      price: 1 - priceCents / 100, // NO 35¢ → YES ask 0.65
-      quantity: qty,
-    }));
-
-    // 3. Sort asks ascending (lowest ask first)
-    asks.sort((a, b) => a.price - b.price);
-
-    // 4. Validate all prices in 0-1 range
+    // Validate all prices in 0-1 range
     const allLevels = [...bids, ...asks];
     for (const level of allLevels) {
       if (level.price < 0 || level.price > 1) {
@@ -53,7 +40,7 @@ export class OrderBookNormalizerService {
       }
     }
 
-    // 5. Check for crossed market (best bid > best ask)
+    // Check for crossed market (best bid > best ask)
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (
@@ -150,7 +137,7 @@ export class OrderBookNormalizerService {
       }
     }
 
-    // 5. Check for crossed market (best bid > best ask)
+    // Check for crossed market (best bid > best ask)
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (

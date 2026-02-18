@@ -18,7 +18,7 @@ import {
   PlatformApiError,
   RETRY_STRATEGIES,
 } from '../../common/errors/index.js';
-import { withRetry } from '../../common/utils/index.js';
+import { withRetry, normalizeKalshiLevels } from '../../common/utils/index.js';
 import { RateLimiter } from '../../common/utils/rate-limiter.js';
 import { KalshiWebSocketClient } from './kalshi-websocket.client.js';
 
@@ -140,24 +140,14 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       this.lastHeartbeat = new Date();
       const orderbook = response.data.orderbook;
 
-      // Normalize: convert cents to decimal, transform NO bids to YES asks
-      const yesBids = orderbook?.true ?? [];
-      const noBids = orderbook?.false ?? [];
-
-      // YES bids → bids (convert cents to decimal)
-      const bids = yesBids.map(([priceCents, quantity]: number[]) => ({
-        price: (priceCents ?? 0) / 100, // 60¢ → 0.60
-        quantity: quantity ?? 0,
-      }));
-
-      // NO bids → asks (invert and convert: NO 35¢ → YES ask 0.65)
-      const asks = noBids.map(([priceCents, quantity]: number[]) => ({
-        price: 1 - (priceCents ?? 0) / 100,
-        quantity: quantity ?? 0,
-      }));
-
-      // Sort asks ascending
-      asks.sort((a, b) => a.price - b.price);
+      // Null-guard SDK response before passing to shared utility
+      const yesBids: [number, number][] = (orderbook?.true ?? []).map(
+        ([p, q]: number[]) => [p ?? 0, q ?? 0],
+      );
+      const noBids: [number, number][] = (orderbook?.false ?? []).map(
+        ([p, q]: number[]) => [p ?? 0, q ?? 0],
+      );
+      const { bids, asks } = normalizeKalshiLevels(yesBids, noBids);
 
       return {
         platformId: PlatformId.KALSHI,

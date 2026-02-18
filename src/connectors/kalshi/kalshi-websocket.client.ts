@@ -1,12 +1,9 @@
 import { Logger } from '@nestjs/common';
 import { createSign, constants as cryptoConstants } from 'crypto';
 import WebSocket from 'ws';
-import {
-  NormalizedOrderBook,
-  PlatformId,
-  PriceLevel,
-} from '../../common/types/index.js';
+import { NormalizedOrderBook, PlatformId } from '../../common/types/index.js';
 import { RETRY_STRATEGIES } from '../../common/errors/index.js';
+import { normalizeKalshiLevels } from '../../common/utils/index.js';
 import type {
   KalshiOrderbookDeltaMsg,
   KalshiOrderbookSnapshotMsg,
@@ -283,21 +280,7 @@ export class KalshiWebSocketClient {
   }
 
   private emitUpdate(ticker: string, state: LocalOrderbookState): void {
-    // Transform YES bids: convert cents to decimal
-    const bids: PriceLevel[] = state.yes.map(([priceCents, qty]) => ({
-      price: priceCents / 100, // 60¢ → 0.60
-      quantity: qty,
-    }));
-
-    // Transform NO bids to YES asks: invert and convert to decimal
-    // NO bid at 35¢ = someone will sell YES at 65¢ (1 - 0.35)
-    const asks: PriceLevel[] = state.no.map(([priceCents, qty]) => ({
-      price: 1 - priceCents / 100, // NO 35¢ → YES ask 0.65
-      quantity: qty,
-    }));
-
-    // Sort asks ascending (lowest ask first)
-    asks.sort((a, b) => a.price - b.price);
+    const { bids, asks } = normalizeKalshiLevels(state.yes, state.no);
 
     const normalized: NormalizedOrderBook = {
       platformId: PlatformId.KALSHI,
