@@ -132,6 +132,82 @@ describe('TradingEngineService', () => {
       );
     });
 
+    it('should include stageDurations in cycle-complete log', async () => {
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.executeCycle();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('Trading cycle completed'),
+          data: expect.objectContaining({
+            cycle: 'complete',
+            durationMs: expect.any(Number),
+            stageDurations: expect.objectContaining({
+              ingestionMs: expect.any(Number),
+              detectionMs: expect.any(Number),
+              edgeCalculationMs: expect.any(Number),
+              riskValidationMs: expect.any(Number),
+              executionQueueMs: expect.any(Number),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('should log durationMs for each pipeline stage', async () => {
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.executeCycle();
+
+      const expectedStages = [
+        'data-ingestion',
+        'detection',
+        'edge-calculation',
+        'risk-validation',
+        'execution-queue',
+      ];
+
+      for (const stage of expectedStages) {
+        expect(logSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              stage,
+              durationMs: expect.any(Number),
+            }),
+          }),
+        );
+      }
+    });
+
+    it('should have numeric durationMs values >= 0 in stageDurations', async () => {
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.executeCycle();
+
+      const cycleCompleteCall = logSpy.mock.calls.find((call) => {
+        const entry = call[0] as Record<string, unknown> | undefined;
+        const data = entry?.data as Record<string, unknown> | undefined;
+        return data?.cycle === 'complete';
+      });
+
+      expect(cycleCompleteCall).toBeDefined();
+
+      const logEntry = cycleCompleteCall![0] as {
+        data: { stageDurations: Record<string, number> };
+      };
+      const { stageDurations } = logEntry.data;
+
+      expect(typeof stageDurations.ingestionMs).toBe('number');
+      expect(typeof stageDurations.detectionMs).toBe('number');
+      expect(typeof stageDurations.edgeCalculationMs).toBe('number');
+      expect(typeof stageDurations.riskValidationMs).toBe('number');
+      expect(typeof stageDurations.executionQueueMs).toBe('number');
+
+      expect(stageDurations.ingestionMs).toBeGreaterThanOrEqual(0);
+      expect(stageDurations.detectionMs).toBeGreaterThanOrEqual(0);
+      expect(stageDurations.edgeCalculationMs).toBeGreaterThanOrEqual(0);
+      expect(stageDurations.riskValidationMs).toBeGreaterThanOrEqual(0);
+      expect(stageDurations.executionQueueMs).toBeGreaterThanOrEqual(0);
+    });
+
     it('should handle errors gracefully', async () => {
       // Mock data ingestion to throw an error
       mockDataIngestionService.ingestCurrentOrderBooks.mockRejectedValueOnce(

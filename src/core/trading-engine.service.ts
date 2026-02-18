@@ -76,13 +76,30 @@ export class TradingEngineService {
           },
         });
 
+        // Stage timing accumulators
+        let ingestionMs = 0;
+        let detectionMs = 0;
+        let edgeCalculationMs = 0;
+        let riskValidationMs = 0;
+        let executionQueueMs = 0;
+
         // STEP 1: Data Ingestion (Story 1.4)
         // NOTE: WebSocket updates run in parallel to this polling path for real-time data
+        const ingestionStart = Date.now();
         await this.dataIngestionService.ingestCurrentOrderBooks();
+        ingestionMs = Date.now() - ingestionStart;
+        this.logger.log({
+          message: `Data ingestion completed in ${ingestionMs}ms`,
+          correlationId: getCorrelationId(),
+          module: 'core',
+          data: { stage: 'data-ingestion', durationMs: ingestionMs },
+        });
 
         // STEP 2: Arbitrage Detection (Epic 3)
+        const detectionStart = Date.now();
         const detectionResult =
           await this.detectionService.detectDislocations();
+        detectionMs = Date.now() - detectionStart;
         this.logger.log({
           message: `Detection: ${detectionResult.dislocations.length} dislocations found`,
           correlationId: getCorrelationId(),
@@ -93,11 +110,19 @@ export class TradingEngineService {
             durationMs: detectionResult.cycleDurationMs,
           },
         });
+        this.logger.log({
+          message: `Detection completed in ${detectionMs}ms`,
+          correlationId: getCorrelationId(),
+          module: 'core',
+          data: { stage: 'detection', durationMs: detectionMs },
+        });
 
         // STEP 2b: Edge Calculation & Opportunity Filtering (Story 3.3)
+        const edgeStart = Date.now();
         const edgeResult = this.edgeCalculator.processDislocations(
           detectionResult.dislocations,
         );
+        edgeCalculationMs = Date.now() - edgeStart;
         this.logger.log({
           message: `Edge calculation: ${edgeResult.summary.totalActionable} actionable opportunities`,
           correlationId: getCorrelationId(),
@@ -108,8 +133,15 @@ export class TradingEngineService {
             durationMs: edgeResult.summary.processingDurationMs,
           },
         });
+        this.logger.log({
+          message: `Edge calculation completed in ${edgeCalculationMs}ms`,
+          correlationId: getCorrelationId(),
+          module: 'core',
+          data: { stage: 'edge-calculation', durationMs: edgeCalculationMs },
+        });
 
         // STEP 3: Risk Pre-filter (cheap pre-screen before execution queue)
+        const riskStart = Date.now();
         const approvedOpportunities: RankedOpportunity[] = [];
         for (const opportunity of edgeResult.opportunities) {
           const decision = await this.riskManager.validatePosition(opportunity);
@@ -141,8 +173,21 @@ export class TradingEngineService {
             });
           }
         }
+        riskValidationMs = Date.now() - riskStart;
+        this.logger.log({
+          message: `Risk validation completed in ${riskValidationMs}ms`,
+          correlationId: getCorrelationId(),
+          module: 'core',
+          data: {
+            stage: 'risk-validation',
+            durationMs: riskValidationMs,
+            opportunitiesEvaluated: edgeResult.opportunities.length,
+            approved: approvedOpportunities.length,
+          },
+        });
 
         // STEP 4: Sequential Execution via Queue (Story 4.4)
+        const executionStart = Date.now();
         if (approvedOpportunities.length > 0) {
           // Sort by netEdge descending (highest edge first)
           approvedOpportunities.sort((a, b) =>
@@ -162,14 +207,32 @@ export class TradingEngineService {
             },
           });
         }
+        executionQueueMs = Date.now() - executionStart;
+        this.logger.log({
+          message: `Execution queue completed in ${executionQueueMs}ms`,
+          correlationId: getCorrelationId(),
+          module: 'core',
+          data: {
+            stage: 'execution-queue',
+            durationMs: executionQueueMs,
+          },
+        });
 
         const duration = Date.now() - startTime;
         this.logger.log({
           message: `Trading cycle completed in ${duration}ms`,
           correlationId: getCorrelationId(),
+          module: 'core',
           data: {
             cycle: 'complete',
             durationMs: duration,
+            stageDurations: {
+              ingestionMs,
+              detectionMs,
+              edgeCalculationMs,
+              riskValidationMs,
+              executionQueueMs,
+            },
           },
         });
       } catch (error) {
