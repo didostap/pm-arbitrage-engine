@@ -43,4 +43,11 @@ export interface IRiskManager {
    * Release a reservation — budget returned to available pool.
    */
   releaseReservation(reservationId: string): Promise<void>;
+  /**
+   * Close a committed position — return capital to pool, decrement position count.
+   * Called when a position transitions to CLOSED.
+   * @param capitalReturned - Decimal amount of capital being returned to the pool
+   * @param pnlDelta - Realized P&L (positive = profit, negative = loss)
+   */
+  closePosition(capitalReturned: unknown, pnlDelta: unknown): Promise<void>;
 }

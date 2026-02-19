@@ -123,7 +123,7 @@ function calcCloseNow(
 }
 
 function calcRetry(
-  filledSide: string,
+  _filledSide: string,
   fillPrice: number,
   secondaryPlatform: string,
   secondarySide: string,

@@ -65,3 +65,25 @@ export class SingleLegExposureEvent extends BaseEvent {
     super(correlationId);
   }
 }
+
+export class SingleLegResolvedEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: string,
+    public readonly pairId: string,
+    public readonly resolutionType: 'retried' | 'closed',
+    public readonly resolvedOrder: {
+      orderId: string;
+      platform: PlatformId;
+      status: string;
+      filledPrice: number;
+      filledQuantity: number;
+    },
+    public readonly originalEdge: number,
+    public readonly newEdge: number | null,
+    public readonly retryPrice: number | null,
+    public readonly realizedPnl: string | null,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}

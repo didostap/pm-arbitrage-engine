@@ -75,6 +75,12 @@ export const EVENT_NAMES = {
   /** [Epic 5] Emitted when only one leg fills within timeout */
   SINGLE_LEG_EXPOSURE: 'execution.single_leg.exposure',
 
+  /** [Story 5.3] Emitted when single-leg exposure is resolved (retried or closed) */
+  SINGLE_LEG_RESOLVED: 'execution.single_leg.resolved',
+
+  /** [Story 5.3] Emitted every 60s for unresolved single-leg positions (re-emission, not counted toward thresholds) */
+  SINGLE_LEG_EXPOSURE_REMINDER: 'execution.single_leg.exposure_reminder',
+
   /** [Epic 5] Emitted when exit threshold is hit (take-profit, stop-loss, time-based) */
   EXIT_TRIGGERED: 'execution.exit.triggered',
 

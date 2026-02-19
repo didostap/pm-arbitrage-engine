@@ -1098,4 +1098,74 @@ describe('RiskManagerService', () => {
       expect(decision.reason).toContain('Insufficient available capital');
     });
   });
+
+  describe('closePosition', () => {
+    it('should decrement open position count', async () => {
+      (service as any).openPositionCount = 3;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+
+      await service.closePosition(
+        new FinancialDecimal(300),
+        new FinancialDecimal(-10),
+      );
+
+      expect(service.getOpenPositionCount()).toBe(2);
+    });
+
+    it('should subtract capital from total deployed', async () => {
+      (service as any).openPositionCount = 2;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+
+      await service.closePosition(
+        new FinancialDecimal(300),
+        new FinancialDecimal(-5),
+      );
+
+      const exposure = service.getCurrentExposure();
+      expect(
+        new FinancialDecimal(exposure.totalCapitalDeployed).toNumber(),
+      ).toBe(700);
+    });
+
+    it('should update daily P&L via updateDailyPnl', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+      (service as any).dailyPnl = new FinancialDecimal(0);
+
+      await service.closePosition(
+        new FinancialDecimal(500),
+        new FinancialDecimal(-20),
+      );
+
+      const exposure = service.getCurrentExposure();
+      expect(new FinancialDecimal(exposure.dailyPnl).toNumber()).toBe(-20);
+    });
+
+    it('should emit BUDGET_RELEASED event', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+
+      await service.closePosition(
+        new FinancialDecimal(500),
+        new FinancialDecimal(0),
+      );
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'risk.budget.released',
+        expect.anything(),
+      );
+    });
+
+    it('should not allow position count to go below 0', async () => {
+      (service as any).openPositionCount = 0;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(0);
+
+      await service.closePosition(
+        new FinancialDecimal(100),
+        new FinancialDecimal(0),
+      );
+
+      expect(service.getOpenPositionCount()).toBe(0);
+    });
+  });
 });

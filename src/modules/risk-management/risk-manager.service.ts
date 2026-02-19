@@ -747,6 +747,44 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState();
   }
 
+  async closePosition(
+    capitalReturned: unknown,
+    pnlDelta: unknown,
+  ): Promise<void> {
+    const capital = new FinancialDecimal(capitalReturned as Decimal);
+    const pnl = new FinancialDecimal(pnlDelta as Decimal);
+
+    this.openPositionCount = Math.max(0, this.openPositionCount - 1);
+    this.totalCapitalDeployed = new FinancialDecimal(
+      this.totalCapitalDeployed.minus(capital),
+    );
+    if (this.totalCapitalDeployed.isNegative()) {
+      this.totalCapitalDeployed = new FinancialDecimal(0);
+    }
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.BUDGET_RELEASED,
+      new BudgetReleasedEvent(
+        'position-close',
+        'position-close',
+        capital.toString(),
+      ),
+    );
+
+    this.logger.log({
+      message: 'Position closed — budget released',
+      data: {
+        capitalReturned: capital.toString(),
+        pnlDelta: pnl.toString(),
+        newOpenPositionCount: this.openPositionCount,
+        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+      },
+    });
+
+    await this.updateDailyPnl(pnl);
+    await this.persistState();
+  }
+
   private getReservedPositionSlots(): number {
     let total = 0;
     for (const reservation of this.reservations.values()) {

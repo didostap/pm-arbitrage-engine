@@ -12,15 +12,21 @@ import { OrderRepository } from '../../persistence/repositories/order.repository
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { PrismaService } from '../../common/prisma.service';
 import { ExposureTrackerService } from './exposure-tracker.service';
+import { SingleLegResolutionService } from './single-leg-resolution.service';
+import { SingleLegResolutionController } from './single-leg-resolution.controller';
+import { ExposureAlertScheduler } from './exposure-alert-scheduler.service';
 
 @Module({
   imports: [RiskManagementModule, ConnectorModule],
+  controllers: [SingleLegResolutionController],
   providers: [
     ExecutionLockService,
     PrismaService,
     OrderRepository,
     PositionRepository,
     ExposureTrackerService,
+    SingleLegResolutionService,
+    ExposureAlertScheduler,
     {
       provide: EXECUTION_ENGINE_TOKEN,
       useClass: ExecutionService,
