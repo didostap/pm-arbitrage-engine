@@ -11,6 +11,7 @@ import { ConnectorModule } from '../../connectors/connector.module';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { PrismaService } from '../../common/prisma.service';
+import { ExposureTrackerService } from './exposure-tracker.service';
 
 @Module({
   imports: [RiskManagementModule, ConnectorModule],
@@ -19,6 +20,7 @@ import { PrismaService } from '../../common/prisma.service';
     PrismaService,
     OrderRepository,
     PositionRepository,
+    ExposureTrackerService,
     {
       provide: EXECUTION_ENGINE_TOKEN,
       useClass: ExecutionService,

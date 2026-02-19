@@ -12,6 +12,7 @@ import { PositionRepository } from '../../persistence/repositories/position.repo
 import { PlatformId } from '../../common/types/platform.type';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
+import { SingleLegExposureEvent } from '../../common/events/execution.events';
 import type {
   RankedOpportunity,
   BudgetReservation,
@@ -144,11 +145,13 @@ describe('ExecutionService', () => {
     submitOrder: ReturnType<typeof vi.fn>;
     getOrderBook: ReturnType<typeof vi.fn>;
     getPlatformId: ReturnType<typeof vi.fn>;
+    getFeeSchedule: ReturnType<typeof vi.fn>;
   };
   let polymarketConnector: {
     submitOrder: ReturnType<typeof vi.fn>;
     getOrderBook: ReturnType<typeof vi.fn>;
     getPlatformId: ReturnType<typeof vi.fn>;
+    getFeeSchedule: ReturnType<typeof vi.fn>;
   };
   let eventEmitter: { emit: ReturnType<typeof vi.fn> };
   let orderRepo: {
@@ -165,11 +168,23 @@ describe('ExecutionService', () => {
       submitOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
+      getFeeSchedule: vi.fn().mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        makerFeePercent: 0,
+        takerFeePercent: 2.0,
+        description: 'Kalshi fee schedule',
+      }),
     };
     polymarketConnector = {
       submitOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
+      getFeeSchedule: vi.fn().mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        makerFeePercent: 0,
+        takerFeePercent: 2.0,
+        description: 'Polymarket fee schedule',
+      }),
     };
     eventEmitter = { emit: vi.fn() };
     orderRepo = {
@@ -456,6 +471,108 @@ describe('ExecutionService', () => {
         (call: unknown[]) => call[0] === EVENT_NAMES.ORDER_FILLED,
       );
       expect(orderFilledCalls).toHaveLength(1);
+    });
+  });
+
+  describe('single-leg exposure — SingleLegExposureEvent emission', () => {
+    it('should emit SingleLegExposureEvent with correct payload on single-leg exposure', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, { status: 'rejected' }),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const singleLegCalls = eventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+      );
+      expect(singleLegCalls).toHaveLength(1);
+
+      const event = singleLegCalls[0]![1] as SingleLegExposureEvent;
+      expect(event).toBeInstanceOf(SingleLegExposureEvent);
+      expect(event.positionId).toBeDefined();
+      expect(event.pairId).toBe('pair-1');
+      expect(event.expectedEdge).toBe(0.08);
+      expect(event.filledLeg.platform).toBe(PlatformId.KALSHI);
+      expect(event.filledLeg.orderId).toBeDefined();
+      expect(event.filledLeg.side).toBe('buy');
+      expect(event.failedLeg.platform).toBe(PlatformId.POLYMARKET);
+      expect(event.failedLeg.reasonCode).toBeDefined();
+      expect(event.pnlScenarios).toBeDefined();
+      expect(event.pnlScenarios.closeNowEstimate).toBeDefined();
+      expect(event.pnlScenarios.retryAtCurrentPrice).toBeDefined();
+      expect(event.pnlScenarios.holdRiskAssessment).toContain('EXPOSED');
+      expect(event.recommendedActions.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should include pnlScenarios and recommendedActions in ExecutionError metadata', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, { status: 'rejected' }),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.error).toBeDefined();
+      expect(result.error!.code).toBe(
+        EXECUTION_ERROR_CODES.SINGLE_LEG_EXPOSURE,
+      );
+      const metadata = result.error!.metadata;
+      expect(metadata).toBeDefined();
+      expect(metadata!.pnlScenarios).toBeDefined();
+      expect(metadata!.recommendedActions).toBeDefined();
+      expect(Array.isArray(metadata!.recommendedActions)).toBe(true);
+    });
+
+    it('should handle order book fetch failure gracefully', async () => {
+      kalshiConnector.getOrderBook
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockRejectedValueOnce(new Error('API timeout')); // P&L fetch fails
+      polymarketConnector.getOrderBook
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // depth check
+        .mockRejectedValueOnce(new Error('API timeout')); // P&L fetch fails
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, { status: 'rejected' }),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(true);
+
+      const singleLegCalls = eventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+      );
+      expect(singleLegCalls).toHaveLength(1);
+
+      const event = singleLegCalls[0]![1] as SingleLegExposureEvent;
+      expect(event.currentPrices.kalshi.bestBid).toBeNull();
+      expect(event.currentPrices.polymarket.bestBid).toBeNull();
+      expect(event.pnlScenarios.closeNowEstimate).toBe('UNAVAILABLE');
+      expect(event.pnlScenarios.holdRiskAssessment).toContain(
+        'Current market prices unavailable',
+      );
     });
   });
 

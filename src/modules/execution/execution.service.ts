@@ -19,7 +19,12 @@ import {
 import {
   OrderFilledEvent,
   ExecutionFailedEvent,
+  SingleLegExposureEvent,
 } from '../../common/events/execution.events';
+import {
+  calculateSingleLegPnlScenarios,
+  buildRecommendedActions,
+} from './single-leg-pnl.util';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import {
   KALSHI_CONNECTOR_TOKEN,
@@ -504,12 +509,114 @@ export class ExecutionService implements IExecutionEngine {
       },
     });
 
+    // Fetch current order books for P&L scenarios (2s timeout per fetch)
+    const ORDERBOOK_FETCH_TIMEOUT_MS = 2000;
+    const withTimeout = <T>(
+      promise: Promise<T>,
+      ms: number,
+    ): Promise<T | null> =>
+      Promise.race([
+        promise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+      ]);
+
+    const { pairConfig } = enriched.dislocation;
+    const [kalshiBook, polymarketBook] = await Promise.all([
+      withTimeout(
+        this.kalshiConnector.getOrderBook(pairConfig.kalshiContractId),
+        ORDERBOOK_FETCH_TIMEOUT_MS,
+      ).catch(() => null),
+      withTimeout(
+        this.polymarketConnector.getOrderBook(pairConfig.polymarketContractId),
+        ORDERBOOK_FETCH_TIMEOUT_MS,
+      ).catch(() => null),
+    ]);
+
+    const currentPrices = {
+      kalshi: kalshiBook
+        ? {
+            bestBid: kalshiBook.bids[0]?.price ?? null,
+            bestAsk: kalshiBook.asks[0]?.price ?? null,
+          }
+        : { bestBid: null, bestAsk: null },
+      polymarket: polymarketBook
+        ? {
+            bestBid: polymarketBook.bids[0]?.price ?? null,
+            bestAsk: polymarketBook.asks[0]?.price ?? null,
+          }
+        : { bestBid: null, bestAsk: null },
+    };
+
+    const secondaryPlatform =
+      primaryLeg === 'kalshi' ? PlatformId.POLYMARKET : PlatformId.KALSHI;
+    const kalshiFee = this.kalshiConnector.getFeeSchedule();
+    const polymarketFee = this.polymarketConnector.getFeeSchedule();
+
+    const primaryTakerFeeDecimal =
+      (primaryPlatform === PlatformId.KALSHI
+        ? kalshiFee.takerFeePercent
+        : polymarketFee.takerFeePercent) / 100;
+    const secondaryTakerFeeDecimal =
+      (secondaryPlatform === PlatformId.KALSHI
+        ? kalshiFee.takerFeePercent
+        : polymarketFee.takerFeePercent) / 100;
+
+    const pnlScenarios = calculateSingleLegPnlScenarios({
+      filledPlatform: primaryPlatform,
+      filledSide: primarySide,
+      fillPrice: primaryOrder.filledPrice,
+      fillSize: primaryOrder.filledQuantity,
+      currentPrices,
+      secondaryPlatform,
+      secondarySide,
+      takerFeeDecimal: primaryTakerFeeDecimal,
+      secondaryTakerFeeDecimal,
+    });
+
+    const recommendedActions = buildRecommendedActions(
+      pnlScenarios,
+      position.positionId,
+    );
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+      new SingleLegExposureEvent(
+        position.positionId,
+        pairId,
+        enriched.netEdge.toNumber(),
+        {
+          platform: primaryPlatform,
+          orderId: primaryOrderId,
+          side: primarySide,
+          price: primaryPrice.toNumber(),
+          size: primarySize,
+          fillPrice: primaryOrder.filledPrice,
+          fillSize: primaryOrder.filledQuantity,
+        },
+        {
+          platform: secondaryPlatform,
+          reason: errorMessage,
+          reasonCode: errorCode,
+          attemptedPrice: secondaryPrice.toNumber(),
+          attemptedSize: secondarySize,
+        },
+        currentPrices,
+        pnlScenarios,
+        recommendedActions,
+      ),
+    );
+
     const error = new ExecutionError(
       EXECUTION_ERROR_CODES.SINGLE_LEG_EXPOSURE,
       errorMessage,
       'critical',
       undefined,
-      { positionId: position.positionId, pairId },
+      {
+        positionId: position.positionId,
+        pairId,
+        pnlScenarios,
+        recommendedActions,
+      },
     );
 
     return {
