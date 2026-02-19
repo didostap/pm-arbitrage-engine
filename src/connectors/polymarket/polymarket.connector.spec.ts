@@ -8,6 +8,9 @@ import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-b
 
 const mockCreateOrDeriveApiKey = vi.fn();
 const mockGetOrderBook = vi.fn();
+const mockCreateOrder = vi.fn();
+const mockPostOrder = vi.fn();
+const mockGetOrder = vi.fn();
 const mockNormalizePolymarket = vi.fn();
 
 // Mock @polymarket/clob-client
@@ -15,8 +18,11 @@ vi.mock('@polymarket/clob-client', () => {
   class MockClobClient {
     createOrDeriveApiKey = mockCreateOrDeriveApiKey;
     getOrderBook = mockGetOrderBook;
+    createOrder = mockCreateOrder;
+    postOrder = mockPostOrder;
+    getOrder = mockGetOrder;
   }
-  return { ClobClient: MockClobClient };
+  return { ClobClient: MockClobClient, Side: { BUY: 'BUY', SELL: 'SELL' } };
 });
 
 // Mock @ethersproject/wallet
@@ -331,9 +337,9 @@ describe('PolymarketConnector', () => {
     });
   });
 
-  describe('placeholder methods', () => {
-    it('submitOrder should throw not-implemented error', () => {
-      expect(() =>
+  describe('submitOrder', () => {
+    it('should throw PlatformApiError when not connected', async () => {
+      await expect(
         connector.submitOrder({
           contractId: 'X',
           side: 'buy',
@@ -341,9 +347,152 @@ describe('PolymarketConnector', () => {
           price: 0.5,
           type: 'limit',
         }),
-      ).toThrow('submitOrder not implemented');
+      ).rejects.toThrow(PlatformApiError);
     });
 
+    it('should return filled when order is immediately matched', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ orderPayload: 'payload' });
+      mockPostOrder.mockResolvedValue({
+        orderID: 'pm-order-1',
+        status: 'matched',
+      });
+
+      const result = await connector.submitOrder({
+        contractId: 'token-abc',
+        side: 'buy',
+        quantity: 10,
+        price: 0.65,
+        type: 'limit',
+      });
+
+      expect(result.orderId).toBe('pm-order-1');
+      expect(result.status).toBe('filled');
+      expect(result.filledQuantity).toBe(10);
+      expect(result.filledPrice).toBe(0.65);
+      expect(result.platformId).toBe(PlatformId.POLYMARKET);
+    });
+
+    it('should poll and return filled when order fills after delay', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ orderPayload: 'payload' });
+      mockPostOrder.mockResolvedValue({
+        orderID: 'pm-order-2',
+        status: 'live',
+      });
+      // First poll: still live, second poll: filled
+      mockGetOrder
+        .mockResolvedValueOnce({ status: 'live' })
+        .mockResolvedValueOnce({
+          status: 'matched',
+          filledSize: 10,
+          filledPrice: 0.65,
+        });
+
+      const result = await connector.submitOrder({
+        contractId: 'token-abc',
+        side: 'sell',
+        quantity: 10,
+        price: 0.65,
+        type: 'limit',
+      });
+
+      expect(result.status).toBe('filled');
+      expect(result.filledQuantity).toBe(10);
+      expect(mockGetOrder).toHaveBeenCalled();
+    });
+
+    it('should return pending after 5s poll timeout', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ orderPayload: 'payload' });
+      mockPostOrder.mockResolvedValue({
+        orderID: 'pm-order-3',
+        status: 'live',
+      });
+      // Always return live — never fills
+      mockGetOrder.mockResolvedValue({ status: 'live' });
+
+      const result = await connector.submitOrder({
+        contractId: 'token-abc',
+        side: 'buy',
+        quantity: 5,
+        price: 0.5,
+        type: 'limit',
+      });
+
+      expect(result.status).toBe('pending');
+      expect(result.orderId).toBe('pm-order-3');
+      expect(result.filledQuantity).toBe(0);
+    }, 10000);
+
+    it('should return rejected when order is canceled during polling', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ orderPayload: 'payload' });
+      mockPostOrder.mockResolvedValue({
+        orderID: 'pm-order-4',
+        status: 'live',
+      });
+      mockGetOrder.mockResolvedValue({ status: 'canceled' });
+
+      const result = await connector.submitOrder({
+        contractId: 'token-abc',
+        side: 'buy',
+        quantity: 5,
+        price: 0.5,
+        type: 'limit',
+      });
+
+      expect(result.status).toBe('rejected');
+      expect(result.filledQuantity).toBe(0);
+    });
+
+    it('should throw PlatformApiError when createOrder fails', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockRejectedValue(new Error('CLOB error'));
+
+      await expect(
+        connector.submitOrder({
+          contractId: 'token-abc',
+          side: 'buy',
+          quantity: 1,
+          price: 0.5,
+          type: 'limit',
+        }),
+      ).rejects.toThrow(PlatformApiError);
+    });
+  });
+
+  describe('placeholder methods', () => {
     it('cancelOrder should throw not-implemented error', () => {
       expect(() => connector.cancelOrder('order-1')).toThrow(
         'cancelOrder not implemented',

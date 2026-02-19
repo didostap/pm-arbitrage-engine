@@ -7,10 +7,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { ExecutionQueueService } from './execution-queue.service';
 import { ExecutionLockService } from './execution-lock.service';
+import { EXECUTION_ENGINE_TOKEN } from './execution.constants';
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { RankedOpportunity } from '../../common/types/risk.type';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { RiskLimitError } from '../../common/errors/risk-limit-error';
+import type { ExecutionResult } from '../../common/interfaces/execution-engine.interface';
 
 function makeRankedOpportunity(
   opportunityId: string,
@@ -24,6 +26,29 @@ function makeRankedOpportunity(
       recommendedPositionSizeUsd: new FinancialDecimal(300),
       pairId: `pair-${opportunityId}`,
     },
+  };
+}
+
+function makeSuccessResult(): ExecutionResult {
+  return {
+    success: true,
+    partialFill: false,
+    positionId: 'pos-1',
+  };
+}
+
+function makePartialFillResult(): ExecutionResult {
+  return {
+    success: false,
+    partialFill: true,
+    positionId: 'pos-1',
+  };
+}
+
+function makeFailureResult(): ExecutionResult {
+  return {
+    success: false,
+    partialFill: false,
   };
 }
 
@@ -44,6 +69,9 @@ describe('ExecutionQueueService', () => {
     updateDailyPnl: ReturnType<typeof vi.fn>;
     isTradingHalted: ReturnType<typeof vi.fn>;
     processOverride: ReturnType<typeof vi.fn>;
+  };
+  let mockExecutionEngine: {
+    execute: ReturnType<typeof vi.fn>;
   };
   let reservationCounter: number;
 
@@ -77,11 +105,16 @@ describe('ExecutionQueueService', () => {
       processOverride: vi.fn(),
     };
 
+    mockExecutionEngine = {
+      execute: vi.fn().mockResolvedValue(makeSuccessResult()),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         ExecutionQueueService,
         { provide: ExecutionLockService, useValue: mockLockService },
         { provide: RISK_MANAGER_TOKEN, useValue: mockRiskManager },
+        { provide: EXECUTION_ENGINE_TOKEN, useValue: mockExecutionEngine },
       ],
     }).compile();
 
@@ -109,6 +142,7 @@ describe('ExecutionQueueService', () => {
       reserved: true,
       executed: true,
       committed: true,
+      error: undefined,
     });
   });
 
@@ -139,9 +173,34 @@ describe('ExecutionQueueService', () => {
     expect(mockRiskManager.commitReservation).toHaveBeenCalledWith('res-1');
   });
 
-  it('should release reservation on failure', async () => {
-    mockRiskManager.commitReservation.mockRejectedValueOnce(
-      new Error('commit failed'),
+  it('should commit reservation on partialFill (single-leg)', async () => {
+    mockExecutionEngine.execute.mockResolvedValue(makePartialFillResult());
+
+    const results = await service.processOpportunities([
+      makeRankedOpportunity('opp-1', 0.05),
+    ]);
+
+    expect(results[0]?.committed).toBe(true);
+    expect(mockRiskManager.commitReservation).toHaveBeenCalledWith('res-1');
+    expect(mockRiskManager.releaseReservation).not.toHaveBeenCalled();
+  });
+
+  it('should release reservation on full failure', async () => {
+    mockExecutionEngine.execute.mockResolvedValue(makeFailureResult());
+
+    const results = await service.processOpportunities([
+      makeRankedOpportunity('opp-1', 0.05),
+    ]);
+
+    expect(results[0]?.committed).toBe(false);
+    expect(results[0]?.executed).toBe(false);
+    expect(mockRiskManager.releaseReservation).toHaveBeenCalledWith('res-1');
+    expect(mockRiskManager.commitReservation).not.toHaveBeenCalled();
+  });
+
+  it('should release reservation when execution throws', async () => {
+    mockExecutionEngine.execute.mockRejectedValue(
+      new Error('unexpected error'),
     );
 
     const results = await service.processOpportunities([
@@ -205,5 +264,18 @@ describe('ExecutionQueueService', () => {
     ]);
 
     expect(processOrder).toEqual(['opp-high', 'opp-mid', 'opp-low']);
+  });
+
+  it('should call executionEngine.execute with opportunity and reservation', async () => {
+    const ranked = makeRankedOpportunity('opp-1', 0.05);
+    await service.processOpportunities([ranked]);
+
+    expect(mockExecutionEngine.execute).toHaveBeenCalledTimes(1);
+    const [passedOpportunity, passedReservation] = mockExecutionEngine.execute
+      .mock.calls[0] as unknown[];
+    expect(passedOpportunity).toBe(ranked);
+    expect((passedReservation as { reservationId: string }).reservationId).toBe(
+      'res-1',
+    );
   });
 });

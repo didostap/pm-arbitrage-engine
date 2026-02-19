@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ExecutionLockService } from './execution-lock.service';
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
+import { EXECUTION_ENGINE_TOKEN } from './execution.constants';
 import type { IRiskManager } from '../../common/interfaces/risk-manager.interface';
+import type { IExecutionEngine } from '../../common/interfaces/execution-engine.interface';
 import {
   ExecutionQueueResult,
   RankedOpportunity,
@@ -16,6 +18,8 @@ export class ExecutionQueueService implements IExecutionQueue {
     private readonly lockService: ExecutionLockService,
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
+    @Inject(EXECUTION_ENGINE_TOKEN)
+    private readonly executionEngine: IExecutionEngine,
   ) {}
 
   async processOpportunities(
@@ -50,16 +54,38 @@ export class ExecutionQueueService implements IExecutionQueue {
           await this.riskManager.reserveBudget(reservationRequest);
 
         try {
-          // TODO: Story 5.1 — replace with IExecutionEngine.execute() call
-          await this.riskManager.commitReservation(reservation.reservationId);
-          return {
-            opportunityId,
-            reserved: true,
-            executed: true,
-            committed: true,
-          };
+          const result = await this.executionEngine.execute(
+            ranked,
+            reservation,
+          );
+
+          // Commit/release based on execution result:
+          // - success → commit (both legs filled)
+          // - partialFill → commit (money is deployed on one leg)
+          // - full failure → release
+          if (result.success || result.partialFill) {
+            await this.riskManager.commitReservation(reservation.reservationId);
+            return {
+              opportunityId,
+              reserved: true,
+              executed: result.success,
+              committed: true,
+              error: result.error?.message,
+            };
+          } else {
+            await this.riskManager.releaseReservation(
+              reservation.reservationId,
+            );
+            return {
+              opportunityId,
+              reserved: true,
+              executed: false,
+              committed: false,
+              error: result.error?.message,
+            };
+          }
         } catch (execError) {
-          // Execution or commit failed — release reservation
+          // Unexpected execution error — release reservation
           try {
             await this.riskManager.releaseReservation(
               reservation.reservationId,
@@ -67,6 +93,14 @@ export class ExecutionQueueService implements IExecutionQueue {
           } catch {
             // Release may fail if commit already consumed it
           }
+
+          if (execError instanceof Error) {
+            this.logger.error({
+              message: 'Execution failed unexpectedly',
+              data: { opportunityId, error: execError.message },
+            });
+          }
+
           return {
             opportunityId,
             reserved: true,

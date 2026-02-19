@@ -69,6 +69,9 @@ export const EVENT_NAMES = {
   /** [Epic 5] Emitted when order is filled on a platform */
   ORDER_FILLED: 'execution.order.filled',
 
+  /** [Epic 5] Emitted when execution fails (depth insufficient, order rejected, etc.) */
+  EXECUTION_FAILED: 'execution.order.failed',
+
   /** [Epic 5] Emitted when only one leg fills within timeout */
   SINGLE_LEG_EXPOSURE: 'execution.single_leg.exposure',
 

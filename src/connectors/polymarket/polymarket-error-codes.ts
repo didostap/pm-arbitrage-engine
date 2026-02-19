@@ -14,4 +14,6 @@ export const POLYMARKET_ERROR_CODES = {
   WEBSOCKET_ERROR: 1013,
   /** Order book data staleness detected — warning, no retry */
   STALE_DATA: 1014,
+  /** Connector not connected — error, no retry */
+  NOT_CONNECTED: 1015,
 } as const;

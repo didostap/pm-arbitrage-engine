@@ -39,5 +39,41 @@ declare module 'kalshi-typescript' {
       depth?: number,
       options?: unknown,
     ): Promise<{ data: GetMarketOrderbookResponse }>;
+
+    createOrder(
+      createOrderRequest: CreateOrderRequest,
+      options?: unknown,
+    ): Promise<{ data: CreateOrderResponse }>;
+  }
+
+  export interface CreateOrderRequest {
+    ticker: string;
+    action: 'buy' | 'sell';
+    type: 'limit' | 'market';
+    side: 'yes' | 'no';
+    count: number;
+    yes_price?: number; // cents (1-99)
+    no_price?: number; // cents (1-99)
+  }
+
+  export interface CreateOrderResponse {
+    order: KalshiOrder;
+  }
+
+  export interface KalshiOrder {
+    order_id: string;
+    ticker: string;
+    action: string;
+    side: string;
+    type: string;
+    status: string; // 'resting' | 'executed' | 'canceled' | 'pending'
+    yes_price: number;
+    no_price: number;
+    created_time: string;
+    expiration_time: string;
+    taker_fill_count: number;
+    taker_fill_cost: number;
+    remaining_count: number;
+    place_count: number;
   }
 }

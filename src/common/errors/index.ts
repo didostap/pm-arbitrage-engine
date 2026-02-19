@@ -8,3 +8,4 @@ export {
 export { SystemHealthError } from './system-health-error.js';
 export { ConfigValidationError } from './config-validation-error.js';
 export { RiskLimitError, RISK_ERROR_CODES } from './risk-limit-error.js';
+export { ExecutionError, EXECUTION_ERROR_CODES } from './execution-error.js';

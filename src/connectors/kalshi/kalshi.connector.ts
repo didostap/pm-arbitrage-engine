@@ -165,9 +165,72 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     throw new Error('getPositions not implemented - Epic 5 Story 5.1');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  submitOrder(_params: OrderParams): Promise<OrderResult> {
-    throw new Error('submitOrder not implemented - Epic 5 Story 5.1');
+  async submitOrder(params: OrderParams): Promise<OrderResult> {
+    await this.rateLimiter.acquireWrite();
+
+    try {
+      // Convert internal decimal price (0.00-1.00) to Kalshi cents (1-99)
+      const priceCents = Math.round(params.price * 100);
+
+      const response = await withRetry(
+        () =>
+          this.marketApi.createOrder({
+            ticker: params.contractId,
+            action: params.side,
+            type: params.type,
+            // Binary markets: always trade the YES side. `action` carries buy/sell intent.
+            // Buying YES = long, Selling YES = short (equivalent to inverse NO position).
+            side: 'yes',
+            count: params.quantity,
+            yes_price: priceCents,
+          }),
+        RETRY_STRATEGIES.NETWORK_ERROR,
+        (attempt, error) => {
+          this.logger.warn({
+            message: 'Retrying createOrder',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.KALSHI,
+            metadata: {
+              contractId: params.contractId,
+              attempt,
+              error: error.message,
+            },
+          });
+        },
+      );
+
+      this.lastHeartbeat = new Date();
+      const order = response.data.order;
+
+      // Map Kalshi status to OrderResult status
+      let status: OrderResult['status'];
+      if (order.status === 'executed') {
+        status = order.remaining_count > 0 ? 'partial' : 'filled';
+      } else if (order.status === 'canceled') {
+        status = 'rejected';
+      } else {
+        status = 'pending';
+      }
+
+      // Convert fill price back from cents to decimal
+      const filledQuantity = order.taker_fill_count;
+      const filledPrice =
+        filledQuantity > 0 && order.taker_fill_cost > 0
+          ? order.taker_fill_cost / filledQuantity / 100
+          : 0;
+
+      return {
+        orderId: order.order_id,
+        platformId: PlatformId.KALSHI,
+        status,
+        filledQuantity,
+        filledPrice,
+        timestamp: new Date(order.created_time),
+      };
+    } catch (error) {
+      throw this.mapError(error);
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

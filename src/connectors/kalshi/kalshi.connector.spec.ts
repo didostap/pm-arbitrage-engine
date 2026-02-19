@@ -6,6 +6,7 @@ import { PlatformId } from '../../common/types/index.js';
 import { PlatformApiError } from '../../common/errors/index.js';
 
 const mockGetMarketOrderbook = vi.fn();
+const mockCreateOrder = vi.fn();
 
 // Mock withRetry to execute fn once without retries (avoids real delay in tests)
 vi.mock('../../common/utils/index.js', async (importOriginal) => {
@@ -22,6 +23,7 @@ vi.mock('kalshi-typescript', () => {
   class MockConfiguration {}
   class MockMarketApi {
     getMarketOrderbook = mockGetMarketOrderbook;
+    createOrder = mockCreateOrder;
   }
   class MockPortfolioApi {
     getPositions = vi.fn();
@@ -147,19 +149,82 @@ describe('KalshiConnector', () => {
     });
   });
 
-  describe('placeholder methods', () => {
-    it('submitOrder should throw not-implemented error', () => {
-      expect(() =>
+  describe('submitOrder', () => {
+    it('should convert decimal price to cents and return mapped result', async () => {
+      mockCreateOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-1',
+            status: 'executed',
+            remaining_count: 0,
+            taker_fill_count: 10,
+            taker_fill_cost: 450, // 10 contracts * 45 cents
+            created_time: '2026-01-01T00:00:00Z',
+          },
+        },
+      });
+
+      const result = await connector.submitOrder({
+        contractId: 'CPI-22DEC-TN0.1',
+        side: 'buy',
+        quantity: 10,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.status).toBe('filled');
+      expect(result.filledQuantity).toBe(10);
+      expect(result.filledPrice).toBe(0.45);
+      expect(result.platformId).toBe(PlatformId.KALSHI);
+
+      // Verify cents conversion: 0.45 → 45 cents
+      expect(mockCreateOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ yes_price: 45 }),
+      );
+    });
+
+    it('should map canceled status to rejected', async () => {
+      mockCreateOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-2',
+            status: 'canceled',
+            remaining_count: 10,
+            taker_fill_count: 0,
+            taker_fill_cost: 0,
+            created_time: '2026-01-01T00:00:00Z',
+          },
+        },
+      });
+
+      const result = await connector.submitOrder({
+        contractId: 'CPI-22DEC-TN0.1',
+        side: 'buy',
+        quantity: 10,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      expect(result.status).toBe('rejected');
+    });
+
+    it('should throw PlatformApiError on SDK error', async () => {
+      mockCreateOrder.mockRejectedValue(new Error('API error'));
+
+      await expect(
         connector.submitOrder({
           contractId: 'X',
           side: 'buy',
           quantity: 1,
-          price: 50,
+          price: 0.5,
           type: 'limit',
         }),
-      ).toThrow('submitOrder not implemented');
+      ).rejects.toThrow(PlatformApiError);
     });
+  });
 
+  describe('placeholder methods', () => {
     it('cancelOrder should throw not-implemented error', () => {
       expect(() => connector.cancelOrder('order-1')).toThrow(
         'cancelOrder not implemented',

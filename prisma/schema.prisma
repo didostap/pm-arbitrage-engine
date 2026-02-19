@@ -74,8 +74,12 @@ model ContractMatch {
   operatorRationale          String?   @map("operator_rationale")
   firstTradedTimestamp       DateTime? @map("first_traded_timestamp") @db.Timestamptz
   totalCyclesTraded          Int       @default(0) @map("total_cycles_traded")
+  primaryLeg                 String?   @map("primary_leg")  // "kalshi" | "polymarket", default applied in ExecutionService
   createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  orders        Order[]
+  positions     OpenPosition[]
 
   @@unique([polymarketContractId, kalshiContractId])
   @@index([operatorApproved])
@@ -98,6 +102,75 @@ model RiskState {
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("risk_states")
+}
+
+// Order status enum for tracking order lifecycle
+enum OrderStatus {
+  PENDING
+  FILLED
+  PARTIAL
+  REJECTED
+  CANCELLED
+}
+
+// Position status enum for tracking position lifecycle
+enum PositionStatus {
+  OPEN
+  SINGLE_LEG_EXPOSED
+  EXIT_PARTIAL
+  CLOSED
+  RECONCILIATION_REQUIRED
+}
+
+// Individual orders submitted to platforms
+model Order {
+  orderId     String      @id @default(uuid()) @map("order_id")
+  platform    Platform
+  contractId  String      @map("contract_id")
+  pairId      String      @map("pair_id")
+  side        String      // 'buy' | 'sell'
+  price       Decimal     @db.Decimal(20, 8)
+  size        Decimal     @db.Decimal(20, 8)
+  status      OrderStatus
+  fillPrice   Decimal?    @map("fill_price") @db.Decimal(20, 8)
+  fillSize    Decimal?    @map("fill_size") @db.Decimal(20, 8)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  pair        ContractMatch @relation(fields: [pairId], references: [matchId])
+
+  polymarketPositions OpenPosition[] @relation("PolymarketOrder")
+  kalshiPositions     OpenPosition[] @relation("KalshiOrder")
+
+  @@index([pairId])
+  @@index([platform, status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// Open positions tracking two-leg (or single-leg) arbitrage positions
+model OpenPosition {
+  positionId          String         @id @default(uuid()) @map("position_id")
+  pairId              String         @map("pair_id")
+  polymarketOrderId   String?        @map("polymarket_order_id")
+  kalshiOrderId       String?        @map("kalshi_order_id")
+  polymarketSide      String?        @map("polymarket_side")
+  kalshiSide          String?        @map("kalshi_side")
+  entryPrices         Json           @map("entry_prices")    // {polymarket: string, kalshi: string}
+  sizes               Json                                    // {polymarket: string, kalshi: string}
+  expectedEdge        Decimal        @map("expected_edge") @db.Decimal(20, 8)
+  status              PositionStatus
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  pair                ContractMatch  @relation(fields: [pairId], references: [matchId])
+  polymarketOrder     Order?         @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
+  kalshiOrder         Order?         @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])
+
+  @@index([pairId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("open_positions")
 }
 
 // Operator risk override audit trail

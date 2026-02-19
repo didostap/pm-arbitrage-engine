@@ -5,7 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ClobClient } from '@polymarket/clob-client';
+import { ClobClient, Side } from '@polymarket/clob-client';
 import { Wallet } from '@ethersproject/wallet';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
 import type {
@@ -325,9 +325,125 @@ export class PolymarketConnector
     throw new Error('getPositions not implemented - Epic 5');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  submitOrder(_params: OrderParams): Promise<OrderResult> {
-    throw new Error('submitOrder not implemented - Epic 5');
+  async submitOrder(params: OrderParams): Promise<OrderResult> {
+    if (!this.connected || !this.clobClient) {
+      throw new PlatformApiError(
+        POLYMARKET_ERROR_CODES.NOT_CONNECTED,
+        'Polymarket connector not connected',
+        PlatformId.POLYMARKET,
+        'error',
+      );
+    }
+
+    await this.rateLimiter.acquireWrite();
+
+    try {
+      // Polymarket prices are already decimal (0.00-1.00), no conversion needed
+      // Create and post order via CLOB client
+      const orderPayload = await this.clobClient.createOrder({
+        tokenID: params.contractId,
+        price: params.price,
+        side: params.side === 'buy' ? Side.BUY : Side.SELL,
+        size: params.quantity,
+      });
+
+      const postResponse = (await this.clobClient.postOrder(
+        orderPayload,
+      )) as Record<string, unknown>;
+
+      this.lastHeartbeat = new Date();
+
+      // Extract order ID from response
+      const orderId =
+        (postResponse.orderID as string | undefined) ??
+        (postResponse.id as string | undefined) ??
+        `pm-${Date.now()}`;
+
+      // Check if order was immediately matched
+      const status = postResponse.status as string | undefined;
+
+      if (status === 'matched' || status === 'filled') {
+        return {
+          orderId,
+          platformId: PlatformId.POLYMARKET,
+          status: 'filled',
+          filledQuantity: params.quantity,
+          filledPrice: params.price,
+          timestamp: new Date(),
+        };
+      }
+
+      // Poll for fill with 5-second timeout
+      const ORDER_POLL_TIMEOUT_MS = 5000;
+      const ORDER_POLL_INTERVAL_MS = 500;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < ORDER_POLL_TIMEOUT_MS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, ORDER_POLL_INTERVAL_MS),
+        );
+
+        try {
+          const orderStatus = await this.clobClient.getOrder(orderId);
+          const currentStatus = (orderStatus as { status?: string }).status;
+
+          if (currentStatus === 'matched' || currentStatus === 'filled') {
+            const filledSize =
+              (orderStatus as { filledSize?: number }).filledSize ??
+              params.quantity;
+            const filledPrice =
+              (orderStatus as { filledPrice?: number }).filledPrice ??
+              params.price;
+
+            return {
+              orderId,
+              platformId: PlatformId.POLYMARKET,
+              status: 'filled',
+              filledQuantity: filledSize,
+              filledPrice,
+              timestamp: new Date(),
+            };
+          }
+
+          if (
+            currentStatus === 'canceled' ||
+            currentStatus === 'cancelled' ||
+            currentStatus === 'rejected'
+          ) {
+            return {
+              orderId,
+              platformId: PlatformId.POLYMARKET,
+              status: 'rejected',
+              filledQuantity: 0,
+              filledPrice: 0,
+              timestamp: new Date(),
+            };
+          }
+        } catch {
+          // Poll error — continue polling
+        }
+      }
+
+      // Timeout — return pending status
+      this.logger.warn({
+        message: 'Polymarket order pending after 5s timeout',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.POLYMARKET,
+        metadata: { orderId, contractId: params.contractId },
+      });
+
+      return {
+        orderId,
+        platformId: PlatformId.POLYMARKET,
+        status: 'pending',
+        filledQuantity: 0,
+        filledPrice: 0,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      throw this.mapError(error);
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
