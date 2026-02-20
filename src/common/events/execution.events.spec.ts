@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  ExitTriggeredEvent,
   SingleLegExposureEvent,
   SingleLegResolvedEvent,
 } from './execution.events';
@@ -221,5 +222,82 @@ describe('SingleLegResolvedEvent', () => {
     expect(EVENT_NAMES.SINGLE_LEG_EXPOSURE_REMINDER).toBe(
       'execution.single_leg.exposure_reminder',
     );
+  });
+});
+
+describe('ExitTriggeredEvent', () => {
+  it('should construct with all required fields', () => {
+    const event = new ExitTriggeredEvent(
+      'pos-1',
+      'pair-1',
+      'take_profit',
+      '0.03000000',
+      '0.02500000',
+      '0.02100000',
+      'kalshi-close-order-1',
+      'poly-close-order-1',
+    );
+
+    expect(event.positionId).toBe('pos-1');
+    expect(event.pairId).toBe('pair-1');
+    expect(event.exitType).toBe('take_profit');
+    expect(event.initialEdge).toBe('0.03000000');
+    expect(event.finalEdge).toBe('0.02500000');
+    expect(event.realizedPnl).toBe('0.02100000');
+    expect(event.kalshiCloseOrderId).toBe('kalshi-close-order-1');
+    expect(event.polymarketCloseOrderId).toBe('poly-close-order-1');
+  });
+
+  it('should inherit BaseEvent timestamp and correlationId', () => {
+    const event = new ExitTriggeredEvent(
+      'pos-1',
+      'pair-1',
+      'stop_loss',
+      '0.03',
+      '-0.06',
+      '-0.05500000',
+      'k-order',
+      'p-order',
+    );
+
+    expect(event.timestamp).toBeInstanceOf(Date);
+    expect(event.correlationId).toBe('test-correlation-id');
+  });
+
+  it('should use provided correlationId when given', () => {
+    const event = new ExitTriggeredEvent(
+      'pos-1',
+      'pair-1',
+      'time_based',
+      '0.03',
+      '0.01',
+      '0.00800000',
+      'k-order',
+      'p-order',
+      'custom-corr-id',
+    );
+
+    expect(event.correlationId).toBe('custom-corr-id');
+  });
+
+  it('should match EVENT_NAMES.EXIT_TRIGGERED catalog entry', () => {
+    expect(EVENT_NAMES.EXIT_TRIGGERED).toBe('execution.exit.triggered');
+  });
+
+  it('should accept all three exit types', () => {
+    const types = ['take_profit', 'stop_loss', 'time_based'] as const;
+    for (const exitType of types) {
+      const event = new ExitTriggeredEvent(
+        'pos-1',
+        'pair-1',
+        exitType,
+        '0.03',
+        '0.02',
+        '0.01',
+        'k',
+        'p',
+      );
+      expect(event.exitType).toBe(exitType);
+    }
   });
 });

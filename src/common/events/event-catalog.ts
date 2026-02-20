@@ -81,7 +81,7 @@ export const EVENT_NAMES = {
   /** [Story 5.3] Emitted every 60s for unresolved single-leg positions (re-emission, not counted toward thresholds) */
   SINGLE_LEG_EXPOSURE_REMINDER: 'execution.single_leg.exposure_reminder',
 
-  /** [Epic 5] Emitted when exit threshold is hit (take-profit, stop-loss, time-based) */
+  /** [Story 5.4] Emitted when exit threshold is hit (take-profit, stop-loss, time-based) */
   EXIT_TRIGGERED: 'execution.exit.triggered',
 
   // [Epic 4] Risk Events

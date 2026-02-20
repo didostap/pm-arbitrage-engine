@@ -66,6 +66,22 @@ export class SingleLegExposureEvent extends BaseEvent {
   }
 }
 
+export class ExitTriggeredEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: string,
+    public readonly pairId: string,
+    public readonly exitType: 'take_profit' | 'stop_loss' | 'time_based',
+    public readonly initialEdge: string,
+    public readonly finalEdge: string,
+    public readonly realizedPnl: string,
+    public readonly kalshiCloseOrderId: string,
+    public readonly polymarketCloseOrderId: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
 export class SingleLegResolvedEvent extends BaseEvent {
   constructor(
     public readonly positionId: string,

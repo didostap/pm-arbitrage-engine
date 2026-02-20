@@ -243,10 +243,29 @@ describe('ExposureAlertScheduler', () => {
 
     await scheduler.checkExposedPositions();
 
-    expect(positionRepository.findByStatusWithPair).toHaveBeenCalledWith(
-      'SINGLE_LEG_EXPOSED',
-    );
+    expect(positionRepository.findByStatusWithPair).toHaveBeenCalledWith({
+      in: ['SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+    });
     // Should NOT call findByIdWithPair separately
     expect(positionRepository.findByIdWithPair).not.toHaveBeenCalled();
+  });
+
+  it('should include EXIT_PARTIAL positions in re-emission', async () => {
+    const exitPartialPosition = createMockPosition({
+      positionId: 'pos-exit-partial',
+      status: 'EXIT_PARTIAL',
+    });
+    positionRepository.findByStatusWithPair!.mockResolvedValue([
+      exitPartialPosition,
+    ]);
+
+    await scheduler.checkExposedPositions();
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.SINGLE_LEG_EXPOSURE_REMINDER,
+      expect.objectContaining({
+        positionId: 'pos-exit-partial',
+      }),
+    );
   });
 });

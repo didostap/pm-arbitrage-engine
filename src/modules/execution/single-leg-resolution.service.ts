@@ -74,10 +74,13 @@ export class SingleLegResolutionService {
       );
     }
 
-    if (position.status !== 'SINGLE_LEG_EXPOSED') {
+    if (
+      position.status !== 'SINGLE_LEG_EXPOSED' &&
+      position.status !== 'EXIT_PARTIAL'
+    ) {
       throw new ExecutionError(
         EXECUTION_ERROR_CODES.INVALID_POSITION_STATE,
-        'Position is not in single-leg exposed state',
+        'Position is not in single-leg exposed or exit-partial state',
         'warning',
       );
     }
@@ -225,10 +228,13 @@ export class SingleLegResolutionService {
       );
     }
 
-    if (position.status !== 'SINGLE_LEG_EXPOSED') {
+    if (
+      position.status !== 'SINGLE_LEG_EXPOSED' &&
+      position.status !== 'EXIT_PARTIAL'
+    ) {
       throw new ExecutionError(
         EXECUTION_ERROR_CODES.INVALID_POSITION_STATE,
-        'Position is not in single-leg exposed state',
+        'Position is not in single-leg exposed or exit-partial state',
         'warning',
       );
     }

@@ -75,6 +75,7 @@ model ContractMatch {
   firstTradedTimestamp       DateTime? @map("first_traded_timestamp") @db.Timestamptz
   totalCyclesTraded          Int       @default(0) @map("total_cycles_traded")
   primaryLeg                 String?   @map("primary_leg")  // "kalshi" | "polymarket", default applied in ExecutionService
+  resolutionDate             DateTime? @map("resolution_date") @db.Timestamptz
   createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 

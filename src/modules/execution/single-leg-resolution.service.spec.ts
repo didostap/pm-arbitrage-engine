@@ -283,7 +283,7 @@ describe('SingleLegResolutionService', () => {
       positionRepository.findByIdWithPair.mockResolvedValue(position);
 
       await expect(service.retryLeg('pos-1', 0.55)).rejects.toThrow(
-        'Position is not in single-leg exposed state',
+        'Position is not in single-leg exposed or exit-partial state',
       );
     });
 
@@ -457,7 +457,7 @@ describe('SingleLegResolutionService', () => {
       positionRepository.findByIdWithPair.mockResolvedValue(position);
 
       await expect(service.closeLeg('pos-1')).rejects.toThrow(
-        'Position is not in single-leg exposed state',
+        'Position is not in single-leg exposed or exit-partial state',
       );
     });
 
@@ -560,6 +560,64 @@ describe('SingleLegResolutionService', () => {
           quantity: 182,
         }),
       );
+    });
+  });
+
+  describe('EXIT_PARTIAL support', () => {
+    it('should accept EXIT_PARTIAL status for retryLeg', async () => {
+      const position = createMockPosition({ status: 'EXIT_PARTIAL' });
+      positionRepository.findByIdWithPair.mockResolvedValue(position);
+      orderRepository.findById.mockResolvedValue(createMockOrder());
+      polymarketConnector.submitOrder.mockResolvedValue({
+        orderId: 'order-poly-retry-exit',
+        platformId: PlatformId.POLYMARKET,
+        status: 'filled',
+        filledQuantity: 182,
+        filledPrice: 0.55,
+        timestamp: new Date(),
+      });
+      orderRepository.create.mockResolvedValue({
+        orderId: 'order-poly-retry-exit',
+      });
+      positionRepository.updateWithOrder.mockResolvedValue({});
+
+      const result = await service.retryLeg('pos-1', 0.55);
+
+      expect(result.success).toBe(true);
+      expect(result.orderId).toBe('order-poly-retry-exit');
+    });
+
+    it('should accept EXIT_PARTIAL status for closeLeg', async () => {
+      const position = createMockPosition({ status: 'EXIT_PARTIAL' });
+      positionRepository.findByIdWithPair.mockResolvedValue(position);
+      orderRepository.findById.mockResolvedValue(createMockOrder());
+
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: 'kalshi-contract-1',
+        bids: [{ price: 0.44, quantity: 100 }],
+        asks: [{ price: 0.46, quantity: 100 }],
+        timestamp: new Date(),
+      });
+
+      kalshiConnector.submitOrder.mockResolvedValue({
+        orderId: 'order-close-exit',
+        platformId: PlatformId.KALSHI,
+        status: 'filled',
+        filledQuantity: 200,
+        filledPrice: 0.44,
+        timestamp: new Date(),
+      });
+
+      orderRepository.create.mockResolvedValue({
+        orderId: 'order-close-exit',
+      });
+      positionRepository.updateStatus.mockResolvedValue({});
+
+      const result = await service.closeLeg('pos-1', 'Partial exit resolution');
+
+      expect(result.success).toBe(true);
+      expect(result.closeOrderId).toBe('order-close-exit');
     });
   });
 });

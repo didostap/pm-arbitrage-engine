@@ -30,6 +30,19 @@ export class PositionRepository {
     });
   }
 
+  /**
+   * Fetches positions by status with ContractMatch, kalshiOrder, and polymarketOrder included.
+   * Used by exit monitor to access entry fill prices for P&L calculation without N+1 queries.
+   */
+  async findByStatusWithOrders(
+    status: Prisma.OpenPositionWhereInput['status'],
+  ) {
+    return this.prisma.openPosition.findMany({
+      where: { status },
+      include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+    });
+  }
+
   async updateStatus(
     positionId: string,
     status: Prisma.OpenPositionUpdateInput['status'],
