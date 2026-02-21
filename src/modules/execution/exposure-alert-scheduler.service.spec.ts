@@ -98,6 +98,7 @@ describe('ExposureAlertScheduler', () => {
     kalshiConnector = {
       submitOrder: vi.fn(),
       cancelOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPositions: vi.fn(),
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
@@ -116,6 +117,7 @@ describe('ExposureAlertScheduler', () => {
     polymarketConnector = {
       submitOrder: vi.fn(),
       cancelOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPositions: vi.fn(),
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),

@@ -4,6 +4,7 @@ import {
   NormalizedOrderBook,
   OrderParams,
   OrderResult,
+  OrderStatusResult,
   PlatformHealth,
   PlatformId,
   Position,
@@ -22,6 +23,9 @@ export interface IPlatformConnector {
 
   /** Cancel an existing order by ID. */
   cancelOrder(orderId: string): Promise<CancelResult>;
+
+  /** Query the current status of an order. Returns 'not_found' status instead of throwing on missing orders. */
+  getOrder(orderId: string): Promise<OrderStatusResult>;
 
   /** Fetch a point-in-time order book snapshot for a contract. */
   getOrderBook(contractId: string): Promise<NormalizedOrderBook>;

@@ -61,6 +61,26 @@ export class PositionRepository {
     });
   }
 
+  /**
+   * Finds all active positions (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL, RECONCILIATION_REQUIRED)
+   * with associated pair, kalshiOrder, and polymarketOrder for reconciliation.
+   */
+  async findActivePositions() {
+    return this.prisma.openPosition.findMany({
+      where: {
+        status: {
+          in: [
+            'OPEN',
+            'SINGLE_LEG_EXPOSED',
+            'EXIT_PARTIAL',
+            'RECONCILIATION_REQUIRED',
+          ],
+        },
+      },
+      include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+    });
+  }
+
   async updateWithOrder(
     positionId: string,
     data: Prisma.OpenPositionUpdateInput,

@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
-import { Configuration, MarketApi } from 'kalshi-typescript';
+import { Configuration, MarketApi, OrdersApi } from 'kalshi-typescript';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
 import type {
   CancelResult,
@@ -9,6 +9,7 @@ import type {
   NormalizedOrderBook,
   OrderParams,
   OrderResult,
+  OrderStatusResult,
   PlatformHealth,
   Position,
 } from '../../common/types/index.js';
@@ -22,10 +23,29 @@ import { withRetry, normalizeKalshiLevels } from '../../common/utils/index.js';
 import { RateLimiter } from '../../common/utils/rate-limiter.js';
 import { KalshiWebSocketClient } from './kalshi-websocket.client.js';
 
+/** Minimal shape of the Kalshi SDK Order returned by GET /portfolio/orders/{order_id}. */
+interface KalshiOrderResponse {
+  data: {
+    order: {
+      order_id: string;
+      status: string;
+      remaining_count: number;
+      fill_count: number;
+      taker_fill_cost: number;
+    };
+  };
+}
+
+/** Kalshi SDK OrdersApi — typed locally to avoid unresolvable generic return types. */
+interface KalshiOrdersApi {
+  getOrder(orderId: string): Promise<KalshiOrderResponse>;
+}
+
 @Injectable()
 export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
   private readonly logger = new Logger(KalshiConnector.name);
   private readonly marketApi: MarketApi;
+  private readonly ordersApi: KalshiOrdersApi;
   private readonly wsClient: KalshiWebSocketClient;
   private readonly rateLimiter: RateLimiter;
   private lastHeartbeat: Date | null = null;
@@ -64,6 +84,8 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     });
 
     this.marketApi = new MarketApi(config);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- OrdersApi constructor type not resolved by TS SDK
+    this.ordersApi = new OrdersApi(config) as unknown as KalshiOrdersApi;
 
     this.wsClient = new KalshiWebSocketClient({
       apiKeyId,
@@ -236,6 +258,69 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   cancelOrder(_orderId: string): Promise<CancelResult> {
     throw new Error('cancelOrder not implemented - Epic 5 Story 5.1');
+  }
+
+  async getOrder(orderId: string): Promise<OrderStatusResult> {
+    if (!this.connected) {
+      throw new PlatformApiError(
+        KALSHI_ERROR_CODES.INVALID_REQUEST,
+        'Kalshi connector not connected',
+        PlatformId.KALSHI,
+        'error',
+      );
+    }
+
+    await this.rateLimiter.acquireRead();
+
+    try {
+      const response = await withRetry(
+        () => this.ordersApi.getOrder(orderId),
+        RETRY_STRATEGIES.NETWORK_ERROR,
+        (attempt, error) => {
+          this.logger.warn({
+            message: 'Retrying getOrder',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.KALSHI,
+            metadata: { orderId, attempt, error: error.message },
+          });
+        },
+      );
+
+      this.lastHeartbeat = new Date();
+      const order = response.data.order;
+
+      let status: OrderStatusResult['status'];
+      if (order.status === 'resting') {
+        status = 'pending';
+      } else if (order.status === 'canceled') {
+        status = 'cancelled';
+      } else if (order.status === 'executed') {
+        status = order.remaining_count > 0 ? 'partial' : 'filled';
+      } else {
+        status = 'pending';
+      }
+
+      const fillCount = order.fill_count;
+      const fillPrice =
+        fillCount > 0 && order.taker_fill_cost > 0
+          ? order.taker_fill_cost / fillCount / 100
+          : undefined;
+
+      return {
+        orderId: order.order_id,
+        status,
+        fillPrice,
+        fillSize: fillCount > 0 ? fillCount : undefined,
+        rawResponse: order,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('not found') || message.includes('404')) {
+        return { orderId, status: 'not_found' };
+      }
+      throw this.mapError(error);
+    }
   }
 
   getHealth(): PlatformHealth {

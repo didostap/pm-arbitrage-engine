@@ -492,6 +492,88 @@ describe('PolymarketConnector', () => {
     });
   });
 
+  describe('getOrder', () => {
+    it('should throw PlatformApiError when not connected', async () => {
+      await expect(connector.getOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should return filled status for MATCHED order', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrder: mockGetOrder,
+      };
+
+      mockGetOrder.mockResolvedValue({
+        status: 'MATCHED',
+        filledSize: 10,
+        filledPrice: 0.65,
+      });
+
+      const result = await connector.getOrder('pm-order-1');
+
+      expect(result.orderId).toBe('pm-order-1');
+      expect(result.status).toBe('filled');
+      expect(result.fillPrice).toBe(0.65);
+      expect(result.fillSize).toBe(10);
+      expect(result.rawResponse).toBeDefined();
+    });
+
+    it('should return pending status for LIVE order', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrder: mockGetOrder,
+      };
+
+      mockGetOrder.mockResolvedValue({ status: 'LIVE' });
+
+      const result = await connector.getOrder('pm-order-2');
+
+      expect(result.status).toBe('pending');
+    });
+
+    it('should return cancelled status for CANCELED order', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrder: mockGetOrder,
+      };
+
+      mockGetOrder.mockResolvedValue({ status: 'CANCELED' });
+
+      const result = await connector.getOrder('pm-order-3');
+
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('should return not_found for 404 errors instead of throwing', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrder: mockGetOrder,
+      };
+
+      mockGetOrder.mockRejectedValue(new Error('Order not found'));
+
+      const result = await connector.getOrder('missing-order');
+
+      expect(result.orderId).toBe('missing-order');
+      expect(result.status).toBe('not_found');
+    });
+
+    it('should throw PlatformApiError on non-404 error', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrder: mockGetOrder,
+      };
+
+      mockGetOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
+
+      await expect(connector.getOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+  });
+
   describe('placeholder methods', () => {
     it('cancelOrder should throw not-implemented error', () => {
       expect(() => connector.cancelOrder('order-1')).toThrow(

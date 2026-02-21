@@ -8,7 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Decimal from 'decimal.js';
-import { RiskManagerService } from './risk-manager.service';
+import {
+  RiskManagerService,
+  HALT_REASONS as HALT_REASONS_CONST,
+} from './risk-manager.service';
 import { PrismaService } from '../../common/prisma.service';
 import { EVENT_NAMES } from '../../common/events';
 import { RiskLimitError, RISK_ERROR_CODES } from '../../common/errors';
@@ -365,8 +368,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject all opportunities when trading halted', async () => {
-      (service as any).tradingHalted = true;
-      (service as any).haltReason = 'daily_loss_limit';
+      (service as any).activeHaltReasons.add('daily_loss_limit');
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
       );
@@ -377,7 +379,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should short-circuit when halted (no open-pairs check)', async () => {
-      (service as any).tradingHalted = true;
+      (service as any).activeHaltReasons.add('daily_loss_limit');
       (service as any).openPositionCount = 10;
       const logSpy = vi.spyOn(service['logger'], 'warn');
       const decision = await service.validatePosition(
@@ -450,7 +452,7 @@ describe('RiskManagerService', () => {
             dailyPnl: expect.any(String),
             lastResetTimestamp: expect.any(Date),
             tradingHalted: false,
-            haltReason: null,
+            haltReason: '[]',
           }),
         }),
       );
@@ -495,7 +497,9 @@ describe('RiskManagerService', () => {
       // 5% of 10000 = 500
       await service.updateDailyPnl(new Decimal('-500'));
       expect(service.isTradingHalted()).toBe(true);
-      expect((service as any).haltReason).toBe('daily_loss_limit');
+      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
+        true,
+      );
     });
 
     it('should emit LimitBreachedEvent with limitType dailyLoss on breach', async () => {
@@ -603,7 +607,7 @@ describe('RiskManagerService', () => {
         lastResetTimestamp: yesterday,
         totalCapitalDeployed: new Decimal('500'),
         tradingHalted: true,
-        haltReason: 'daily_loss_limit',
+        haltReason: '["daily_loss_limit"]',
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -1166,6 +1170,269 @@ describe('RiskManagerService', () => {
       );
 
       expect(service.getOpenPositionCount()).toBe(0);
+    });
+  });
+
+  describe('haltTrading', () => {
+    it('should add reason to activeHaltReasons and halt trading', () => {
+      service.haltTrading('daily_loss_limit');
+      expect(service.isTradingHalted()).toBe(true);
+      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
+        true,
+      );
+    });
+
+    it('should emit SYSTEM_TRADING_HALTED event', () => {
+      service.haltTrading('daily_loss_limit');
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.SYSTEM_TRADING_HALTED,
+        expect.objectContaining({
+          reason: 'daily_loss_limit',
+          severity: 'critical',
+        }),
+      );
+    });
+
+    it('should not emit duplicate event when already halted for same reason', () => {
+      service.haltTrading('daily_loss_limit');
+      mockEventEmitter.emit.mockClear();
+
+      service.haltTrading('daily_loss_limit');
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('should allow multiple halt reasons simultaneously', () => {
+      service.haltTrading('daily_loss_limit');
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted()).toBe(true);
+      expect((service as any).activeHaltReasons.size).toBe(2);
+    });
+  });
+
+  describe('resumeTrading', () => {
+    it('should remove specific reason from activeHaltReasons', () => {
+      service.haltTrading('daily_loss_limit');
+      service.resumeTrading('daily_loss_limit');
+      expect(service.isTradingHalted()).toBe(false);
+      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
+        false,
+      );
+    });
+
+    it('should emit SYSTEM_TRADING_RESUMED event', () => {
+      service.haltTrading('daily_loss_limit');
+      mockEventEmitter.emit.mockClear();
+
+      service.resumeTrading('daily_loss_limit');
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+        expect.objectContaining({
+          removedReason: 'daily_loss_limit',
+          remainingReasons: [],
+        }),
+      );
+    });
+
+    it('should not emit event when reason is not active', () => {
+      service.resumeTrading('daily_loss_limit');
+      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('should keep trading halted when other reasons remain (overlapping halt)', () => {
+      service.haltTrading('daily_loss_limit');
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted()).toBe(true);
+
+      service.resumeTrading('daily_loss_limit');
+      expect(service.isTradingHalted()).toBe(true);
+      expect(
+        (service as any).activeHaltReasons.has('reconciliation_discrepancy'),
+      ).toBe(true);
+    });
+
+    it('should resume trading only when all reasons cleared', () => {
+      service.haltTrading('daily_loss_limit');
+      service.haltTrading('reconciliation_discrepancy');
+
+      service.resumeTrading('daily_loss_limit');
+      expect(service.isTradingHalted()).toBe(true);
+
+      service.resumeTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted()).toBe(false);
+    });
+
+    it('should include remaining reasons in SYSTEM_TRADING_RESUMED event', () => {
+      service.haltTrading('daily_loss_limit');
+      service.haltTrading('reconciliation_discrepancy');
+      mockEventEmitter.emit.mockClear();
+
+      service.resumeTrading('daily_loss_limit');
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+        expect.objectContaining({
+          removedReason: 'daily_loss_limit',
+          remainingReasons: ['reconciliation_discrepancy'],
+        }),
+      );
+    });
+  });
+
+  describe('recalculateFromPositions', () => {
+    it('should force-set openPositionCount and totalCapitalDeployed', async () => {
+      (service as any).openPositionCount = 5;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(2000);
+
+      await service.recalculateFromPositions(3, new Decimal('1200'));
+
+      expect(service.getOpenPositionCount()).toBe(3);
+      expect(service.getCurrentExposure().totalCapitalDeployed.toNumber()).toBe(
+        1200,
+      );
+    });
+
+    it('should persist state after recalculation', async () => {
+      mockPrisma.riskState.upsert.mockClear();
+
+      await service.recalculateFromPositions(2, new Decimal('800'));
+
+      expect(mockPrisma.riskState.upsert).toHaveBeenCalled();
+    });
+
+    it('should log the override with previous and new values', async () => {
+      (service as any).openPositionCount = 5;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(2000);
+      const logSpy = vi.spyOn(service['logger'], 'log');
+
+      await service.recalculateFromPositions(3, new Decimal('1200'));
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Risk state recalculated from reconciliation',
+          data: expect.objectContaining({
+            previousOpenCount: 5,
+            newOpenCount: 3,
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('HALT_REASONS constant', () => {
+    it('should contain DAILY_LOSS_LIMIT', () => {
+      expect(HALT_REASONS_CONST.DAILY_LOSS_LIMIT).toBe('daily_loss_limit');
+    });
+
+    it('should contain RECONCILIATION_DISCREPANCY', () => {
+      expect(HALT_REASONS_CONST.RECONCILIATION_DISCREPANCY).toBe(
+        'reconciliation_discrepancy',
+      );
+    });
+  });
+
+  describe('halt state persistence', () => {
+    it('should persist activeHaltReasons as JSON array', async () => {
+      service.haltTrading('daily_loss_limit');
+      await service.updateDailyPnl(new Decimal('0'));
+
+      const lastUpsertCall = mockPrisma.riskState.upsert.mock.calls.at(-1);
+      const updateData = lastUpsertCall?.[0]?.update;
+      expect(updateData.haltReason).toBe('["daily_loss_limit"]');
+      expect(updateData.tradingHalted).toBe(true);
+    });
+
+    it('should persist empty array when no halts active', async () => {
+      await service.updateDailyPnl(new Decimal('-10'));
+
+      const lastUpsertCall = mockPrisma.riskState.upsert.mock.calls.at(-1);
+      const updateData = lastUpsertCall?.[0]?.update;
+      expect(updateData.haltReason).toBe('[]');
+      expect(updateData.tradingHalted).toBe(false);
+    });
+
+    it('should restore halt reasons from JSON array in DB', async () => {
+      const todayMidnight = new Date();
+      todayMidnight.setUTCHours(0, 0, 0, 0);
+      mockPrisma.riskState.findFirst.mockResolvedValue({
+        id: 'test-id',
+        singletonKey: 'default',
+        dailyPnl: new Decimal(0),
+        openPositionCount: 0,
+        lastResetTimestamp: todayMidnight,
+        totalCapitalDeployed: new Decimal('0'),
+        tradingHalted: true,
+        haltReason: '["reconciliation_discrepancy"]',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const module = await Test.createTestingModule({
+        providers: [
+          RiskManagerService,
+          { provide: ConfigService, useValue: createMockConfigService() },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          { provide: PrismaService, useValue: mockPrisma },
+        ],
+      }).compile();
+      const svc = module.get<RiskManagerService>(RiskManagerService);
+      await svc.onModuleInit();
+
+      expect(svc.isTradingHalted()).toBe(true);
+      expect(
+        (svc as any).activeHaltReasons.has('reconciliation_discrepancy'),
+      ).toBe(true);
+    });
+
+    it('should restore from legacy single-string haltReason', async () => {
+      const todayMidnight = new Date();
+      todayMidnight.setUTCHours(0, 0, 0, 0);
+      mockPrisma.riskState.findFirst.mockResolvedValue({
+        id: 'test-id',
+        singletonKey: 'default',
+        dailyPnl: new Decimal(0),
+        openPositionCount: 0,
+        lastResetTimestamp: todayMidnight,
+        totalCapitalDeployed: new Decimal('0'),
+        tradingHalted: true,
+        haltReason: 'daily_loss_limit',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const module = await Test.createTestingModule({
+        providers: [
+          RiskManagerService,
+          { provide: ConfigService, useValue: createMockConfigService() },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          { provide: PrismaService, useValue: mockPrisma },
+        ],
+      }).compile();
+      const svc = module.get<RiskManagerService>(RiskManagerService);
+      await svc.onModuleInit();
+
+      // Legacy format should be interpreted correctly
+      expect(svc.isTradingHalted()).toBe(true);
+      expect((svc as any).activeHaltReasons.has('daily_loss_limit')).toBe(true);
+    });
+  });
+
+  describe('midnight reset with overlapping halts', () => {
+    it('should only clear daily_loss_limit on midnight reset, not reconciliation_discrepancy', async () => {
+      service.haltTrading('daily_loss_limit');
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted()).toBe(true);
+
+      await service.handleMidnightReset();
+
+      // Daily loss should be cleared
+      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
+        false,
+      );
+      // Reconciliation halt should remain
+      expect(
+        (service as any).activeHaltReasons.has('reconciliation_discrepancy'),
+      ).toBe(true);
+      // Trading should still be halted
+      expect(service.isTradingHalted()).toBe(true);
     });
   });
 });

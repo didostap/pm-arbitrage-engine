@@ -21,6 +21,8 @@ import {
   BudgetReservedEvent,
   BudgetCommittedEvent,
   BudgetReleasedEvent,
+  TradingHaltedEvent,
+  TradingResumedEvent,
 } from '../../common/events';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PrismaService } from '../../common/prisma.service';
@@ -30,10 +32,11 @@ import {
 } from '../../common/errors/risk-limit-error';
 import { randomUUID } from 'crypto';
 
-const HALT_REASONS = {
+export const HALT_REASONS = {
   DAILY_LOSS_LIMIT: 'daily_loss_limit',
+  RECONCILIATION_DISCREPANCY: 'reconciliation_discrepancy',
 } as const;
-type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS] | null;
+export type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS];
 
 @Injectable()
 export class RiskManagerService implements IRiskManager, OnModuleInit {
@@ -42,8 +45,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   private openPositionCount = 0;
   private totalCapitalDeployed = new FinancialDecimal(0);
   private dailyPnl = new FinancialDecimal(0);
-  private tradingHalted = false;
-  private haltReason: HaltReason = null;
+  private activeHaltReasons = new Set<HaltReason>();
   private dailyLossApproachEmitted = false;
   private lastResetTimestamp: Date | null = null;
   private reservations = new Map<string, BudgetReservation>();
@@ -158,8 +160,32 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         state.totalCapitalDeployed.toString(),
       );
       this.dailyPnl = new FinancialDecimal(state.dailyPnl.toString());
-      this.tradingHalted = state.tradingHalted;
-      this.haltReason = (state.haltReason as HaltReason) ?? null;
+
+      // Restore halt reasons from DB
+      this.activeHaltReasons = new Set<HaltReason>();
+      if (state.haltReason) {
+        try {
+          const parsed: unknown = JSON.parse(state.haltReason);
+          if (Array.isArray(parsed)) {
+            for (const r of parsed) {
+              if (typeof r === 'string') {
+                this.activeHaltReasons.add(r as HaltReason);
+              }
+            }
+          } else if (typeof parsed === 'string' && parsed.length > 0) {
+            // Legacy single-string format
+            this.activeHaltReasons.add(parsed as HaltReason);
+          }
+        } catch {
+          // Legacy single-string format (not JSON)
+          if (
+            typeof state.haltReason === 'string' &&
+            state.haltReason.length > 0
+          ) {
+            this.activeHaltReasons.add(state.haltReason as HaltReason);
+          }
+        }
+      }
 
       // Stale-day detection
       if (state.lastResetTimestamp) {
@@ -172,8 +198,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
             data: { previousDailyPnl: this.dailyPnl.toString() },
           });
           this.dailyPnl = new FinancialDecimal(0);
-          this.tradingHalted = false;
-          this.haltReason = null;
+          this.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
           this.lastResetTimestamp = todayMidnight;
           this.dailyLossApproachEmitted = false;
           await this.persistState();
@@ -187,8 +212,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
             ? this.dailyPnl.abs()
             : new FinancialDecimal(0);
           if (absLoss.gte(dailyLossLimitUsd)) {
-            this.tradingHalted = true;
-            this.haltReason = HALT_REASONS.DAILY_LOSS_LIMIT;
+            this.activeHaltReasons.add(HALT_REASONS.DAILY_LOSS_LIMIT);
           }
         }
       } else {
@@ -204,8 +228,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
             data: { dailyPnl: this.dailyPnl.toString() },
           });
           this.dailyPnl = new FinancialDecimal(0);
-          this.tradingHalted = false;
-          this.haltReason = null;
+          this.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
           await this.persistState();
         }
       }
@@ -216,7 +239,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           openPositionCount: this.openPositionCount,
           totalCapitalDeployed: this.totalCapitalDeployed.toString(),
           dailyPnl: this.dailyPnl.toString(),
-          tradingHalted: this.tradingHalted,
+          tradingHalted: this.isTradingHalted(),
         },
       });
     } else {
@@ -234,6 +257,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     try {
       const reservedPositionSlots = this.getReservedPositionSlots();
       const reservedCapital = this.getReservedCapital().toFixed();
+      const tradingHalted = this.isTradingHalted();
+      const haltReason = JSON.stringify([...this.activeHaltReasons]);
       await this.prisma.riskState.upsert({
         where: { singletonKey: 'default' },
         update: {
@@ -241,8 +266,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           totalCapitalDeployed: this.totalCapitalDeployed.toFixed(),
           dailyPnl: this.dailyPnl.toFixed(),
           lastResetTimestamp: this.lastResetTimestamp,
-          tradingHalted: this.tradingHalted,
-          haltReason: this.haltReason,
+          tradingHalted,
+          haltReason,
           reservedCapital,
           reservedPositionSlots,
         },
@@ -252,8 +277,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           totalCapitalDeployed: this.totalCapitalDeployed.toFixed(),
           dailyPnl: this.dailyPnl.toFixed(),
           lastResetTimestamp: this.lastResetTimestamp,
-          tradingHalted: this.tradingHalted,
-          haltReason: this.haltReason,
+          tradingHalted,
+          haltReason,
           reservedCapital,
           reservedPositionSlots,
         },
@@ -264,7 +289,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         data: {
           operation: 'persistState',
           dailyPnl: this.dailyPnl.toString(),
-          tradingHalted: this.tradingHalted,
+          tradingHalted: this.isTradingHalted(),
           error: error instanceof Error ? error.message : String(error),
         },
       });
@@ -274,7 +299,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   validatePosition(_opportunity: unknown): Promise<RiskDecision> {
     // FIRST: Check daily loss halt (Story 4.2) — before any other computation
-    if (this.tradingHalted) {
+    if (this.isTradingHalted()) {
       return Promise.resolve({
         approved: false,
         reason: 'Trading halted: daily loss limit breached',
@@ -370,8 +395,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   ): Promise<RiskDecision> {
     // FIRST: Check if daily loss halt is active — cannot be overridden
     if (
-      this.tradingHalted &&
-      this.haltReason === HALT_REASONS.DAILY_LOSS_LIMIT
+      this.isTradingHalted() &&
+      this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
     ) {
       const denialReason = 'Override denied: daily loss halt active';
 
@@ -488,9 +513,11 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       : new FinancialDecimal(0);
     const percentUsed = absLoss.div(dailyLossLimitUsd).toNumber();
 
-    if (percentUsed >= 1.0 && !this.tradingHalted) {
-      this.tradingHalted = true;
-      this.haltReason = HALT_REASONS.DAILY_LOSS_LIMIT;
+    if (
+      percentUsed >= 1.0 &&
+      !this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
+    ) {
+      this.haltTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
       this.eventEmitter.emit(
         EVENT_NAMES.LIMIT_BREACHED,
         new LimitBreachedEvent(
@@ -528,7 +555,74 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   isTradingHalted(): boolean {
-    return this.tradingHalted;
+    return this.activeHaltReasons.size > 0;
+  }
+
+  haltTrading(reason: string): void {
+    const haltReason = reason as HaltReason;
+    if (this.activeHaltReasons.has(haltReason)) {
+      return; // Already halted for this reason
+    }
+    this.activeHaltReasons.add(haltReason);
+    this.eventEmitter.emit(
+      EVENT_NAMES.SYSTEM_TRADING_HALTED,
+      new TradingHaltedEvent(
+        reason,
+        { activeReasons: [...this.activeHaltReasons] },
+        new Date(),
+        'critical',
+      ),
+    );
+    this.logger.log({
+      message: `Trading halted: ${reason}`,
+      data: { reason, activeReasons: [...this.activeHaltReasons] },
+    });
+    void this.persistState();
+  }
+
+  resumeTrading(reason: string): void {
+    const haltReason = reason as HaltReason;
+    if (!this.activeHaltReasons.has(haltReason)) {
+      return; // Not halted for this reason
+    }
+    this.activeHaltReasons.delete(haltReason);
+    const remaining = [...this.activeHaltReasons];
+    this.eventEmitter.emit(
+      EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+      new TradingResumedEvent(reason, remaining, new Date()),
+    );
+    this.logger.log({
+      message: `Halt reason removed: ${reason}`,
+      data: {
+        removedReason: reason,
+        remainingReasons: remaining,
+        tradingResumed: this.activeHaltReasons.size === 0,
+      },
+    });
+    void this.persistState();
+  }
+
+  async recalculateFromPositions(
+    openCount: number,
+    capitalDeployed: Decimal,
+  ): Promise<void> {
+    const previousCount = this.openPositionCount;
+    const previousCapital = this.totalCapitalDeployed.toString();
+
+    this.openPositionCount = openCount;
+    this.totalCapitalDeployed = new FinancialDecimal(capitalDeployed);
+
+    this.logger.log({
+      message: 'Risk state recalculated from reconciliation',
+      data: {
+        previousOpenCount: previousCount,
+        newOpenCount: openCount,
+        previousCapitalDeployed: previousCapital,
+        newCapitalDeployed: this.totalCapitalDeployed.toString(),
+      },
+    });
+
+    await this.persistState();
   }
 
   @Cron('0 0 0 * * *', { timeZone: 'UTC' })
@@ -540,9 +634,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     this.lastResetTimestamp = todayMidnight;
     this.dailyLossApproachEmitted = false;
 
-    if (this.haltReason === HALT_REASONS.DAILY_LOSS_LIMIT) {
-      this.tradingHalted = false;
-      this.haltReason = null;
+    if (this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)) {
+      this.resumeTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
       this.logger.log({ message: 'Trading halt cleared by midnight reset' });
     }
 
@@ -580,7 +673,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
   async reserveBudget(request: ReservationRequest): Promise<BudgetReservation> {
     // Check halt
-    if (this.tradingHalted) {
+    if (this.isTradingHalted()) {
       throw new RiskLimitError(
         RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
         'Budget reservation failed: trading halted',

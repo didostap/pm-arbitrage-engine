@@ -6,6 +6,7 @@ import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.mo
 import { ArbitrageDetectionModule } from '../modules/arbitrage-detection/arbitrage-detection.module';
 import { RiskManagementModule } from '../modules/risk-management/risk-management.module';
 import { ExecutionModule } from '../modules/execution/execution.module';
+import { ReconciliationModule } from '../reconciliation/reconciliation.module';
 
 /**
  * Core module providing engine lifecycle management and orchestration.
@@ -17,6 +18,7 @@ import { ExecutionModule } from '../modules/execution/execution.module';
     ArbitrageDetectionModule, // Provides DetectionService for TradingEngineService
     RiskManagementModule, // Provides IRiskManager for TradingEngineService
     ExecutionModule, // Provides IExecutionQueue for TradingEngineService
+    ReconciliationModule, // Provides StartupReconciliationService for EngineLifecycleService
   ],
   providers: [EngineLifecycleService, TradingEngineService, SchedulerService],
   exports: [TradingEngineService], // Export for future monitoring integration

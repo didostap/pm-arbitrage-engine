@@ -27,4 +27,27 @@ export class OrderRepository {
       data: { status },
     });
   }
+
+  /** Finds all orders with PENDING status. */
+  async findPendingOrders() {
+    return this.prisma.order.findMany({
+      where: { status: 'PENDING' },
+    });
+  }
+
+  /** Updates order status with optional fill data. */
+  async updateOrderStatus(
+    orderId: string,
+    status: Prisma.OrderUpdateInput['status'],
+    fillPrice?: Prisma.OrderUpdateInput['fillPrice'],
+    fillSize?: Prisma.OrderUpdateInput['fillSize'],
+  ) {
+    const data: Prisma.OrderUpdateInput = { status };
+    if (fillPrice !== undefined) data.fillPrice = fillPrice;
+    if (fillSize !== undefined) data.fillSize = fillSize;
+    return this.prisma.order.update({
+      where: { orderId },
+      data,
+    });
+  }
 }

@@ -43,6 +43,9 @@ export const EVENT_NAMES = {
   /** Emitted when trading is halted for any reason (time drift, risk limits, etc.) */
   SYSTEM_TRADING_HALTED: 'system.trading.halted',
 
+  /** Emitted when a specific halt reason is removed and trading may resume */
+  SYSTEM_TRADING_RESUMED: 'system.trading.resumed',
+
   // ============================================================================
   // EPIC 2 EVENTS (Story 2.4 - Degradation Protocol)
   // ============================================================================
@@ -109,6 +112,13 @@ export const EVENT_NAMES = {
   // [All Epics] System Health Events
   /** Emitted when critical system health issue detected (database failure, etc.) */
   SYSTEM_HEALTH_CRITICAL: 'system.health.critical',
+
+  // [Story 5.5] Reconciliation Events
+  /** Emitted when startup reconciliation completes */
+  RECONCILIATION_COMPLETE: 'system.reconciliation.complete',
+
+  /** Emitted for each discrepancy found during reconciliation */
+  RECONCILIATION_DISCREPANCY: 'system.reconciliation.discrepancy',
 } as const;
 
 /**

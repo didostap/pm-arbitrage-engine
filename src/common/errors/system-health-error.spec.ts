@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { SystemHealthError } from './system-health-error';
+import {
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from './system-health-error';
 
 describe('SystemHealthError', () => {
   it('should create error with code 4000-4999', () => {
@@ -28,5 +31,18 @@ describe('SystemHealthError', () => {
     );
 
     expect(error.metadata).toEqual({ driftMs: 150 });
+  });
+
+  it('should accept RECONCILIATION_DISCREPANCY code 4005', () => {
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.RECONCILIATION_DISCREPANCY,
+      'Order status mismatch detected during reconciliation',
+      'warning',
+      'reconciliation',
+    );
+
+    expect(error.code).toBe(4005);
+    expect(error.severity).toBe('warning');
+    expect(error.component).toBe('reconciliation');
   });
 });

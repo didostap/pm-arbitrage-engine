@@ -43,6 +43,24 @@ export interface Position {
 }
 
 /**
+ * Result from querying an individual order's status on a platform.
+ * Used by reconciliation to verify order states without throwing on not-found.
+ */
+export interface OrderStatusResult {
+  orderId: string;
+  status:
+    | 'filled'
+    | 'pending'
+    | 'cancelled'
+    | 'rejected'
+    | 'partial'
+    | 'not_found';
+  fillPrice?: number;
+  fillSize?: number;
+  rawResponse?: unknown;
+}
+
+/**
  * Platform fee schedule for edge calculation.
  * NOTE: Fee percentages use 0-100 scale (e.g., 2.0 = 2%), NOT decimal scale (0-1).
  * Connectors must convert internal decimal constants (e.g., 0.02) to percentage (2.0).

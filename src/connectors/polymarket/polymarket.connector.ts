@@ -14,6 +14,7 @@ import type {
   NormalizedOrderBook,
   OrderParams,
   OrderResult,
+  OrderStatusResult,
   PlatformHealth,
   Position,
 } from '../../common/types/index.js';
@@ -449,6 +450,56 @@ export class PolymarketConnector
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   cancelOrder(_orderId: string): Promise<CancelResult> {
     throw new Error('cancelOrder not implemented - Epic 5');
+  }
+
+  async getOrder(orderId: string): Promise<OrderStatusResult> {
+    if (!this.connected || !this.clobClient) {
+      throw new PlatformApiError(
+        POLYMARKET_ERROR_CODES.NOT_CONNECTED,
+        'Polymarket connector not connected',
+        PlatformId.POLYMARKET,
+        'error',
+      );
+    }
+
+    await this.rateLimiter.acquireRead();
+
+    try {
+      const orderData = await this.clobClient.getOrder(orderId);
+      const rawStatus = (orderData as { status?: string }).status;
+
+      let status: OrderStatusResult['status'];
+      if (rawStatus === 'MATCHED' || rawStatus === 'matched') {
+        status = 'filled';
+      } else if (rawStatus === 'LIVE' || rawStatus === 'live') {
+        status = 'pending';
+      } else if (
+        rawStatus === 'CANCELED' ||
+        rawStatus === 'canceled' ||
+        rawStatus === 'cancelled'
+      ) {
+        status = 'cancelled';
+      } else {
+        status = 'pending';
+      }
+
+      const fillSize = (orderData as { filledSize?: number }).filledSize;
+      const fillPrice = (orderData as { filledPrice?: number }).filledPrice;
+
+      return {
+        orderId,
+        status,
+        fillPrice: fillPrice ?? undefined,
+        fillSize: fillSize ?? undefined,
+        rawResponse: orderData,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('not found') || message.includes('404')) {
+        return { orderId, status: 'not_found' };
+      }
+      throw this.mapError(error);
+    }
   }
 
   private mapError(error: unknown): PlatformApiError {

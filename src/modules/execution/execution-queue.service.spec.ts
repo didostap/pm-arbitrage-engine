@@ -70,6 +70,9 @@ describe('ExecutionQueueService', () => {
     isTradingHalted: ReturnType<typeof vi.fn>;
     processOverride: ReturnType<typeof vi.fn>;
     closePosition: ReturnType<typeof vi.fn>;
+    haltTrading: ReturnType<typeof vi.fn>;
+    resumeTrading: ReturnType<typeof vi.fn>;
+    recalculateFromPositions: ReturnType<typeof vi.fn>;
   };
   let mockExecutionEngine: {
     execute: ReturnType<typeof vi.fn>;
@@ -105,6 +108,9 @@ describe('ExecutionQueueService', () => {
       isTradingHalted: vi.fn(),
       processOverride: vi.fn(),
       closePosition: vi.fn().mockResolvedValue(undefined),
+      haltTrading: vi.fn(),
+      resumeTrading: vi.fn(),
+      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
     };
 
     mockExecutionEngine = {

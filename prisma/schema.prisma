@@ -36,10 +36,10 @@ model SystemMetadata {
 model OrderBookSnapshot {
   id              String   @id @default(uuid())
   platform        Platform // Platform enum: KALSHI | POLYMARKET
-  contract_id     String   // Platform's contract identifier
-  bids            Json     // PriceLevel[] serialized: [{price: 0.60, quantity: 1000}, ...]
-  asks            Json     // PriceLevel[] serialized: [{price: 0.65, quantity: 800}, ...]
-  sequence_number Int?     // Optional WebSocket sequence tracking
+  contract_id     String // Platform's contract identifier
+  bids            Json // PriceLevel[] serialized: [{price: 0.60, quantity: 1000}, ...]
+  asks            Json // PriceLevel[] serialized: [{price: 0.65, quantity: 800}, ...]
+  sequence_number Int? // Optional WebSocket sequence tracking
   created_at      DateTime @default(now()) @db.Timestamptz
 
   @@index([platform, contract_id, created_at])
@@ -49,13 +49,13 @@ model OrderBookSnapshot {
 
 // Platform health logs for observability and degradation analysis
 model PlatformHealthLog {
-  id                 String   @id @default(uuid())
-  platform           Platform // Platform enum: KALSHI | POLYMARKET
-  status             String   // "healthy" | "degraded" | "disconnected" (NOT "offline")
-  last_update        DateTime @db.Timestamptz
-  response_time_ms   Float?   // p95 latency
-  connection_state   String   // From connector.getHealth() metadata
-  created_at         DateTime @default(now()) @db.Timestamptz
+  id               String   @id @default(uuid())
+  platform         Platform // Platform enum: KALSHI | POLYMARKET
+  status           String // "healthy" | "degraded" | "disconnected" (NOT "offline")
+  last_update      DateTime @db.Timestamptz
+  response_time_ms Float? // p95 latency
+  connection_state String // From connector.getHealth() metadata
+  created_at       DateTime @default(now()) @db.Timestamptz
 
   @@index([platform, created_at])
   @@index([created_at])
@@ -64,23 +64,23 @@ model PlatformHealthLog {
 
 // Contract match pairs tracking operator-approved cross-platform matches
 model ContractMatch {
-  matchId                    String    @id @default(uuid()) @map("match_id")
-  polymarketContractId       String    @map("polymarket_contract_id")
-  kalshiContractId           String    @map("kalshi_contract_id")
-  polymarketDescription      String?   @map("polymarket_description")
-  kalshiDescription          String?   @map("kalshi_description")
-  operatorApproved           Boolean   @default(false) @map("operator_approved")
-  operatorApprovalTimestamp  DateTime? @map("operator_approval_timestamp") @db.Timestamptz
-  operatorRationale          String?   @map("operator_rationale")
-  firstTradedTimestamp       DateTime? @map("first_traded_timestamp") @db.Timestamptz
-  totalCyclesTraded          Int       @default(0) @map("total_cycles_traded")
-  primaryLeg                 String?   @map("primary_leg")  // "kalshi" | "polymarket", default applied in ExecutionService
-  resolutionDate             DateTime? @map("resolution_date") @db.Timestamptz
-  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  matchId                   String    @id @default(uuid()) @map("match_id")
+  polymarketContractId      String    @map("polymarket_contract_id")
+  kalshiContractId          String    @map("kalshi_contract_id")
+  polymarketDescription     String?   @map("polymarket_description")
+  kalshiDescription         String?   @map("kalshi_description")
+  operatorApproved          Boolean   @default(false) @map("operator_approved")
+  operatorApprovalTimestamp DateTime? @map("operator_approval_timestamp") @db.Timestamptz
+  operatorRationale         String?   @map("operator_rationale")
+  firstTradedTimestamp      DateTime? @map("first_traded_timestamp") @db.Timestamptz
+  totalCyclesTraded         Int       @default(0) @map("total_cycles_traded")
+  primaryLeg                String?   @map("primary_leg") // "kalshi" | "polymarket", default applied in ExecutionService
+  resolutionDate            DateTime? @map("resolution_date") @db.Timestamptz
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  orders        Order[]
-  positions     OpenPosition[]
+  orders    Order[]
+  positions OpenPosition[]
 
   @@unique([polymarketContractId, kalshiContractId])
   @@index([operatorApproved])
@@ -125,20 +125,20 @@ enum PositionStatus {
 
 // Individual orders submitted to platforms
 model Order {
-  orderId     String      @id @default(uuid()) @map("order_id")
-  platform    Platform
-  contractId  String      @map("contract_id")
-  pairId      String      @map("pair_id")
-  side        String      // 'buy' | 'sell'
-  price       Decimal     @db.Decimal(20, 8)
-  size        Decimal     @db.Decimal(20, 8)
-  status      OrderStatus
-  fillPrice   Decimal?    @map("fill_price") @db.Decimal(20, 8)
-  fillSize    Decimal?    @map("fill_size") @db.Decimal(20, 8)
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  orderId    String      @id @default(uuid()) @map("order_id")
+  platform   Platform
+  contractId String      @map("contract_id")
+  pairId     String      @map("pair_id")
+  side       String // 'buy' | 'sell'
+  price      Decimal     @db.Decimal(20, 8)
+  size       Decimal     @db.Decimal(20, 8)
+  status     OrderStatus
+  fillPrice  Decimal?    @map("fill_price") @db.Decimal(20, 8)
+  fillSize   Decimal?    @map("fill_size") @db.Decimal(20, 8)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
-  pair        ContractMatch @relation(fields: [pairId], references: [matchId])
+  pair ContractMatch @relation(fields: [pairId], references: [matchId])
 
   polymarketPositions OpenPosition[] @relation("PolymarketOrder")
   kalshiPositions     OpenPosition[] @relation("KalshiOrder")
@@ -151,22 +151,24 @@ model Order {
 
 // Open positions tracking two-leg (or single-leg) arbitrage positions
 model OpenPosition {
-  positionId          String         @id @default(uuid()) @map("position_id")
-  pairId              String         @map("pair_id")
-  polymarketOrderId   String?        @map("polymarket_order_id")
-  kalshiOrderId       String?        @map("kalshi_order_id")
-  polymarketSide      String?        @map("polymarket_side")
-  kalshiSide          String?        @map("kalshi_side")
-  entryPrices         Json           @map("entry_prices")    // {polymarket: string, kalshi: string}
-  sizes               Json                                    // {polymarket: string, kalshi: string}
-  expectedEdge        Decimal        @map("expected_edge") @db.Decimal(20, 8)
-  status              PositionStatus
-  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  positionId        String         @id @default(uuid()) @map("position_id")
+  pairId            String         @map("pair_id")
+  polymarketOrderId String?        @map("polymarket_order_id")
+  kalshiOrderId     String?        @map("kalshi_order_id")
+  polymarketSide    String?        @map("polymarket_side")
+  kalshiSide        String?        @map("kalshi_side")
+  entryPrices       Json           @map("entry_prices") // {polymarket: string, kalshi: string}
+  sizes             Json // {polymarket: string, kalshi: string}
+  expectedEdge      Decimal        @map("expected_edge") @db.Decimal(20, 8)
+  status            PositionStatus
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  pair                ContractMatch  @relation(fields: [pairId], references: [matchId])
-  polymarketOrder     Order?         @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
-  kalshiOrder         Order?         @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])
+  reconciliationContext Json? @map("reconciliation_context")
+
+  pair            ContractMatch @relation(fields: [pairId], references: [matchId])
+  polymarketOrder Order?        @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
+  kalshiOrder     Order?        @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])
 
   @@index([pairId])
   @@index([status])

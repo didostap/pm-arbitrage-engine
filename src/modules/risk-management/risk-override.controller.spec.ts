@@ -17,6 +17,9 @@ describe('RiskOverrideController', () => {
     getOpenPositionCount: vi.fn(),
     updateDailyPnl: vi.fn(),
     isTradingHalted: vi.fn(),
+    haltTrading: vi.fn(),
+    resumeTrading: vi.fn(),
+    recalculateFromPositions: vi.fn(),
   };
 
   beforeEach(async () => {

@@ -90,6 +90,7 @@ describe('ExitMonitorService', () => {
 
     kalshiConnector = {
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.KALSHI,
         contractId: 'kalshi-contract-1',
@@ -115,6 +116,7 @@ describe('ExitMonitorService', () => {
 
     polymarketConnector = {
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
         contractId: 'poly-contract-1',
@@ -140,6 +142,9 @@ describe('ExitMonitorService', () => {
 
     riskManager = {
       closePosition: vi.fn().mockResolvedValue(undefined),
+      haltTrading: vi.fn(),
+      resumeTrading: vi.fn(),
+      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
     };
 
     eventEmitter = {

@@ -6,6 +6,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EngineLifecycleService } from './engine-lifecycle.service';
 import { TradingEngineService } from './trading-engine.service';
 import { PrismaService } from '../common/prisma.service';
+import { StartupReconciliationService } from '../reconciliation/startup-reconciliation.service';
+import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.constants';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock the NTP utility to avoid real network calls in tests
@@ -21,6 +23,70 @@ vi.mock('../common/utils', async () => {
   };
 });
 
+const createMockReconciliationService = () => ({
+  reconcile: vi.fn().mockResolvedValue({
+    positionsChecked: 0,
+    ordersVerified: 0,
+    pendingOrdersResolved: 0,
+    discrepanciesFound: 0,
+    durationMs: 100,
+    platformsUnavailable: [],
+    discrepancies: [],
+  }),
+  getLastRunResult: vi.fn().mockReturnValue(null),
+});
+
+const createProviders = (overrides?: Record<string, unknown>) => [
+  EngineLifecycleService,
+  {
+    provide: ConfigService,
+    useValue: {
+      get: vi.fn((key: string, defaultValue: number): number => {
+        if (key === 'POLLING_INTERVAL_MS') return 30000;
+        return defaultValue;
+      }),
+      ...(overrides?.configService as object),
+    },
+  },
+  {
+    provide: PrismaService,
+    useValue: {
+      $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
+      ...(overrides?.prisma as object),
+    },
+  },
+  {
+    provide: TradingEngineService,
+    useValue: {
+      initiateShutdown: vi.fn(),
+      waitForShutdown: vi.fn().mockResolvedValue(undefined),
+      ...(overrides?.tradingEngine as object),
+    },
+  },
+  {
+    provide: EventEmitter2,
+    useValue: {
+      emit: vi.fn(),
+      ...(overrides?.eventEmitter as object),
+    },
+  },
+  {
+    provide: StartupReconciliationService,
+    useValue:
+      (overrides?.reconciliation as object) ??
+      createMockReconciliationService(),
+  },
+  {
+    provide: RISK_MANAGER_TOKEN,
+    useValue: {
+      haltTrading: vi.fn(),
+      resumeTrading: vi.fn(),
+      isTradingHalted: vi.fn().mockReturnValue(false),
+      ...(overrides?.riskManager as object),
+    },
+  },
+];
+
 describe('EngineLifecycleService', () => {
   let service: EngineLifecycleService;
   let prisma: PrismaService;
@@ -28,37 +94,7 @@ describe('EngineLifecycleService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        EngineLifecycleService,
-        {
-          provide: ConfigService,
-          useValue: {
-            get: vi.fn((key: string, defaultValue: number): number => {
-              if (key === 'POLLING_INTERVAL_MS') return 30000;
-              return defaultValue;
-            }),
-          },
-        },
-        {
-          provide: PrismaService,
-          useValue: {
-            $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
-          },
-        },
-        {
-          provide: TradingEngineService,
-          useValue: {
-            initiateShutdown: vi.fn(),
-            waitForShutdown: vi.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: EventEmitter2,
-          useValue: {
-            emit: vi.fn(),
-          },
-        },
-      ],
+      providers: createProviders(),
     }).compile();
 
     service = module.get<EngineLifecycleService>(EngineLifecycleService);
@@ -103,37 +139,14 @@ describe('EngineLifecycleService', () => {
 
     it('should reject polling interval below minimum (1000ms)', async () => {
       const module = await Test.createTestingModule({
-        providers: [
-          EngineLifecycleService,
-          {
-            provide: ConfigService,
-            useValue: {
-              get: vi.fn((key: string) => {
-                if (key === 'POLLING_INTERVAL_MS') return 500; // Below minimum
-                return 30000;
-              }),
-            },
+        providers: createProviders({
+          configService: {
+            get: vi.fn((key: string) => {
+              if (key === 'POLLING_INTERVAL_MS') return 500; // Below minimum
+              return 30000;
+            }),
           },
-          {
-            provide: PrismaService,
-            useValue: {
-              $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
-            },
-          },
-          {
-            provide: TradingEngineService,
-            useValue: {
-              initiateShutdown: vi.fn(),
-              waitForShutdown: vi.fn().mockResolvedValue(undefined),
-            },
-          },
-          {
-            provide: EventEmitter2,
-            useValue: {
-              emit: vi.fn(),
-            },
-          },
-        ],
+        }),
       }).compile();
 
       const invalidService = module.get<EngineLifecycleService>(
@@ -147,37 +160,14 @@ describe('EngineLifecycleService', () => {
 
     it('should reject polling interval above maximum (300000ms)', async () => {
       const module = await Test.createTestingModule({
-        providers: [
-          EngineLifecycleService,
-          {
-            provide: ConfigService,
-            useValue: {
-              get: vi.fn((key: string) => {
-                if (key === 'POLLING_INTERVAL_MS') return 999999; // Above maximum
-                return 30000;
-              }),
-            },
+        providers: createProviders({
+          configService: {
+            get: vi.fn((key: string) => {
+              if (key === 'POLLING_INTERVAL_MS') return 999999; // Above maximum
+              return 30000;
+            }),
           },
-          {
-            provide: PrismaService,
-            useValue: {
-              $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
-            },
-          },
-          {
-            provide: TradingEngineService,
-            useValue: {
-              initiateShutdown: vi.fn(),
-              waitForShutdown: vi.fn().mockResolvedValue(undefined),
-            },
-          },
-          {
-            provide: EventEmitter2,
-            useValue: {
-              emit: vi.fn(),
-            },
-          },
-        ],
+        }),
       }).compile();
 
       const invalidService = module.get<EngineLifecycleService>(
@@ -187,6 +177,79 @@ describe('EngineLifecycleService', () => {
       await expect(invalidService.onApplicationBootstrap()).rejects.toThrow(
         'POLLING_INTERVAL_MS must be between',
       );
+    });
+
+    it('should call reconciliation service during startup', async () => {
+      const mockRecon = createMockReconciliationService();
+      const module = await Test.createTestingModule({
+        providers: createProviders({ reconciliation: mockRecon }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRecon.reconcile).toHaveBeenCalled();
+    });
+
+    it('should handle reconciliation failure with active positions by halting trading', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockRejectedValue(new Error('Platform timeout')),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+          prisma: {
+            $queryRaw: vi
+              .fn()
+              .mockResolvedValueOnce([{ '?column?': 1 }]) // DB check
+              .mockResolvedValueOnce([{ count: BigInt(2) }]), // Active positions query
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRisk.haltTrading).toHaveBeenCalledWith(
+        'reconciliation_discrepancy',
+      );
+    });
+
+    it('should skip halt when reconciliation fails with no active positions', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockRejectedValue(new Error('Platform timeout')),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+          prisma: {
+            $queryRaw: vi
+              .fn()
+              .mockResolvedValueOnce([{ '?column?': 1 }]) // DB check
+              .mockResolvedValueOnce([{ count: BigInt(0) }]), // No active positions
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      // Should NOT halt trading
+      expect(mockRisk.haltTrading).not.toHaveBeenCalled();
     });
   });
 

@@ -7,6 +7,7 @@ import { PlatformApiError } from '../../common/errors/index.js';
 
 const mockGetMarketOrderbook = vi.fn();
 const mockCreateOrder = vi.fn();
+const mockGetOrder = vi.fn();
 
 // Mock withRetry to execute fn once without retries (avoids real delay in tests)
 vi.mock('../../common/utils/index.js', async (importOriginal) => {
@@ -28,7 +29,9 @@ vi.mock('kalshi-typescript', () => {
   class MockPortfolioApi {
     getPositions = vi.fn();
   }
-  class MockOrdersApi {}
+  class MockOrdersApi {
+    getOrder = mockGetOrder;
+  }
   class MockKalshiAuth {
     generateAuthHeaders() {
       return {};
@@ -221,6 +224,122 @@ describe('KalshiConnector', () => {
           type: 'limit',
         }),
       ).rejects.toThrow(PlatformApiError);
+    });
+  });
+
+  describe('getOrder', () => {
+    it('should throw PlatformApiError when not connected', async () => {
+      await expect(connector.getOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should return filled status for executed order with no remaining', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-1',
+            status: 'executed',
+            remaining_count: 0,
+            fill_count: 10,
+            taker_fill_cost: 450, // 10 contracts * 45 cents each = 450 cents total
+          },
+        },
+      });
+
+      const result = await connector.getOrder('kalshi-order-1');
+
+      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.status).toBe('filled');
+      expect(result.fillPrice).toBe(0.45);
+      expect(result.fillSize).toBe(10);
+      expect(result.rawResponse).toBeDefined();
+    });
+
+    it('should return partial status for executed order with remaining', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-2',
+            status: 'executed',
+            remaining_count: 5,
+            fill_count: 5,
+            taker_fill_cost: 225, // 5 contracts * 45 cents = 225 cents total
+          },
+        },
+      });
+
+      const result = await connector.getOrder('kalshi-order-2');
+
+      expect(result.status).toBe('partial');
+      expect(result.fillSize).toBe(5);
+    });
+
+    it('should return pending status for resting order', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-3',
+            status: 'resting',
+            remaining_count: 10,
+            fill_count: 0,
+            taker_fill_cost: 0,
+          },
+        },
+      });
+
+      const result = await connector.getOrder('kalshi-order-3');
+
+      expect(result.status).toBe('pending');
+      expect(result.fillPrice).toBeUndefined();
+      expect(result.fillSize).toBeUndefined();
+    });
+
+    it('should return cancelled status for canceled order', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-4',
+            status: 'canceled',
+            remaining_count: 10,
+            fill_count: 0,
+            taker_fill_cost: 0,
+          },
+        },
+      });
+
+      const result = await connector.getOrder('kalshi-order-4');
+
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('should return not_found for 404 errors instead of throwing', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockRejectedValue(new Error('Order not found (404)'));
+
+      const result = await connector.getOrder('missing-order');
+
+      expect(result.orderId).toBe('missing-order');
+      expect(result.status).toBe('not_found');
+    });
+
+    it('should throw PlatformApiError on non-404 SDK error', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockGetOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
+
+      await expect(connector.getOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
     });
   });
 

@@ -88,6 +88,7 @@ describe('SingleLegResolutionService', () => {
     kalshiConnector = {
       submitOrder: vi.fn(),
       cancelOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPositions: vi.fn(),
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
@@ -106,6 +107,7 @@ describe('SingleLegResolutionService', () => {
     polymarketConnector = {
       submitOrder: vi.fn(),
       cancelOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPositions: vi.fn(),
       getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
@@ -132,6 +134,9 @@ describe('SingleLegResolutionService', () => {
       commitReservation: vi.fn().mockResolvedValue(undefined),
       releaseReservation: vi.fn().mockResolvedValue(undefined),
       closePosition: vi.fn().mockResolvedValue(undefined),
+      haltTrading: vi.fn(),
+      resumeTrading: vi.fn(),
+      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
     };
 
     eventEmitter = {

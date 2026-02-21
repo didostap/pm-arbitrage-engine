@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   BudgetReservation,
   ReservationRequest,
@@ -22,6 +23,26 @@ export interface IRiskManager {
    * Check if trading is currently halted.
    */
   isTradingHalted(): boolean;
+  /**
+   * Halt trading for the given reason. Adds to the set of active halt reasons.
+   * @param reason - The halt reason string (from HALT_REASONS)
+   */
+  haltTrading(reason: string): void;
+  /**
+   * Resume trading for the given reason. Removes only the specified reason.
+   * Trading actually resumes only when all halt reasons are cleared.
+   * @param reason - The halt reason to remove
+   */
+  resumeTrading(reason: string): void;
+  /**
+   * Force-set open position count and total capital deployed from reconciliation data.
+   * @param openCount - Reconciled open position count
+   * @param capitalDeployed - Reconciled total capital deployed
+   */
+  recalculateFromPositions(
+    openCount: number,
+    capitalDeployed: Decimal,
+  ): Promise<void>;
   /**
    * Process an operator override for a rejected opportunity.
    * @param opportunityId - The opportunity to override

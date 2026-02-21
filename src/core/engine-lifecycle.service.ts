@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   OnApplicationBootstrap,
@@ -11,6 +12,9 @@ import { TradingEngineService } from './trading-engine.service';
 import { syncAndMeasureDrift } from '../common/utils';
 import { EVENT_NAMES, TimeHaltEvent } from '../common/events';
 import { getCorrelationId } from '../common/services/correlation-context';
+import { StartupReconciliationService } from '../reconciliation/startup-reconciliation.service';
+import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.constants';
+import { IRiskManager } from '../common/interfaces/risk-manager.interface';
 
 /**
  * Manages engine lifecycle hooks for startup and graceful shutdown.
@@ -27,6 +31,9 @@ export class EngineLifecycleService
     private readonly tradingEngine: TradingEngineService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly reconciliationService: StartupReconciliationService,
+    @Inject(RISK_MANAGER_TOKEN)
+    private readonly riskManager: IRiskManager,
   ) {}
 
   /**
@@ -101,6 +108,64 @@ export class EngineLifecycleService
             error: error instanceof Error ? error.message : 'Unknown error',
           },
         });
+      }
+
+      // Startup Reconciliation — verify positions against platform state
+      try {
+        const reconResult = await this.reconciliationService.reconcile();
+
+        if (reconResult.discrepanciesFound > 0) {
+          this.logger.error({
+            message:
+              'Reconciliation found discrepancies — trading halted until resolved',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+            data: {
+              discrepanciesFound: reconResult.discrepanciesFound,
+              positionsChecked: reconResult.positionsChecked,
+            },
+          });
+        }
+      } catch (error) {
+        // Check if active positions exist
+        const activeCount = await this.prisma.$queryRaw<
+          { count: bigint }[]
+        >`SELECT COUNT(*) as count FROM open_positions WHERE status IN ('OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL')`;
+        const count = Number(activeCount[0]?.count ?? 0);
+
+        if (count > 0) {
+          this.logger.error({
+            message:
+              'Reconciliation failed with active positions — halting trading',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+            data: {
+              error: error instanceof Error ? error.message : 'Unknown error',
+              activePositions: count,
+            },
+          });
+          this.logger.warn({
+            message:
+              'Risk state may be stale — reconciliation could not verify positions against platforms',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+          });
+          this.riskManager.haltTrading('reconciliation_discrepancy');
+        } else {
+          this.logger.warn({
+            message:
+              'Reconciliation failed but no active positions — skipping halt',
+            timestamp: new Date().toISOString(),
+            module: 'core',
+            correlationId: getCorrelationId(),
+            data: {
+              error: error instanceof Error ? error.message : 'Unknown error',
+            },
+          });
+        }
       }
 
       const nodeEnv = process.env.NODE_ENV || 'development';

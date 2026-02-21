@@ -143,12 +143,14 @@ describe('ExecutionService', () => {
   let service: ExecutionService;
   let kalshiConnector: {
     submitOrder: ReturnType<typeof vi.fn>;
+    getOrder: ReturnType<typeof vi.fn>;
     getOrderBook: ReturnType<typeof vi.fn>;
     getPlatformId: ReturnType<typeof vi.fn>;
     getFeeSchedule: ReturnType<typeof vi.fn>;
   };
   let polymarketConnector: {
     submitOrder: ReturnType<typeof vi.fn>;
+    getOrder: ReturnType<typeof vi.fn>;
     getOrderBook: ReturnType<typeof vi.fn>;
     getPlatformId: ReturnType<typeof vi.fn>;
     getFeeSchedule: ReturnType<typeof vi.fn>;
@@ -166,6 +168,7 @@ describe('ExecutionService', () => {
   beforeEach(async () => {
     kalshiConnector = {
       submitOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
       getFeeSchedule: vi.fn().mockReturnValue({
@@ -177,6 +180,7 @@ describe('ExecutionService', () => {
     };
     polymarketConnector = {
       submitOrder: vi.fn(),
+      getOrder: vi.fn(),
       getOrderBook: vi.fn(),
       getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
       getFeeSchedule: vi.fn().mockReturnValue({

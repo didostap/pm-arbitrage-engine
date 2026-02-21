@@ -3,6 +3,7 @@ export type {
   PlatformHealth,
   OrderParams,
   OrderResult,
+  OrderStatusResult,
   CancelResult,
   Position,
   FeeSchedule,
@@ -13,3 +14,8 @@ export type {
 } from './normalized-order-book.type.js';
 export type { DriftResult } from './ntp.type.js';
 export type { RiskDecision, RiskExposure, RiskConfig } from './risk.type.js';
+export type {
+  ReconciliationContext,
+  ReconciliationResult,
+  ReconciliationDiscrepancy,
+} from './reconciliation.types.js';
