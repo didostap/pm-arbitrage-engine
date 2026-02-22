@@ -76,6 +76,12 @@ export class ExecutionService implements IExecutionEngine {
       secondaryPlatform,
     } = this.resolveConnectors(primaryLeg);
 
+    // Determine paper mode from connector health
+    const primaryHealth = primaryConnector.getHealth();
+    const secondaryHealth = secondaryConnector.getHealth();
+    const isPaper =
+      primaryHealth.mode === 'paper' || secondaryHealth.mode === 'paper';
+
     const primaryContractId =
       primaryLeg === 'kalshi'
         ? dislocation.pairConfig.kalshiContractId
@@ -182,6 +188,7 @@ export class ExecutionService implements IExecutionEngine {
       status: primaryOrder.status === 'filled' ? 'FILLED' : 'PARTIAL',
       fillPrice: primaryOrder.filledPrice,
       fillSize: primaryOrder.filledQuantity,
+      isPaper,
     });
 
     // Step 4: Verify depth on secondary platform
@@ -216,6 +223,7 @@ export class ExecutionService implements IExecutionEngine {
         reservation,
         EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
         `Secondary depth insufficient on ${secondaryPlatform}`,
+        isPaper,
       );
     }
 
@@ -246,6 +254,7 @@ export class ExecutionService implements IExecutionEngine {
         reservation,
         EXECUTION_ERROR_CODES.ORDER_REJECTED,
         `Secondary leg submission failed: ${err instanceof Error ? err.message : String(err)}`,
+        isPaper,
       );
     }
 
@@ -267,6 +276,7 @@ export class ExecutionService implements IExecutionEngine {
           status: 'PENDING',
           fillPrice: null,
           fillSize: null,
+          isPaper,
         });
         this.logger.warn({
           message:
@@ -294,6 +304,7 @@ export class ExecutionService implements IExecutionEngine {
           ? EXECUTION_ERROR_CODES.ORDER_TIMEOUT
           : EXECUTION_ERROR_CODES.ORDER_REJECTED,
         `Secondary leg ${secondaryOrder.status} on ${secondaryPlatform}`,
+        isPaper,
       );
     }
 
@@ -309,6 +320,7 @@ export class ExecutionService implements IExecutionEngine {
       status: secondaryOrder.status === 'filled' ? 'FILLED' : 'PARTIAL',
       fillPrice: secondaryOrder.filledPrice,
       fillSize: secondaryOrder.filledQuantity,
+      isPaper,
     });
 
     const kalshiOrderId =
@@ -345,6 +357,7 @@ export class ExecutionService implements IExecutionEngine {
       },
       expectedEdge: enriched.netEdge.toNumber(),
       status: 'OPEN',
+      isPaper,
     });
 
     // Emit OrderFilledEvent for both legs
@@ -440,6 +453,7 @@ export class ExecutionService implements IExecutionEngine {
     _reservation: BudgetReservation,
     errorCode: number,
     errorMessage: string,
+    isPaper: boolean,
   ): Promise<ExecutionResult> {
     const kalshiSide = primaryLeg === 'kalshi' ? primarySide : secondarySide;
     const polymarketSide =
@@ -478,6 +492,7 @@ export class ExecutionService implements IExecutionEngine {
       },
       expectedEdge: enriched.netEdge.toNumber(),
       status: 'SINGLE_LEG_EXPOSED',
+      isPaper,
     });
 
     // Emit OrderFilledEvent for the filled primary leg only

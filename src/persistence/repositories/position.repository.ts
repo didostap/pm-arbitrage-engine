@@ -18,14 +18,20 @@ export class PositionRepository {
     return this.prisma.openPosition.findMany({ where: { pairId } });
   }
 
-  async findByStatus(status: Prisma.OpenPositionWhereInput['status']) {
-    return this.prisma.openPosition.findMany({ where: { status } });
+  async findByStatus(
+    status: Prisma.OpenPositionWhereInput['status'],
+    isPaper: boolean = false,
+  ) {
+    return this.prisma.openPosition.findMany({ where: { status, isPaper } });
   }
 
   /** Fetches positions by status with associated ContractMatch included. */
-  async findByStatusWithPair(status: Prisma.OpenPositionWhereInput['status']) {
+  async findByStatusWithPair(
+    status: Prisma.OpenPositionWhereInput['status'],
+    isPaper: boolean = false,
+  ) {
     return this.prisma.openPosition.findMany({
-      where: { status },
+      where: { status, isPaper },
       include: { pair: true },
     });
   }
@@ -36,9 +42,10 @@ export class PositionRepository {
    */
   async findByStatusWithOrders(
     status: Prisma.OpenPositionWhereInput['status'],
+    isPaper: boolean = false,
   ) {
     return this.prisma.openPosition.findMany({
-      where: { status },
+      where: { status, isPaper },
       include: { pair: true, kalshiOrder: true, polymarketOrder: true },
     });
   }
@@ -65,9 +72,10 @@ export class PositionRepository {
    * Finds all active positions (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL, RECONCILIATION_REQUIRED)
    * with associated pair, kalshiOrder, and polymarketOrder for reconciliation.
    */
-  async findActivePositions() {
+  async findActivePositions(isPaper: boolean = false) {
     return this.prisma.openPosition.findMany({
       where: {
+        isPaper,
         status: {
           in: [
             'OPEN',

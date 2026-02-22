@@ -71,7 +71,7 @@ describe('PositionRepository', () => {
     const result = await repo.findByStatus('OPEN');
 
     expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
-      where: { status: 'OPEN' },
+      where: { status: 'OPEN', isPaper: false },
     });
     expect(result).toHaveLength(1);
   });
@@ -89,5 +89,113 @@ describe('PositionRepository', () => {
       data: { status: 'CLOSED' },
     });
     expect(result.status).toBe('CLOSED');
+  });
+
+  describe('isPaper filtering', () => {
+    it('findByStatus defaults to isPaper false', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatus('OPEN');
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: false },
+      });
+    });
+
+    it('findByStatus filters to isPaper true when requested', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatus('OPEN', true);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: true },
+      });
+    });
+
+    it('findByStatusWithPair defaults to isPaper false', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatusWithPair('OPEN');
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: false },
+        include: { pair: true },
+      });
+    });
+
+    it('findByStatusWithPair filters to isPaper true when requested', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatusWithPair('OPEN', true);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: true },
+        include: { pair: true },
+      });
+    });
+
+    it('findByStatusWithOrders defaults to isPaper false', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatusWithOrders('OPEN');
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: false },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+      });
+    });
+
+    it('findByStatusWithOrders filters to isPaper true when requested', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findByStatusWithOrders('OPEN', true);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: 'OPEN', isPaper: true },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+      });
+    });
+
+    it('findActivePositions defaults to isPaper false', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findActivePositions();
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: {
+          isPaper: false,
+          status: {
+            in: [
+              'OPEN',
+              'SINGLE_LEG_EXPOSED',
+              'EXIT_PARTIAL',
+              'RECONCILIATION_REQUIRED',
+            ],
+          },
+        },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+      });
+    });
+
+    it('findActivePositions filters to isPaper true when requested', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+
+      await repo.findActivePositions(true);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: {
+          isPaper: true,
+          status: {
+            in: [
+              'OPEN',
+              'SINGLE_LEG_EXPOSED',
+              'EXIT_PARTIAL',
+              'RECONCILIATION_REQUIRED',
+            ],
+          },
+        },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+      });
+    });
   });
 });

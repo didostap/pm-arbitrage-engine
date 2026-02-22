@@ -29,9 +29,9 @@ export class OrderRepository {
   }
 
   /** Finds all orders with PENDING status. */
-  async findPendingOrders() {
+  async findPendingOrders(isPaper: boolean = false) {
     return this.prisma.order.findMany({
-      where: { status: 'PENDING' },
+      where: { status: 'PENDING', isPaper },
     });
   }
 

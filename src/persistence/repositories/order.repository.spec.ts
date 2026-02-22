@@ -83,4 +83,26 @@ describe('OrderRepository', () => {
     });
     expect(result.status).toBe('CANCELLED');
   });
+
+  describe('isPaper filtering', () => {
+    it('findPendingOrders defaults to isPaper false', async () => {
+      mockPrisma.order.findMany.mockResolvedValue([]);
+
+      await repo.findPendingOrders();
+
+      expect(mockPrisma.order.findMany).toHaveBeenCalledWith({
+        where: { status: 'PENDING', isPaper: false },
+      });
+    });
+
+    it('findPendingOrders filters to isPaper true when requested', async () => {
+      mockPrisma.order.findMany.mockResolvedValue([]);
+
+      await repo.findPendingOrders(true);
+
+      expect(mockPrisma.order.findMany).toHaveBeenCalledWith({
+        where: { status: 'PENDING', isPaper: true },
+      });
+    });
+  });
 });

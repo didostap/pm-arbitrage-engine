@@ -561,6 +561,170 @@ describe('ExecutionService', () => {
     });
   });
 
+  describe('isPaper flag propagation', () => {
+    it('should set isPaper false when both connectors are live (no mode field)', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      // Verify orders created with isPaper: false
+      for (const call of orderRepo.create.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ isPaper: false }));
+      }
+      // Verify position created with isPaper: false
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: false }),
+      );
+    });
+
+    it('should set isPaper true when primary connector health has mode paper', async () => {
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      for (const call of orderRepo.create.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ isPaper: true }));
+      }
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: true }),
+      );
+    });
+
+    it('should set isPaper true when secondary connector health has mode paper', async () => {
+      polymarketConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      for (const call of orderRepo.create.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ isPaper: true }));
+      }
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: true }),
+      );
+    });
+
+    it('should pass isPaper to handleSingleLeg position creation', async () => {
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        ...makePolymarketOrderBook(),
+        asks: [],
+        bids: [],
+      });
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      // Primary order created with isPaper
+      expect(orderRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: true }),
+      );
+      // Single-leg position created with isPaper
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: true }),
+      );
+    });
+
+    it('should set isPaper on pending secondary order persist before handleSingleLeg', async () => {
+      polymarketConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      // Secondary returns pending (not filled)
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, {
+          status: 'pending',
+          filledQuantity: 0,
+          filledPrice: 0,
+        }),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(true);
+
+      // Should have 2 order creates: primary + pending secondary
+      expect(orderRepo.create).toHaveBeenCalledTimes(2);
+      // Both orders should have isPaper: true
+      for (const call of orderRepo.create.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ isPaper: true }));
+      }
+      // Pending secondary order should have status PENDING
+      const secondCall = orderRepo.create.mock.calls[1]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(secondCall.status).toBe('PENDING');
+      // Position should also have isPaper: true
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ isPaper: true }),
+      );
+    });
+  });
+
   describe('primary leg fails', () => {
     it('should return success false and partialFill false when primary rejected', async () => {
       kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());

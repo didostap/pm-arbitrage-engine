@@ -127,6 +127,7 @@ export class ReconciliationController {
   @Get('status')
   async status() {
     const lastRun = this.reconciliationService.getLastRunResult();
+    // Live positions only (isPaper defaults to false) — paper positions are excluded
     const outstandingPositions = await this.positionRepository.findByStatus(
       'RECONCILIATION_REQUIRED',
     );

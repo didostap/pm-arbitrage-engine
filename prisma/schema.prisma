@@ -135,6 +135,7 @@ model Order {
   status     OrderStatus
   fillPrice  Decimal?    @map("fill_price") @db.Decimal(20, 8)
   fillSize   Decimal?    @map("fill_size") @db.Decimal(20, 8)
+  isPaper    Boolean     @default(false) @map("is_paper")
   createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -146,6 +147,7 @@ model Order {
   @@index([pairId])
   @@index([platform, status])
   @@index([createdAt])
+  @@index([isPaper, status])
   @@map("orders")
 }
 
@@ -165,6 +167,7 @@ model OpenPosition {
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
   reconciliationContext Json? @map("reconciliation_context")
+  isPaper           Boolean        @default(false) @map("is_paper")
 
   pair            ContractMatch @relation(fields: [pairId], references: [matchId])
   polymarketOrder Order?        @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
@@ -173,6 +176,7 @@ model OpenPosition {
   @@index([pairId])
   @@index([status])
   @@index([createdAt])
+  @@index([isPaper, status])
   @@map("open_positions")
 }
 
