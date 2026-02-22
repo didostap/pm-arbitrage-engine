@@ -9,6 +9,7 @@ export interface PlatformHealth {
   lastHeartbeat: Date | null;
   latencyMs: number | null;
   metadata?: Record<string, unknown>;
+  mode?: 'paper' | 'live';
 }
 
 export interface OrderParams {
