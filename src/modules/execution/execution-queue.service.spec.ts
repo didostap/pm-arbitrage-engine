@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-misused-promises */
 // Disabled for test file: mock implementation typing requires flexible assignment and async mock callbacks
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -13,6 +10,10 @@ import { RankedOpportunity } from '../../common/types/risk.type';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { RiskLimitError } from '../../common/errors/risk-limit-error';
 import type { ExecutionResult } from '../../common/interfaces/execution-engine.interface';
+import {
+  createMockRiskManager,
+  createMockExecutionEngine,
+} from '../../test/mock-factories.js';
 
 function makeRankedOpportunity(
   opportunityId: string,
@@ -59,24 +60,8 @@ describe('ExecutionQueueService', () => {
     release: ReturnType<typeof vi.fn>;
     isLocked: ReturnType<typeof vi.fn>;
   };
-  let mockRiskManager: {
-    reserveBudget: ReturnType<typeof vi.fn>;
-    commitReservation: ReturnType<typeof vi.fn>;
-    releaseReservation: ReturnType<typeof vi.fn>;
-    validatePosition: ReturnType<typeof vi.fn>;
-    getCurrentExposure: ReturnType<typeof vi.fn>;
-    getOpenPositionCount: ReturnType<typeof vi.fn>;
-    updateDailyPnl: ReturnType<typeof vi.fn>;
-    isTradingHalted: ReturnType<typeof vi.fn>;
-    processOverride: ReturnType<typeof vi.fn>;
-    closePosition: ReturnType<typeof vi.fn>;
-    haltTrading: ReturnType<typeof vi.fn>;
-    resumeTrading: ReturnType<typeof vi.fn>;
-    recalculateFromPositions: ReturnType<typeof vi.fn>;
-  };
-  let mockExecutionEngine: {
-    execute: ReturnType<typeof vi.fn>;
-  };
+  let mockRiskManager: ReturnType<typeof createMockRiskManager>;
+  let mockExecutionEngine: ReturnType<typeof createMockExecutionEngine>;
   let reservationCounter: number;
 
   beforeEach(async () => {
@@ -87,35 +72,25 @@ describe('ExecutionQueueService', () => {
       isLocked: vi.fn().mockReturnValue(false),
     };
 
-    mockRiskManager = {
-      reserveBudget: vi.fn().mockImplementation((req) => {
-        reservationCounter++;
-        return Promise.resolve({
-          reservationId: `res-${reservationCounter}`,
-          opportunityId: req.opportunityId,
-          reservedPositionSlots: 1,
-          reservedCapitalUsd: new FinancialDecimal(300),
-          correlationExposure: new FinancialDecimal(0),
-          createdAt: new Date(),
-        });
-      }),
-      commitReservation: vi.fn().mockResolvedValue(undefined),
-      releaseReservation: vi.fn().mockResolvedValue(undefined),
-      validatePosition: vi.fn(),
-      getCurrentExposure: vi.fn(),
-      getOpenPositionCount: vi.fn(),
-      updateDailyPnl: vi.fn(),
-      isTradingHalted: vi.fn(),
-      processOverride: vi.fn(),
-      closePosition: vi.fn().mockResolvedValue(undefined),
-      haltTrading: vi.fn(),
-      resumeTrading: vi.fn(),
-      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
-    };
+    mockRiskManager = createMockRiskManager({
+      reserveBudget: vi
+        .fn()
+        .mockImplementation((req: { opportunityId: string }) => {
+          reservationCounter++;
+          return Promise.resolve({
+            reservationId: `res-${reservationCounter}`,
+            opportunityId: req.opportunityId,
+            reservedPositionSlots: 1,
+            reservedCapitalUsd: new FinancialDecimal(300),
+            correlationExposure: new FinancialDecimal(0),
+            createdAt: new Date(),
+          });
+        }),
+    });
 
-    mockExecutionEngine = {
+    mockExecutionEngine = createMockExecutionEngine({
       execute: vi.fn().mockResolvedValue(makeSuccessResult()),
-    };
+    });
 
     const module = await Test.createTestingModule({
       providers: [

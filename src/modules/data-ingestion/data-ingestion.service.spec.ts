@@ -13,19 +13,16 @@ import { PlatformId } from '../../common/types/platform.type';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
 import { vi } from 'vitest';
 import { DegradationProtocolService } from './degradation-protocol.service';
+import { createMockPlatformConnector } from '../../test/mock-factories.js';
 
 describe('DataIngestionService', () => {
   let service: DataIngestionService;
 
-  const mockKalshiConnector = {
-    onOrderBookUpdate: vi.fn(),
-    getOrderBook: vi.fn(),
-  };
+  const mockKalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
 
-  const mockPolymarketConnector = {
-    onOrderBookUpdate: vi.fn(),
-    getOrderBook: vi.fn(),
-  };
+  const mockPolymarketConnector = createMockPlatformConnector(
+    PlatformId.POLYMARKET,
+  );
 
   const mockNormalizer = {
     normalize: vi.fn(),

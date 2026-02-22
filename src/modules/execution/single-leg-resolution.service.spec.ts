@@ -12,6 +12,10 @@ import {
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
+import {
+  createMockPlatformConnector,
+  createMockRiskManager,
+} from '../../test/mock-factories.js';
 
 vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -62,9 +66,9 @@ describe('SingleLegResolutionService', () => {
   let service: SingleLegResolutionService;
   let positionRepository: Record<string, ReturnType<typeof vi.fn>>;
   let orderRepository: Record<string, ReturnType<typeof vi.fn>>;
-  let kalshiConnector: Record<string, ReturnType<typeof vi.fn>>;
-  let polymarketConnector: Record<string, ReturnType<typeof vi.fn>>;
-  let riskManager: Record<string, ReturnType<typeof vi.fn>>;
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
+  let riskManager: ReturnType<typeof createMockRiskManager>;
   let eventEmitter: Record<string, ReturnType<typeof vi.fn>>;
 
   beforeEach(async () => {
@@ -85,59 +89,25 @@ describe('SingleLegResolutionService', () => {
       updateStatus: vi.fn(),
     };
 
-    kalshiConnector = {
-      submitOrder: vi.fn(),
-      cancelOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPositions: vi.fn(),
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.KALSHI,
         makerFeePercent: 0,
         takerFeePercent: 2,
         description: 'Kalshi fees',
       }),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      onOrderBookUpdate: vi.fn(),
-    };
+    });
 
-    polymarketConnector = {
-      submitOrder: vi.fn(),
-      cancelOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPositions: vi.fn(),
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.POLYMARKET,
         makerFeePercent: 0,
         takerFeePercent: 1,
         description: 'Polymarket fees',
       }),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      onOrderBookUpdate: vi.fn(),
-    };
+    });
 
-    riskManager = {
-      validatePosition: vi.fn(),
-      getCurrentExposure: vi.fn(),
-      getOpenPositionCount: vi.fn(),
-      updateDailyPnl: vi.fn().mockResolvedValue(undefined),
-      isTradingHalted: vi.fn().mockReturnValue(false),
-      processOverride: vi.fn(),
-      reserveBudget: vi.fn(),
-      commitReservation: vi.fn().mockResolvedValue(undefined),
-      releaseReservation: vi.fn().mockResolvedValue(undefined),
-      closePosition: vi.fn().mockResolvedValue(undefined),
-      haltTrading: vi.fn(),
-      resumeTrading: vi.fn(),
-      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
-    };
+    riskManager = createMockRiskManager();
 
     eventEmitter = {
       emit: vi.fn(),
@@ -162,8 +132,8 @@ describe('SingleLegResolutionService', () => {
   describe('retryLeg', () => {
     it('should fill retry and transition position to OPEN', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
       polymarketConnector.submitOrder.mockResolvedValue({
         orderId: 'order-poly-retry-1',
         platformId: PlatformId.POLYMARKET,
@@ -172,10 +142,10 @@ describe('SingleLegResolutionService', () => {
         filledPrice: 0.55,
         timestamp: new Date(),
       });
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-poly-retry-1',
       });
-      positionRepository.updateWithOrder.mockResolvedValue({});
+      positionRepository.updateWithOrder?.mockResolvedValue({});
 
       const result = await service.retryLeg('pos-1', 0.55);
 
@@ -220,8 +190,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should handle partial fill and still transition to OPEN', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
       polymarketConnector.submitOrder.mockResolvedValue({
         orderId: 'order-poly-partial-1',
         platformId: PlatformId.POLYMARKET,
@@ -230,10 +200,10 @@ describe('SingleLegResolutionService', () => {
         filledPrice: 0.55,
         timestamp: new Date(),
       });
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-poly-partial-1',
       });
-      positionRepository.updateWithOrder.mockResolvedValue({});
+      positionRepository.updateWithOrder?.mockResolvedValue({});
 
       const result = await service.retryLeg('pos-1', 0.55);
 
@@ -245,8 +215,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should return failure when order is rejected', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
       polymarketConnector.submitOrder.mockResolvedValue({
         orderId: 'order-reject-1',
         platformId: PlatformId.POLYMARKET,
@@ -285,7 +255,7 @@ describe('SingleLegResolutionService', () => {
 
     it('should throw ExecutionError when position is not SINGLE_LEG_EXPOSED', async () => {
       const position = createMockPosition({ status: 'OPEN' });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
 
       await expect(service.retryLeg('pos-1', 0.55)).rejects.toThrow(
         'Position is not in single-leg exposed or exit-partial state',
@@ -293,7 +263,7 @@ describe('SingleLegResolutionService', () => {
     });
 
     it('should throw ExecutionError when position not found', async () => {
-      positionRepository.findByIdWithPair.mockResolvedValue(null);
+      positionRepository.findByIdWithPair?.mockResolvedValue(null);
 
       await expect(service.retryLeg('nonexistent', 0.55)).rejects.toThrow(
         'not found',
@@ -302,7 +272,7 @@ describe('SingleLegResolutionService', () => {
 
     it('should throw ExecutionError when connector throws', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
       polymarketConnector.submitOrder.mockRejectedValue(
         new Error('API timeout'),
       );
@@ -317,8 +287,8 @@ describe('SingleLegResolutionService', () => {
         kalshiOrderId: null,
         polymarketOrderId: 'order-poly-1',
       });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(
         createMockOrder({
           orderId: 'order-poly-1',
           platform: 'POLYMARKET',
@@ -335,10 +305,10 @@ describe('SingleLegResolutionService', () => {
         filledPrice: 0.45,
         timestamp: new Date(),
       });
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-kalshi-retry-1',
       });
-      positionRepository.updateWithOrder.mockResolvedValue({});
+      positionRepository.updateWithOrder?.mockResolvedValue({});
 
       const result = await service.retryLeg('pos-1', 0.45);
 
@@ -361,8 +331,8 @@ describe('SingleLegResolutionService', () => {
   describe('closeLeg', () => {
     it('should close filled leg and transition to CLOSED', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
 
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
@@ -381,8 +351,8 @@ describe('SingleLegResolutionService', () => {
         timestamp: new Date(),
       });
 
-      orderRepository.create.mockResolvedValue({ orderId: 'order-close-1' });
-      positionRepository.updateStatus.mockResolvedValue({});
+      orderRepository.create?.mockResolvedValue({ orderId: 'order-close-1' });
+      positionRepository.updateStatus?.mockResolvedValue({});
 
       const result = await service.closeLeg('pos-1', 'Cut losses');
 
@@ -421,8 +391,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should calculate P&L correctly for buy→sell close', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(
         createMockOrder({ fillPrice: 0.45, fillSize: 200 }),
       );
 
@@ -443,8 +413,8 @@ describe('SingleLegResolutionService', () => {
         timestamp: new Date(),
       });
 
-      orderRepository.create.mockResolvedValue({ orderId: 'order-close-1' });
-      positionRepository.updateStatus.mockResolvedValue({});
+      orderRepository.create?.mockResolvedValue({ orderId: 'order-close-1' });
+      positionRepository.updateStatus?.mockResolvedValue({});
 
       const result = await service.closeLeg('pos-1');
 
@@ -459,7 +429,7 @@ describe('SingleLegResolutionService', () => {
 
     it('should throw when position is not SINGLE_LEG_EXPOSED', async () => {
       const position = createMockPosition({ status: 'OPEN' });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
 
       await expect(service.closeLeg('pos-1')).rejects.toThrow(
         'Position is not in single-leg exposed or exit-partial state',
@@ -467,7 +437,7 @@ describe('SingleLegResolutionService', () => {
     });
 
     it('should throw when position not found', async () => {
-      positionRepository.findByIdWithPair.mockResolvedValue(null);
+      positionRepository.findByIdWithPair?.mockResolvedValue(null);
 
       await expect(service.closeLeg('nonexistent')).rejects.toThrow(
         'not found',
@@ -476,8 +446,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should throw when order book has no bids for sell close', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
 
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
@@ -494,8 +464,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should throw when connector submit fails', async () => {
       const position = createMockPosition();
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
 
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
@@ -521,8 +491,8 @@ describe('SingleLegResolutionService', () => {
         kalshiSide: 'buy',
         polymarketSide: 'sell',
       });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(
         createMockOrder({
           orderId: 'order-poly-1',
           platform: 'POLYMARKET',
@@ -549,10 +519,10 @@ describe('SingleLegResolutionService', () => {
         timestamp: new Date(),
       });
 
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-close-poly-1',
       });
-      positionRepository.updateStatus.mockResolvedValue({});
+      positionRepository.updateStatus?.mockResolvedValue({});
 
       const result = await service.closeLeg('pos-1', 'Hedging losses');
 
@@ -571,8 +541,8 @@ describe('SingleLegResolutionService', () => {
   describe('EXIT_PARTIAL support', () => {
     it('should accept EXIT_PARTIAL status for retryLeg', async () => {
       const position = createMockPosition({ status: 'EXIT_PARTIAL' });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
       polymarketConnector.submitOrder.mockResolvedValue({
         orderId: 'order-poly-retry-exit',
         platformId: PlatformId.POLYMARKET,
@@ -581,10 +551,10 @@ describe('SingleLegResolutionService', () => {
         filledPrice: 0.55,
         timestamp: new Date(),
       });
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-poly-retry-exit',
       });
-      positionRepository.updateWithOrder.mockResolvedValue({});
+      positionRepository.updateWithOrder?.mockResolvedValue({});
 
       const result = await service.retryLeg('pos-1', 0.55);
 
@@ -594,8 +564,8 @@ describe('SingleLegResolutionService', () => {
 
     it('should accept EXIT_PARTIAL status for closeLeg', async () => {
       const position = createMockPosition({ status: 'EXIT_PARTIAL' });
-      positionRepository.findByIdWithPair.mockResolvedValue(position);
-      orderRepository.findById.mockResolvedValue(createMockOrder());
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
 
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
@@ -614,10 +584,10 @@ describe('SingleLegResolutionService', () => {
         timestamp: new Date(),
       });
 
-      orderRepository.create.mockResolvedValue({
+      orderRepository.create?.mockResolvedValue({
         orderId: 'order-close-exit',
       });
-      positionRepository.updateStatus.mockResolvedValue({});
+      positionRepository.updateStatus?.mockResolvedValue({});
 
       const result = await service.closeLeg('pos-1', 'Partial exit resolution');
 

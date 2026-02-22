@@ -11,6 +11,7 @@ const mockGetOrderBook = vi.fn();
 const mockCreateOrder = vi.fn();
 const mockPostOrder = vi.fn();
 const mockGetOrder = vi.fn();
+const mockCancelOrder = vi.fn();
 const mockNormalizePolymarket = vi.fn();
 
 // Mock @polymarket/clob-client
@@ -21,6 +22,7 @@ vi.mock('@polymarket/clob-client', () => {
     createOrder = mockCreateOrder;
     postOrder = mockPostOrder;
     getOrder = mockGetOrder;
+    cancelOrder = mockCancelOrder;
   }
   return { ClobClient: MockClobClient, Side: { BUY: 'BUY', SELL: 'SELL' } };
 });
@@ -574,13 +576,107 @@ describe('PolymarketConnector', () => {
     });
   });
 
-  describe('placeholder methods', () => {
-    it('cancelOrder should throw not-implemented error', () => {
-      expect(() => connector.cancelOrder('order-1')).toThrow(
-        'cancelOrder not implemented',
+  describe('cancelOrder', () => {
+    it('should throw PlatformApiError when not connected', async () => {
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
       );
     });
 
+    it('should return cancelled status on success', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockResolvedValue({ success: true });
+
+      const result = await connector.cancelOrder('pm-order-1');
+
+      expect(result.orderId).toBe('pm-order-1');
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('should return not_found when error contains "not found"', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockRejectedValue(new Error('Order not found'));
+
+      const result = await connector.cancelOrder('missing-order');
+
+      expect(result.orderId).toBe('missing-order');
+      expect(result.status).toBe('not_found');
+    });
+
+    it('should return already_filled when error contains "matched"', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockRejectedValue(new Error('Order already matched'));
+
+      const result = await connector.cancelOrder('filled-order');
+
+      expect(result.orderId).toBe('filled-order');
+      expect(result.status).toBe('already_filled');
+    });
+
+    it('should throw PlatformApiError on other SDK errors', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
+
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should throw on ambiguous already errors that are not already matched', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockRejectedValue(
+        new Error('Request already in progress'),
+      );
+
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should call rateLimiter.acquireWrite()', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        cancelOrder: mockCancelOrder,
+      };
+
+      mockCancelOrder.mockResolvedValue({ success: true });
+
+      const acquireWriteSpy = vi.spyOn(
+        (
+          connector as unknown as {
+            rateLimiter: { acquireWrite: () => Promise<void> };
+          }
+        ).rateLimiter,
+        'acquireWrite',
+      );
+
+      await connector.cancelOrder('order-1');
+
+      expect(acquireWriteSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('placeholder methods', () => {
     it('getPositions should throw not-implemented error', () => {
       expect(() => connector.getPositions()).toThrow(
         'getPositions not implemented',

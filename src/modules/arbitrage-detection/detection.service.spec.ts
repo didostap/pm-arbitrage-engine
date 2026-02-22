@@ -8,6 +8,7 @@ import { PlatformId, NormalizedOrderBook } from '../../common/types';
 import { ContractPairConfig } from '../contract-matching/types';
 import { FinancialDecimal } from '../../common/utils';
 import { vi } from 'vitest';
+import { createMockPlatformConnector } from '../../test/mock-factories.js';
 
 function makeOrderBook(
   platformId: PlatformId,
@@ -39,14 +40,14 @@ describe('DetectionService', () => {
   let service: DetectionService;
   let contractPairLoader: { getActivePairs: ReturnType<typeof vi.fn> };
   let degradationService: { isDegraded: ReturnType<typeof vi.fn> };
-  let kalshiConnector: { getOrderBook: ReturnType<typeof vi.fn> };
-  let polymarketConnector: { getOrderBook: ReturnType<typeof vi.fn> };
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
 
   beforeEach(async () => {
     contractPairLoader = { getActivePairs: vi.fn().mockReturnValue([]) };
     degradationService = { isDegraded: vi.fn().mockReturnValue(false) };
-    kalshiConnector = { getOrderBook: vi.fn() };
-    polymarketConnector = { getOrderBook: vi.fn() };
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

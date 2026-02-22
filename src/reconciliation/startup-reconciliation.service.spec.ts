@@ -14,46 +14,10 @@ import { PositionRepository } from '../persistence/repositories/position.reposit
 import { OrderRepository } from '../persistence/repositories/order.repository';
 import { EVENT_NAMES } from '../common/events';
 import { PlatformId } from '../common/types/platform.type';
-
-const createMockConnector = (platformId: PlatformId) => ({
-  getHealth: vi.fn().mockReturnValue({
-    platformId,
-    status: 'healthy' as const,
-    lastHeartbeat: new Date(),
-    latencyMs: 50,
-  }),
-  getOrder: vi.fn().mockResolvedValue({
-    orderId: 'order-1',
-    status: 'filled',
-    fillPrice: 0.45,
-    fillSize: 100,
-  }),
-  submitOrder: vi.fn(),
-  cancelOrder: vi.fn(),
-  getOrderBook: vi.fn(),
-  getPositions: vi.fn(),
-  getPlatformId: vi.fn().mockReturnValue(platformId),
-  getFeeSchedule: vi.fn(),
-  connect: vi.fn(),
-  disconnect: vi.fn(),
-  onOrderBookUpdate: vi.fn(),
-});
-
-const createMockRiskManager = () => ({
-  validatePosition: vi.fn(),
-  getCurrentExposure: vi.fn(),
-  getOpenPositionCount: vi.fn(),
-  updateDailyPnl: vi.fn(),
-  isTradingHalted: vi.fn().mockReturnValue(false),
-  haltTrading: vi.fn(),
-  resumeTrading: vi.fn(),
-  recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
-  processOverride: vi.fn(),
-  reserveBudget: vi.fn(),
-  commitReservation: vi.fn(),
-  releaseReservation: vi.fn(),
-  closePosition: vi.fn().mockResolvedValue(undefined),
-});
+import {
+  createMockPlatformConnector,
+  createMockRiskManager,
+} from '../test/mock-factories.js';
 
 const createMockOrder = (overrides: Record<string, unknown> = {}) => ({
   orderId: 'order-1',
@@ -105,8 +69,8 @@ const createMockPosition = (overrides: Record<string, unknown> = {}) => ({
 
 describe('StartupReconciliationService', () => {
   let service: StartupReconciliationService;
-  let kalshiConnector: ReturnType<typeof createMockConnector>;
-  let polymarketConnector: ReturnType<typeof createMockConnector>;
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
   let riskManager: ReturnType<typeof createMockRiskManager>;
   let positionRepository: {
     findActivePositions: ReturnType<typeof vi.fn>;
@@ -128,8 +92,22 @@ describe('StartupReconciliationService', () => {
   };
 
   beforeEach(async () => {
-    kalshiConnector = createMockConnector(PlatformId.KALSHI);
-    polymarketConnector = createMockConnector(PlatformId.POLYMARKET);
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
+      getOrder: vi.fn().mockResolvedValue({
+        orderId: 'order-1',
+        status: 'filled',
+        fillPrice: 0.45,
+        fillSize: 100,
+      }),
+    });
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
+      getOrder: vi.fn().mockResolvedValue({
+        orderId: 'order-1',
+        status: 'filled',
+        fillPrice: 0.45,
+        fillSize: 100,
+      }),
+    });
     riskManager = createMockRiskManager();
     eventEmitter = { emit: vi.fn() };
     mockPrisma = {

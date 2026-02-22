@@ -2,7 +2,7 @@
 
 Known gotchas discovered across Epics 1–4. Each entry includes a problem demonstration and solution.
 
-Last updated: 2026-02-18 (Story 4.5.4)
+Last updated: 2026-02-22 (Story 5.5.0)
 
 ---
 
@@ -184,4 +184,26 @@ const edge = FinancialMath.calculateEdge(priceA, priceB, fees);
 const positionSize = FinancialMath.calculatePositionSize(bankroll, maxPct);
 // Never convert to number until final display/serialization
 // Property-based tests (Story 4.5.1) verify composition chain correctness
+```
+
+---
+
+## 7. P&L Source of Truth: Order Fill Records, Not Position Entry Prices
+
+**Source:** Stories 5.3, 5.4, 5.5 Dev Notes
+
+Always compute P&L from order fill records (`order.fillPrice`, `order.fillSize`), never from `position.entryPrices`. The `entryPrices` field is a convenience snapshot set at position creation time and may drift from reality if partial fills or reconciliation adjustments occur.
+
+**Problem:**
+
+```typescript
+const pnl = position.entryPrices.kalshi - position.entryPrices.polymarket; // WRONG — uses snapshot, not actual fills
+```
+
+**Solution:**
+
+```typescript
+const kalshiCost = new Decimal(order.kalshiOrder.fillPrice.toString()).mul(new Decimal(order.kalshiOrder.fillSize.toString()));
+const polyCost = new Decimal(order.polymarketOrder.fillPrice.toString()).mul(new Decimal(order.polymarketOrder.fillSize.toString()));
+const pnl = kalshiCost.plus(polyCost).minus(totalCapitalDeployed); // Correct — uses actual fill data
 ```

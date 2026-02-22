@@ -14,7 +14,7 @@ import { EVENT_NAMES, TimeHaltEvent } from '../common/events';
 import { getCorrelationId } from '../common/services/correlation-context';
 import { StartupReconciliationService } from '../reconciliation/startup-reconciliation.service';
 import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.constants';
-import { IRiskManager } from '../common/interfaces/risk-manager.interface';
+import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
 
 /**
  * Manages engine lifecycle hooks for startup and graceful shutdown.

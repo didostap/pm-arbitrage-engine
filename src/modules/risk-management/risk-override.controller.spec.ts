@@ -7,20 +7,11 @@ import { RISK_MANAGER_TOKEN } from './risk-management.constants';
 import { RISK_ERROR_CODES } from '../../common/errors/risk-limit-error';
 import { AuthTokenGuard } from '../../common/guards/auth-token.guard';
 import { FinancialDecimal } from '../../common/utils/financial-math';
+import { createMockRiskManager } from '../../test/mock-factories.js';
 
 describe('RiskOverrideController', () => {
   let controller: RiskOverrideController;
-  const mockRiskManager = {
-    processOverride: vi.fn(),
-    validatePosition: vi.fn(),
-    getCurrentExposure: vi.fn(),
-    getOpenPositionCount: vi.fn(),
-    updateDailyPnl: vi.fn(),
-    isTradingHalted: vi.fn(),
-    haltTrading: vi.fn(),
-    resumeTrading: vi.fn(),
-    recalculateFromPositions: vi.fn(),
-  };
+  const mockRiskManager = createMockRiskManager();
 
   beforeEach(async () => {
     vi.clearAllMocks();

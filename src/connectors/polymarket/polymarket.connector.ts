@@ -447,9 +447,48 @@ export class PolymarketConnector
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  cancelOrder(_orderId: string): Promise<CancelResult> {
-    throw new Error('cancelOrder not implemented - Epic 5');
+  async cancelOrder(orderId: string): Promise<CancelResult> {
+    if (!this.connected || !this.clobClient) {
+      throw new PlatformApiError(
+        POLYMARKET_ERROR_CODES.NOT_CONNECTED,
+        'Polymarket connector not connected',
+        PlatformId.POLYMARKET,
+        'error',
+      );
+    }
+
+    await this.rateLimiter.acquireWrite();
+
+    try {
+      await withRetry(
+        () => this.clobClient!.cancelOrder({ orderID: orderId }),
+        RETRY_STRATEGIES.NETWORK_ERROR,
+        (attempt, error) => {
+          this.logger.warn({
+            message: 'Retrying cancelOrder',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.POLYMARKET,
+            metadata: { orderId, attempt, error: error.message },
+          });
+        },
+      );
+
+      this.lastHeartbeat = new Date();
+      return { orderId, status: 'cancelled' };
+    } catch (error) {
+      const message = (
+        error instanceof Error ? error.message : String(error)
+      ).toLowerCase();
+
+      if (message.includes('not found') || message.includes('404')) {
+        return { orderId, status: 'not_found' };
+      }
+      if (message.includes('already matched') || message.includes('matched')) {
+        return { orderId, status: 'already_filled' };
+      }
+      throw this.mapError(error);
+    }
   }
 
   async getOrder(orderId: string): Promise<OrderStatusResult> {

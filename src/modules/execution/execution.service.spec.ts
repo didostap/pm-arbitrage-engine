@@ -13,6 +13,7 @@ import { PlatformId } from '../../common/types/platform.type';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { SingleLegExposureEvent } from '../../common/events/execution.events';
+import { createMockPlatformConnector } from '../../test/mock-factories.js';
 import type {
   RankedOpportunity,
   BudgetReservation,
@@ -141,20 +142,8 @@ function makeFilledOrder(
 
 describe('ExecutionService', () => {
   let service: ExecutionService;
-  let kalshiConnector: {
-    submitOrder: ReturnType<typeof vi.fn>;
-    getOrder: ReturnType<typeof vi.fn>;
-    getOrderBook: ReturnType<typeof vi.fn>;
-    getPlatformId: ReturnType<typeof vi.fn>;
-    getFeeSchedule: ReturnType<typeof vi.fn>;
-  };
-  let polymarketConnector: {
-    submitOrder: ReturnType<typeof vi.fn>;
-    getOrder: ReturnType<typeof vi.fn>;
-    getOrderBook: ReturnType<typeof vi.fn>;
-    getPlatformId: ReturnType<typeof vi.fn>;
-    getFeeSchedule: ReturnType<typeof vi.fn>;
-  };
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
   let eventEmitter: { emit: ReturnType<typeof vi.fn> };
   let orderRepo: {
     create: ReturnType<typeof vi.fn>;
@@ -166,30 +155,22 @@ describe('ExecutionService', () => {
   };
 
   beforeEach(async () => {
-    kalshiConnector = {
-      submitOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.KALSHI,
         makerFeePercent: 0,
         takerFeePercent: 2.0,
         description: 'Kalshi fee schedule',
       }),
-    };
-    polymarketConnector = {
-      submitOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
+    });
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.POLYMARKET,
         makerFeePercent: 0,
         takerFeePercent: 2.0,
         description: 'Polymarket fee schedule',
       }),
-    };
+    });
     eventEmitter = { emit: vi.fn() };
     orderRepo = {
       create: vi.fn().mockImplementation((data: Record<string, unknown>) => ({

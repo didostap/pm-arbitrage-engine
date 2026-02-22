@@ -11,6 +11,7 @@ import {
 } from '../../connectors/connector.constants';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
+import { createMockPlatformConnector } from '../../test/mock-factories.js';
 
 vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -43,8 +44,8 @@ describe('ExposureAlertScheduler', () => {
   let scheduler: ExposureAlertScheduler;
   let positionRepository: Record<string, ReturnType<typeof vi.fn>>;
   let orderRepository: Record<string, ReturnType<typeof vi.fn>>;
-  let kalshiConnector: Record<string, ReturnType<typeof vi.fn>>;
-  let polymarketConnector: Record<string, ReturnType<typeof vi.fn>>;
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
   let eventEmitter: Record<string, ReturnType<typeof vi.fn>>;
   let resolutionService: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -95,43 +96,23 @@ describe('ExposureAlertScheduler', () => {
       updateStatus: vi.fn(),
     };
 
-    kalshiConnector = {
-      submitOrder: vi.fn(),
-      cancelOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPositions: vi.fn(),
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.KALSHI,
         makerFeePercent: 0,
         takerFeePercent: 2,
         description: 'Kalshi fees',
       }),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      onOrderBookUpdate: vi.fn(),
-    };
+    });
 
-    polymarketConnector = {
-      submitOrder: vi.fn(),
-      cancelOrder: vi.fn(),
-      getOrder: vi.fn(),
-      getOrderBook: vi.fn(),
-      getPositions: vi.fn(),
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getFeeSchedule: vi.fn().mockReturnValue({
         platformId: PlatformId.POLYMARKET,
         makerFeePercent: 0,
         takerFeePercent: 1,
         description: 'Polymarket fees',
       }),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      onOrderBookUpdate: vi.fn(),
-    };
+    });
 
     eventEmitter = {
       emit: vi.fn(),
@@ -192,7 +173,7 @@ describe('ExposureAlertScheduler', () => {
   it('should skip re-emission when connector is disconnected', async () => {
     const position = createMockPosition();
     positionRepository.findByStatusWithPair!.mockResolvedValue([position]);
-    kalshiConnector.getHealth!.mockReturnValue({ status: 'disconnected' });
+    kalshiConnector.getHealth.mockReturnValue({ status: 'disconnected' });
 
     await scheduler.checkExposedPositions();
 

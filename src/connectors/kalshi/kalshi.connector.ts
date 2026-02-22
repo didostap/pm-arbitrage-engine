@@ -1,7 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
-import { Configuration, MarketApi, OrdersApi } from 'kalshi-typescript';
+import { Configuration, MarketApi } from 'kalshi-typescript';
+import { OrdersApi } from 'kalshi-typescript/dist/api/orders-api.js';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
 import type {
   CancelResult,
@@ -36,9 +37,23 @@ interface KalshiOrderResponse {
   };
 }
 
+/** Minimal shape of the Kalshi SDK cancel response. */
+interface KalshiCancelOrderResponse {
+  data: {
+    order: {
+      order_id: string;
+      status: string;
+      remaining_count: number;
+      fill_count: number;
+    };
+    reduced_by: number;
+  };
+}
+
 /** Kalshi SDK OrdersApi — typed locally to avoid unresolvable generic return types. */
 interface KalshiOrdersApi {
   getOrder(orderId: string): Promise<KalshiOrderResponse>;
+  cancelOrder(orderId: string): Promise<KalshiCancelOrderResponse>;
 }
 
 @Injectable()
@@ -84,8 +99,9 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     });
 
     this.marketApi = new MarketApi(config);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- OrdersApi constructor type not resolved by TS SDK
-    this.ordersApi = new OrdersApi(config) as unknown as KalshiOrdersApi;
+    this.ordersApi = new OrdersApi(
+      config as ConstructorParameters<typeof OrdersApi>[0],
+    ) as unknown as KalshiOrdersApi;
 
     this.wsClient = new KalshiWebSocketClient({
       apiKeyId,
@@ -255,9 +271,57 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  cancelOrder(_orderId: string): Promise<CancelResult> {
-    throw new Error('cancelOrder not implemented - Epic 5 Story 5.1');
+  async cancelOrder(orderId: string): Promise<CancelResult> {
+    if (!this.connected) {
+      throw new PlatformApiError(
+        KALSHI_ERROR_CODES.INVALID_REQUEST,
+        'Kalshi connector not connected',
+        PlatformId.KALSHI,
+        'error',
+      );
+    }
+
+    await this.rateLimiter.acquireWrite();
+
+    try {
+      const response = await withRetry(
+        () => this.ordersApi.cancelOrder(orderId),
+        RETRY_STRATEGIES.NETWORK_ERROR,
+        (attempt, error) => {
+          this.logger.warn({
+            message: 'Retrying cancelOrder',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.KALSHI,
+            metadata: { orderId, attempt, error: error.message },
+          });
+        },
+      );
+
+      this.lastHeartbeat = new Date();
+      const order = response.data.order;
+
+      if (order.status === 'canceled') {
+        return { orderId, status: 'cancelled' };
+      }
+      if (order.status === 'executed') {
+        return { orderId, status: 'already_filled' };
+      }
+
+      // Unexpected status — cancel may not have taken effect
+      throw new PlatformApiError(
+        KALSHI_ERROR_CODES.INVALID_REQUEST,
+        `Unexpected order status after cancel: ${order.status}`,
+        PlatformId.KALSHI,
+        'warning',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('not found') || message.includes('404')) {
+        return { orderId, status: 'not_found' };
+      }
+      throw this.mapError(error);
+    }
   }
 
   async getOrder(orderId: string): Promise<OrderStatusResult> {

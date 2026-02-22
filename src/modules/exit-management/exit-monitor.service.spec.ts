@@ -14,6 +14,10 @@ import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
 import type { IPlatformConnector } from '../../common/interfaces/platform-connector.interface';
+import {
+  createMockPlatformConnector,
+  createMockRiskManager,
+} from '../../test/mock-factories.js';
 
 vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -68,9 +72,9 @@ describe('ExitMonitorService', () => {
   let service: ExitMonitorService;
   let positionRepository: Record<string, ReturnType<typeof vi.fn>>;
   let orderRepository: Record<string, ReturnType<typeof vi.fn>>;
-  let kalshiConnector: Record<string, ReturnType<typeof vi.fn>>;
-  let polymarketConnector: Record<string, ReturnType<typeof vi.fn>>;
-  let riskManager: Record<string, ReturnType<typeof vi.fn>>;
+  let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
+  let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
+  let riskManager: ReturnType<typeof createMockRiskManager>;
   let eventEmitter: Record<string, ReturnType<typeof vi.fn>>;
   let thresholdEvaluator: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -88,9 +92,7 @@ describe('ExitMonitorService', () => {
       findById: vi.fn(),
     };
 
-    kalshiConnector = {
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getOrder: vi.fn(),
+    kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.KALSHI,
         contractId: 'kalshi-contract-1',
@@ -111,12 +113,9 @@ describe('ExitMonitorService', () => {
         filledQuantity: 100,
         timestamp: new Date(),
       }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.KALSHI),
-    };
+    });
 
-    polymarketConnector = {
-      getHealth: vi.fn().mockReturnValue({ status: 'healthy' }),
-      getOrder: vi.fn(),
+    polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
         contractId: 'poly-contract-1',
@@ -137,15 +136,9 @@ describe('ExitMonitorService', () => {
         filledQuantity: 100,
         timestamp: new Date(),
       }),
-      getPlatformId: vi.fn().mockReturnValue(PlatformId.POLYMARKET),
-    };
+    });
 
-    riskManager = {
-      closePosition: vi.fn().mockResolvedValue(undefined),
-      haltTrading: vi.fn(),
-      resumeTrading: vi.fn(),
-      recalculateFromPositions: vi.fn().mockResolvedValue(undefined),
-    };
+    riskManager = createMockRiskManager();
 
     eventEmitter = {
       emit: vi.fn(),
@@ -189,7 +182,7 @@ describe('ExitMonitorService', () => {
     it('should skip evaluation when connector is disconnected', async () => {
       const position = createMockPosition();
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
-      kalshiConnector.getHealth!.mockReturnValue({ status: 'disconnected' });
+      kalshiConnector.getHealth.mockReturnValue({ status: 'disconnected' });
 
       await service.evaluatePositions();
 
@@ -244,7 +237,7 @@ describe('ExitMonitorService', () => {
       const position = createMockPosition();
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
       // kalshi buy side → close by selling → need bids
-      kalshiConnector.getOrderBook!.mockResolvedValue({
+      kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
         contractId: 'kalshi-contract-1',
         bids: [], // Empty
@@ -321,14 +314,14 @@ describe('ExitMonitorService', () => {
       });
 
       // Primary (kalshi) fills, secondary (polymarket) fails
-      kalshiConnector.submitOrder!.mockResolvedValue({
+      kalshiConnector.submitOrder.mockResolvedValue({
         orderId: 'kalshi-exit-1',
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 100,
         timestamp: new Date(),
       });
-      polymarketConnector.submitOrder!.mockRejectedValue(
+      polymarketConnector.submitOrder.mockRejectedValue(
         new Error('Polymarket API timeout'),
       );
 
@@ -400,7 +393,7 @@ describe('ExitMonitorService', () => {
       });
 
       // Primary (kalshi) fails
-      kalshiConnector.submitOrder!.mockRejectedValue(
+      kalshiConnector.submitOrder.mockRejectedValue(
         new Error('Connection reset'),
       );
 
@@ -423,8 +416,8 @@ describe('ExitMonitorService', () => {
       ]);
 
       // First position: connector throws on order book
-      kalshiConnector
-        .getOrderBook!.mockRejectedValueOnce(new Error('First call fails'))
+      kalshiConnector.getOrderBook
+        .mockRejectedValueOnce(new Error('First call fails'))
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
           contractId: 'kalshi-contract-1',
@@ -446,9 +439,7 @@ describe('ExitMonitorService', () => {
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
 
       // Make all evaluations fail
-      kalshiConnector.getOrderBook!.mockRejectedValue(
-        new Error('Always fails'),
-      );
+      kalshiConnector.getOrderBook.mockRejectedValue(new Error('Always fails'));
 
       // 3 consecutive full failures
       await service.evaluatePositions();
@@ -486,7 +477,7 @@ describe('ExitMonitorService', () => {
     });
 
     it('should return null when order book is empty on relevant side', async () => {
-      kalshiConnector.getOrderBook!.mockResolvedValue({
+      kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
         contractId: 'contract-1',
         bids: [],

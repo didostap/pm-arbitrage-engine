@@ -8,6 +8,7 @@ import { PlatformApiError } from '../../common/errors/index.js';
 const mockGetMarketOrderbook = vi.fn();
 const mockCreateOrder = vi.fn();
 const mockGetOrder = vi.fn();
+const mockCancelOrder = vi.fn();
 
 // Mock withRetry to execute fn once without retries (avoids real delay in tests)
 vi.mock('../../common/utils/index.js', async (importOriginal) => {
@@ -31,6 +32,7 @@ vi.mock('kalshi-typescript', () => {
   }
   class MockOrdersApi {
     getOrder = mockGetOrder;
+    cancelOrder = mockCancelOrder;
   }
   class MockKalshiAuth {
     generateAuthHeaders() {
@@ -44,6 +46,15 @@ vi.mock('kalshi-typescript', () => {
     OrdersApi: MockOrdersApi,
     KalshiAuth: MockKalshiAuth,
   };
+});
+
+// Mock deep import for OrdersApi (barrel re-export broken under nodenext)
+vi.mock('kalshi-typescript/dist/api/orders-api.js', () => {
+  class MockOrdersApi {
+    getOrder = mockGetOrder;
+    cancelOrder = mockCancelOrder;
+  }
+  return { OrdersApi: MockOrdersApi };
 });
 
 // Mock ws
@@ -343,13 +354,122 @@ describe('KalshiConnector', () => {
     });
   });
 
-  describe('placeholder methods', () => {
-    it('cancelOrder should throw not-implemented error', () => {
-      expect(() => connector.cancelOrder('order-1')).toThrow(
-        'cancelOrder not implemented',
+  describe('cancelOrder', () => {
+    it('should throw PlatformApiError when not connected', async () => {
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
       );
     });
 
+    it('should return cancelled status when order is canceled', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-1',
+            status: 'canceled',
+            remaining_count: 0,
+            fill_count: 0,
+          },
+          reduced_by: 10,
+        },
+      });
+
+      const result = await connector.cancelOrder('kalshi-order-1');
+
+      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('should return already_filled when order status is executed', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-2',
+            status: 'executed',
+            remaining_count: 0,
+            fill_count: 10,
+          },
+          reduced_by: 0,
+        },
+      });
+
+      const result = await connector.cancelOrder('kalshi-order-2');
+
+      expect(result.orderId).toBe('kalshi-order-2');
+      expect(result.status).toBe('already_filled');
+    });
+
+    it('should return not_found for 404 errors', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockRejectedValue(new Error('Order not found (404)'));
+
+      const result = await connector.cancelOrder('missing-order');
+
+      expect(result.orderId).toBe('missing-order');
+      expect(result.status).toBe('not_found');
+    });
+
+    it('should throw PlatformApiError on non-404 SDK error', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
+
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should throw PlatformApiError on unexpected order status', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'order-1',
+            status: 'resting',
+            remaining_count: 10,
+            fill_count: 0,
+          },
+          reduced_by: 0,
+        },
+      });
+
+      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should call rateLimiter.acquireWrite()', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+
+      mockCancelOrder.mockResolvedValue({
+        data: {
+          order: { order_id: 'order-1', status: 'canceled' },
+          reduced_by: 5,
+        },
+      });
+
+      const acquireWriteSpy = vi.spyOn(
+        (
+          connector as unknown as {
+            rateLimiter: { acquireWrite: () => Promise<void> };
+          }
+        ).rateLimiter,
+        'acquireWrite',
+      );
+
+      await connector.cancelOrder('order-1');
+
+      expect(acquireWriteSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('placeholder methods', () => {
     it('getPositions should throw not-implemented error', () => {
       expect(() => connector.getPositions()).toThrow(
         'getPositions not implemented',
