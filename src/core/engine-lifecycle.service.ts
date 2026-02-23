@@ -15,6 +15,12 @@ import { getCorrelationId } from '../common/services/correlation-context';
 import { StartupReconciliationService } from '../reconciliation/startup-reconciliation.service';
 import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.constants';
 import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
+import {
+  KALSHI_CONNECTOR_TOKEN,
+  POLYMARKET_CONNECTOR_TOKEN,
+} from '../connectors/connector.constants';
+import type { IPlatformConnector } from '../common/interfaces/platform-connector.interface';
+import { ConfigValidationError } from '../common/errors/config-validation-error';
 
 /**
  * Manages engine lifecycle hooks for startup and graceful shutdown.
@@ -34,6 +40,10 @@ export class EngineLifecycleService
     private readonly reconciliationService: StartupReconciliationService,
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
+    @Inject(KALSHI_CONNECTOR_TOKEN)
+    private readonly kalshiConnector: IPlatformConnector,
+    @Inject(POLYMARKET_CONNECTOR_TOKEN)
+    private readonly polymarketConnector: IPlatformConnector,
   ) {}
 
   /**
@@ -51,6 +61,9 @@ export class EngineLifecycleService
         30000,
       );
       this.validateConfiguration(pollingInterval);
+
+      // Validate platform modes (mixed mode detection)
+      this.validatePlatformModes();
 
       // Startup NTP validation
       try {
@@ -205,9 +218,58 @@ export class EngineLifecycleService
       pollingIntervalMs < MIN_POLLING_INTERVAL ||
       pollingIntervalMs > MAX_POLLING_INTERVAL
     ) {
-      throw new Error(
+      throw new ConfigValidationError(
         `POLLING_INTERVAL_MS must be between ${MIN_POLLING_INTERVAL} and ${MAX_POLLING_INTERVAL}ms, got ${pollingIntervalMs}ms`,
+        [`POLLING_INTERVAL_MS=${pollingIntervalMs} is outside valid range`],
       );
+    }
+  }
+
+  private validatePlatformModes(): void {
+    let kalshiHealth;
+    let polymarketHealth;
+    try {
+      kalshiHealth = this.kalshiConnector.getHealth();
+      polymarketHealth = this.polymarketConnector.getHealth();
+    } catch (error) {
+      throw new ConfigValidationError(
+        `Failed to read connector health for mode validation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        ['Connector health unavailable at startup'],
+      );
+    }
+
+    const kalshiMode = kalshiHealth.mode === 'paper' ? 'paper' : 'live';
+    const polymarketMode = polymarketHealth.mode === 'paper' ? 'paper' : 'live';
+
+    // Log platform modes at startup (AC1)
+    this.logger.log({
+      message: `Platform modes: [Kalshi: ${kalshiMode.toUpperCase()}] [Polymarket: ${polymarketMode.toUpperCase()}]`,
+      timestamp: new Date().toISOString(),
+      module: 'core',
+      correlationId: getCorrelationId(),
+      data: { kalshiMode, polymarketMode },
+    });
+
+    const isMixedMode = kalshiMode !== polymarketMode;
+
+    if (isMixedMode) {
+      const allowMixed =
+        this.configService.get<string>('ALLOW_MIXED_MODE', 'false') === 'true';
+      if (!allowMixed) {
+        throw new ConfigValidationError(
+          `Mixed mode detected: Kalshi=${kalshiMode}, Polymarket=${polymarketMode}. ` +
+            `Mixed mode is disallowed by default. Set ALLOW_MIXED_MODE=true to enable.`,
+          ['ALLOW_MIXED_MODE must be true for mixed-mode operation'],
+        );
+      }
+      this.logger.warn({
+        message:
+          'Mixed mode active — live capital at risk alongside paper trades',
+        timestamp: new Date().toISOString(),
+        module: 'core',
+        correlationId: getCorrelationId(),
+        data: { kalshiMode, polymarketMode, allowMixed: true },
+      });
     }
   }
 

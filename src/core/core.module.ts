@@ -7,6 +7,7 @@ import { ArbitrageDetectionModule } from '../modules/arbitrage-detection/arbitra
 import { RiskManagementModule } from '../modules/risk-management/risk-management.module';
 import { ExecutionModule } from '../modules/execution/execution.module';
 import { ReconciliationModule } from '../reconciliation/reconciliation.module';
+import { ConnectorModule } from '../connectors/connector.module';
 
 /**
  * Core module providing engine lifecycle management and orchestration.
@@ -18,6 +19,7 @@ import { ReconciliationModule } from '../reconciliation/reconciliation.module';
     ArbitrageDetectionModule, // Provides DetectionService for TradingEngineService
     RiskManagementModule, // Provides IRiskManager for TradingEngineService
     ExecutionModule, // Provides IExecutionQueue for TradingEngineService
+    ConnectorModule, // Provides connector tokens for EngineLifecycleService + TradingEngineService
     ReconciliationModule, // Provides StartupReconciliationService for EngineLifecycleService
   ],
   providers: [EngineLifecycleService, TradingEngineService, SchedulerService],

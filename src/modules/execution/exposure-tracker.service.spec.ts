@@ -45,6 +45,9 @@ function makeExposureEvent(
         'EXPOSED: $90.00 on kalshi (buy 200@0.45). No hedge. Immediate operator action recommended.',
     },
     ['Monitor position'],
+    undefined,
+    false,
+    false,
   );
 }
 

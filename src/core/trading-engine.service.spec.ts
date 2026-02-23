@@ -10,6 +10,12 @@ import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calcu
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FinancialDecimal } from '../common/utils/financial-math';
 import { EXECUTION_QUEUE_TOKEN } from '../modules/execution/execution.constants';
+import {
+  KALSHI_CONNECTOR_TOKEN,
+  POLYMARKET_CONNECTOR_TOKEN,
+} from '../connectors/connector.constants';
+import { createMockPlatformConnector } from '../test/mock-factories';
+import { PlatformId } from '../common/types/platform.type';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
@@ -88,6 +94,14 @@ describe('TradingEngineService', () => {
           provide: EXECUTION_QUEUE_TOKEN,
           useValue: mockExecutionQueue,
         },
+        {
+          provide: KALSHI_CONNECTOR_TOKEN,
+          useValue: createMockPlatformConnector(PlatformId.KALSHI),
+        },
+        {
+          provide: POLYMARKET_CONNECTOR_TOKEN,
+          useValue: createMockPlatformConnector(PlatformId.POLYMARKET),
+        },
       ],
     }).compile();
 
@@ -128,6 +142,22 @@ describe('TradingEngineService', () => {
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.stringContaining('cycle'),
+        }),
+      );
+    });
+
+    it('should include kalshiMode and polymarketMode in cycle start log', async () => {
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.executeCycle();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Starting trading cycle',
+          data: expect.objectContaining({
+            cycle: 'start',
+            kalshiMode: 'live',
+            polymarketMode: 'live',
+          }),
         }),
       );
     });

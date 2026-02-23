@@ -129,6 +129,12 @@ export class ExposureAlertScheduler {
       return;
     }
 
+    // Compute paper/mixed mode from connector health
+    const isPaper =
+      kalshiHealth.mode === 'paper' || polymarketHealth.mode === 'paper';
+    const mixedMode =
+      (kalshiHealth.mode === 'paper') !== (polymarketHealth.mode === 'paper');
+
     const fillPrice = new Decimal(filledOrder.fillPrice.toString()).toNumber();
     const fillSize = new Decimal(filledOrder.fillSize.toString()).toNumber();
 
@@ -167,6 +173,9 @@ export class ExposureAlertScheduler {
         currentPrices,
         pnlScenarios,
         recommendedActions,
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
 

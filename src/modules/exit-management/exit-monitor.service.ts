@@ -453,6 +453,8 @@ export class ExitMonitorService {
     // Emit exit event
     this.eventEmitter.emit(
       EVENT_NAMES.EXIT_TRIGGERED,
+      // Exit monitor only processes live positions (isPaper=false filter from Story 5.5.2).
+      // Hardcoding false/false — update if paper position exit handling is added.
       new ExitTriggeredEvent(
         position.positionId,
         position.pairId,
@@ -462,6 +464,9 @@ export class ExitMonitorService {
         realizedPnl.toFixed(8),
         kalshiCloseOrderId,
         polymarketCloseOrderId,
+        undefined,
+        false,
+        false,
       ),
     );
 
@@ -554,6 +559,10 @@ export class ExitMonitorService {
           'Retry failed exit leg via POST /api/positions/:id/retry-leg',
           'Close remaining leg via POST /api/positions/:id/close-leg',
         ],
+        // Exit monitor only processes live positions (isPaper=false filter from Story 5.5.2).
+        undefined,
+        false,
+        false,
       ),
     );
 

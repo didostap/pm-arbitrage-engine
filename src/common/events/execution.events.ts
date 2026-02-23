@@ -12,6 +12,8 @@ export class OrderFilledEvent extends BaseEvent {
     public readonly fillSize: number,
     public readonly positionId: string,
     correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
   ) {
     super(correlationId);
   }
@@ -24,6 +26,8 @@ export class ExecutionFailedEvent extends BaseEvent {
     public readonly opportunityId: string,
     public readonly context: Record<string, unknown>,
     correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
   ) {
     super(correlationId);
   }
@@ -61,6 +65,8 @@ export class SingleLegExposureEvent extends BaseEvent {
     },
     public readonly recommendedActions: string[],
     correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
   ) {
     super(correlationId);
   }
@@ -77,6 +83,8 @@ export class ExitTriggeredEvent extends BaseEvent {
     public readonly kalshiCloseOrderId: string,
     public readonly polymarketCloseOrderId: string,
     correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
   ) {
     super(correlationId);
   }
@@ -99,6 +107,8 @@ export class SingleLegResolvedEvent extends BaseEvent {
     public readonly retryPrice: number | null,
     public readonly realizedPnl: string | null,
     correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
   ) {
     super(correlationId);
   }

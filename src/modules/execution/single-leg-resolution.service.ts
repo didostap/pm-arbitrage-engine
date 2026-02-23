@@ -94,6 +94,14 @@ export class SingleLegResolutionService {
       failedPlatform === PlatformId.KALSHI ? sizes.kalshi : sizes.polymarket,
     );
 
+    // Compute paper/mixed mode from connector health
+    const kalshiHealth = this.kalshiConnector.getHealth();
+    const polymarketHealth = this.polymarketConnector.getHealth();
+    const isPaper =
+      kalshiHealth.mode === 'paper' || polymarketHealth.mode === 'paper';
+    const mixedMode =
+      (kalshiHealth.mode === 'paper') !== (polymarketHealth.mode === 'paper');
+
     let orderResult;
     try {
       orderResult = await connector.submitOrder({
@@ -156,6 +164,9 @@ export class SingleLegResolutionService {
           orderResult.filledPrice,
           orderResult.filledQuantity,
           positionId,
+          undefined,
+          isPaper,
+          mixedMode,
         ),
       );
 
@@ -176,6 +187,9 @@ export class SingleLegResolutionService {
           newEdge,
           retryPrice,
           null,
+          undefined,
+          isPaper,
+          mixedMode,
         ),
       );
 
@@ -243,6 +257,14 @@ export class SingleLegResolutionService {
     const connector = this.getConnector(filledPlatform);
     const contractId = this.getContractId(position.pair, filledPlatform);
     const filledSide = this.getSide(position, filledPlatform);
+
+    // Compute paper/mixed mode from connector health
+    const kalshiHealth = this.kalshiConnector.getHealth();
+    const polymarketHealth = this.polymarketConnector.getHealth();
+    const isPaper =
+      kalshiHealth.mode === 'paper' || polymarketHealth.mode === 'paper';
+    const mixedMode =
+      (kalshiHealth.mode === 'paper') !== (polymarketHealth.mode === 'paper');
 
     // Get the filled order record for entry price
     const filledOrderId =
@@ -385,6 +407,9 @@ export class SingleLegResolutionService {
         null,
         null,
         realizedPnl.toFixed(8),
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
 

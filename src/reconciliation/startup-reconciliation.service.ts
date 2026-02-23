@@ -538,6 +538,8 @@ export class StartupReconciliationService {
     // Emit OrderFilledEvent
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
+      // Reconciliation runs at startup before mode context is relevant.
+      // Hardcoding false/false for live defaults.
       new OrderFilledEvent(
         order.orderId,
         isKalshi ? PlatformId.KALSHI : PlatformId.POLYMARKET,
@@ -547,6 +549,9 @@ export class StartupReconciliationService {
         platformStatus.fillPrice ?? 0,
         platformStatus.fillSize ?? 0,
         matchingPosition.positionId,
+        undefined,
+        false,
+        false,
       ),
     );
 

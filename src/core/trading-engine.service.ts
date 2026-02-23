@@ -18,6 +18,11 @@ import { type IExecutionQueue } from '../common/interfaces/execution-queue.inter
 import { RankedOpportunity } from '../common/types/risk.type';
 import { FinancialDecimal } from '../common/utils/financial-math';
 import { EXECUTION_QUEUE_TOKEN } from '../modules/execution/execution.constants';
+import {
+  KALSHI_CONNECTOR_TOKEN,
+  POLYMARKET_CONNECTOR_TOKEN,
+} from '../connectors/connector.constants';
+import type { IPlatformConnector } from '../common/interfaces/platform-connector.interface';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -39,6 +44,10 @@ export class TradingEngineService {
     @Inject('IRiskManager') private readonly riskManager: IRiskManager,
     @Inject(EXECUTION_QUEUE_TOKEN)
     private readonly executionQueue: IExecutionQueue,
+    @Inject(KALSHI_CONNECTOR_TOKEN)
+    private readonly kalshiConnector: IPlatformConnector,
+    @Inject(POLYMARKET_CONNECTOR_TOKEN)
+    private readonly polymarketConnector: IPlatformConnector,
   ) {}
 
   /**
@@ -73,6 +82,14 @@ export class TradingEngineService {
           correlationId: getCorrelationId(),
           data: {
             cycle: 'start',
+            kalshiMode:
+              this.kalshiConnector.getHealth().mode === 'paper'
+                ? 'paper'
+                : 'live',
+            polymarketMode:
+              this.polymarketConnector.getHealth().mode === 'paper'
+                ? 'paper'
+                : 'live',
           },
         });
 

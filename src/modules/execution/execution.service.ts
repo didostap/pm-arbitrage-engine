@@ -81,6 +81,9 @@ export class ExecutionService implements IExecutionEngine {
     const secondaryHealth = secondaryConnector.getHealth();
     const isPaper =
       primaryHealth.mode === 'paper' || secondaryHealth.mode === 'paper';
+    // XOR: true when exactly one connector is paper and the other is live
+    const mixedMode =
+      (primaryHealth.mode === 'paper') !== (secondaryHealth.mode === 'paper');
 
     const primaryContractId =
       primaryLeg === 'kalshi'
@@ -137,6 +140,9 @@ export class ExecutionService implements IExecutionEngine {
           error.message,
           opportunity.reservationRequest.opportunityId,
           { platform: primaryPlatform, contractId: primaryContractId },
+          undefined,
+          isPaper,
+          mixedMode,
         ),
       );
       return { success: false, partialFill: false, error };
@@ -224,6 +230,7 @@ export class ExecutionService implements IExecutionEngine {
         EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
         `Secondary depth insufficient on ${secondaryPlatform}`,
         isPaper,
+        mixedMode,
       );
     }
 
@@ -255,6 +262,7 @@ export class ExecutionService implements IExecutionEngine {
         EXECUTION_ERROR_CODES.ORDER_REJECTED,
         `Secondary leg submission failed: ${err instanceof Error ? err.message : String(err)}`,
         isPaper,
+        mixedMode,
       );
     }
 
@@ -305,6 +313,7 @@ export class ExecutionService implements IExecutionEngine {
           : EXECUTION_ERROR_CODES.ORDER_REJECTED,
         `Secondary leg ${secondaryOrder.status} on ${secondaryPlatform}`,
         isPaper,
+        mixedMode,
       );
     }
 
@@ -372,6 +381,9 @@ export class ExecutionService implements IExecutionEngine {
         primaryOrder.filledPrice,
         primaryOrder.filledQuantity,
         position.positionId,
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
     this.eventEmitter.emit(
@@ -385,6 +397,9 @@ export class ExecutionService implements IExecutionEngine {
         secondaryOrder.filledPrice,
         secondaryOrder.filledQuantity,
         position.positionId,
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
 
@@ -454,6 +469,7 @@ export class ExecutionService implements IExecutionEngine {
     errorCode: number,
     errorMessage: string,
     isPaper: boolean,
+    mixedMode: boolean,
   ): Promise<ExecutionResult> {
     const kalshiSide = primaryLeg === 'kalshi' ? primarySide : secondarySide;
     const polymarketSide =
@@ -509,6 +525,9 @@ export class ExecutionService implements IExecutionEngine {
         primaryOrder.filledPrice,
         primaryOrder.filledQuantity,
         position.positionId,
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
 
@@ -618,6 +637,9 @@ export class ExecutionService implements IExecutionEngine {
         currentPrices,
         pnlScenarios,
         recommendedActions,
+        undefined,
+        isPaper,
+        mixedMode,
       ),
     );
 

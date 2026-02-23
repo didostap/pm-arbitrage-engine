@@ -8,6 +8,13 @@ import { TradingEngineService } from './trading-engine.service';
 import { PrismaService } from '../common/prisma.service';
 import { StartupReconciliationService } from '../reconciliation/startup-reconciliation.service';
 import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.constants';
+import {
+  KALSHI_CONNECTOR_TOKEN,
+  POLYMARKET_CONNECTOR_TOKEN,
+} from '../connectors/connector.constants';
+import { createMockPlatformConnector } from '../test/mock-factories';
+import { PlatformId } from '../common/types/platform.type';
+import { ConfigValidationError } from '../common/errors/config-validation-error';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock the NTP utility to avoid real network calls in tests
@@ -41,8 +48,9 @@ const createProviders = (overrides?: Record<string, unknown>) => [
   {
     provide: ConfigService,
     useValue: {
-      get: vi.fn((key: string, defaultValue: number): number => {
+      get: vi.fn((key: string, defaultValue?: unknown): unknown => {
         if (key === 'POLLING_INTERVAL_MS') return 30000;
+        if (key === 'ALLOW_MIXED_MODE') return defaultValue ?? 'false';
         return defaultValue;
       }),
       ...(overrides?.configService as object),
@@ -84,6 +92,18 @@ const createProviders = (overrides?: Record<string, unknown>) => [
       isTradingHalted: vi.fn().mockReturnValue(false),
       ...(overrides?.riskManager as object),
     },
+  },
+  {
+    provide: KALSHI_CONNECTOR_TOKEN,
+    useValue:
+      (overrides?.kalshiConnector as object) ??
+      createMockPlatformConnector(PlatformId.KALSHI),
+  },
+  {
+    provide: POLYMARKET_CONNECTOR_TOKEN,
+    useValue:
+      (overrides?.polymarketConnector as object) ??
+      createMockPlatformConnector(PlatformId.POLYMARKET),
   },
 ];
 
@@ -154,6 +174,9 @@ describe('EngineLifecycleService', () => {
       );
 
       await expect(invalidService.onApplicationBootstrap()).rejects.toThrow(
+        ConfigValidationError,
+      );
+      await expect(invalidService.onApplicationBootstrap()).rejects.toThrow(
         'POLLING_INTERVAL_MS must be between',
       );
     });
@@ -174,6 +197,9 @@ describe('EngineLifecycleService', () => {
         EngineLifecycleService,
       );
 
+      await expect(invalidService.onApplicationBootstrap()).rejects.toThrow(
+        ConfigValidationError,
+      );
       await expect(invalidService.onApplicationBootstrap()).rejects.toThrow(
         'POLLING_INTERVAL_MS must be between',
       );
@@ -219,6 +245,168 @@ describe('EngineLifecycleService', () => {
 
       expect(mockRisk.haltTrading).toHaveBeenCalledWith(
         'reconciliation_discrepancy',
+      );
+    });
+
+    it('should log platform modes at startup (both live)', async () => {
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.onApplicationBootstrap();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('[Kalshi: LIVE] [Polymarket: LIVE]'),
+          module: 'core',
+          data: expect.objectContaining({
+            kalshiMode: 'live',
+            polymarketMode: 'live',
+          }),
+        }),
+      );
+    });
+
+    it('should log platform modes at startup (both paper)', async () => {
+      const kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      const polymarketConnector = createMockPlatformConnector(
+        PlatformId.POLYMARKET,
+      );
+      polymarketConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          kalshiConnector,
+          polymarketConnector,
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      const logSpy = vi.spyOn(svc['logger'], 'log');
+      await svc.onApplicationBootstrap();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            '[Kalshi: PAPER] [Polymarket: PAPER]',
+          ),
+          data: expect.objectContaining({
+            kalshiMode: 'paper',
+            polymarketMode: 'paper',
+          }),
+        }),
+      );
+    });
+
+    it('should throw ConfigValidationError when mixed mode detected and ALLOW_MIXED_MODE=false', async () => {
+      const kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          kalshiConnector,
+          configService: {
+            get: vi.fn((key: string, defaultValue?: unknown): unknown => {
+              if (key === 'POLLING_INTERVAL_MS') return 30000;
+              if (key === 'ALLOW_MIXED_MODE') return 'false';
+              return defaultValue;
+            }),
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await expect(svc.onApplicationBootstrap()).rejects.toThrow(
+        ConfigValidationError,
+      );
+      await expect(svc.onApplicationBootstrap()).rejects.toThrow(
+        /Mixed mode detected/,
+      );
+    });
+
+    it('should allow mixed mode and log warning when ALLOW_MIXED_MODE=true', async () => {
+      const kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          kalshiConnector,
+          configService: {
+            get: vi.fn((key: string, defaultValue?: unknown): unknown => {
+              if (key === 'POLLING_INTERVAL_MS') return 30000;
+              if (key === 'ALLOW_MIXED_MODE') return 'true';
+              return defaultValue;
+            }),
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      const warnSpy = vi.spyOn(svc['logger'], 'warn');
+      await svc.onApplicationBootstrap();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'Mixed mode active — live capital at risk alongside paper trades',
+          ),
+        }),
+      );
+    });
+
+    it('should treat missing mode field as live', async () => {
+      // Default mock connectors have no mode field — should be treated as live
+      const logSpy = vi.spyOn(service['logger'], 'log');
+      await service.onApplicationBootstrap();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            kalshiMode: 'live',
+            polymarketMode: 'live',
+          }),
+        }),
+      );
+    });
+
+    it('should throw ConfigValidationError when getHealth() throws', async () => {
+      const kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+      kalshiConnector.getHealth.mockImplementation(() => {
+        throw new Error('Connector not initialized');
+      });
+
+      const module = await Test.createTestingModule({
+        providers: createProviders({ kalshiConnector }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await expect(svc.onApplicationBootstrap()).rejects.toThrow(
+        ConfigValidationError,
+      );
+      await expect(svc.onApplicationBootstrap()).rejects.toThrow(
+        /Failed to read connector health/,
       );
     });
 
