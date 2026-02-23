@@ -119,6 +119,10 @@ export const EVENT_NAMES = {
 
   /** Emitted for each discrepancy found during reconciliation */
   RECONCILIATION_DISCREPANCY: 'system.reconciliation.discrepancy',
+
+  // [Story 6.0] Gas Estimation Events
+  /** Emitted when gas estimate changes significantly (>10% delta) */
+  PLATFORM_GAS_UPDATED: 'platform.gas.updated',
 } as const;
 
 /**

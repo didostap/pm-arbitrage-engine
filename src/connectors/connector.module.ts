@@ -9,6 +9,7 @@ import {
 import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.module.js';
 import { PaperTradingConnector } from './paper/paper-trading.connector.js';
 import { PaperTradingConfig } from './paper/paper-trading.types.js';
+import { GasEstimationService } from './polymarket/gas-estimation.service.js';
 import { PlatformId } from '../common/types/platform.type.js';
 import { ConfigValidationError } from '../common/errors/config-validation-error.js';
 
@@ -68,6 +69,7 @@ function validatePaperConfig(
 @Module({
   imports: [forwardRef(() => DataIngestionModule), ConfigModule],
   providers: [
+    GasEstimationService,
     KalshiConnector,
     PolymarketConnector,
     {

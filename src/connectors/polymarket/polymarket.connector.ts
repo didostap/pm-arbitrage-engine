@@ -27,6 +27,7 @@ import { withRetry } from '../../common/utils/index.js';
 import { RateLimiter } from '../../common/utils/rate-limiter.js';
 import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-book-normalizer.service.js';
 import { POLYMARKET_ERROR_CODES } from './polymarket-error-codes.js';
+import { GasEstimationService } from './gas-estimation.service.js';
 import { PolymarketWebSocketClient } from './polymarket-websocket.client.js';
 import type { PolymarketOrderBookMessage } from './polymarket.types.js';
 import {
@@ -53,6 +54,7 @@ export class PolymarketConnector
   constructor(
     private readonly configService: ConfigService,
     private readonly normalizer: OrderBookNormalizerService,
+    private readonly gasEstimation: GasEstimationService,
   ) {
     this.privateKey = this.configService.get<string>(
       'POLYMARKET_PRIVATE_KEY',
@@ -310,15 +312,13 @@ export class PolymarketConnector
   }
 
   getFeeSchedule(): FeeSchedule {
-    // TODO(Epic 5): Add gas estimation for on-chain settlement operations
-    // Gas only applies to withdrawals/settlements, not CLOB order matching
-    // Will implement in Story 5.1 (Order Submission & Position Tracking)
     return {
       platformId: PlatformId.POLYMARKET,
       makerFeePercent: POLYMARKET_MAKER_FEE * 100, // Convert decimal (0.00) to percent (0)
       takerFeePercent: POLYMARKET_TAKER_FEE * 100, // Convert decimal (0.02) to percent (2)
+      gasEstimateUsd: this.gasEstimation.getGasEstimateUsd().toNumber(),
       description:
-        'Polymarket: ~2% taker fee, 0% maker fee. No gas fees for CLOB operations.',
+        'Polymarket: ~2% taker fee, 0% maker fee. Gas estimate includes 20% buffer for on-chain settlement.',
     };
   }
 

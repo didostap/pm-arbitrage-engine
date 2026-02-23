@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import Decimal from 'decimal.js';
 import { PolymarketConnector } from './polymarket.connector.js';
+import { GasEstimationService } from './gas-estimation.service.js';
 import { PlatformId } from '../../common/types/index.js';
 import { PlatformApiError } from '../../common/errors/index.js';
 import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-book-normalizer.service.js';
@@ -13,6 +15,7 @@ const mockPostOrder = vi.fn();
 const mockGetOrder = vi.fn();
 const mockCancelOrder = vi.fn();
 const mockNormalizePolymarket = vi.fn();
+const mockGetGasEstimateUsd = vi.fn().mockReturnValue(new Decimal('0.003'));
 
 // Mock @polymarket/clob-client
 vi.mock('@polymarket/clob-client', () => {
@@ -91,6 +94,12 @@ describe('PolymarketConnector', () => {
             normalizePolymarket: mockNormalizePolymarket,
           },
         },
+        {
+          provide: GasEstimationService,
+          useValue: {
+            getGasEstimateUsd: mockGetGasEstimateUsd,
+          },
+        },
       ],
     }).compile();
 
@@ -120,11 +129,13 @@ describe('PolymarketConnector', () => {
   });
 
   describe('getFeeSchedule', () => {
-    it('should return Polymarket fee schedule', () => {
+    it('should return Polymarket fee schedule with dynamic gas estimate', () => {
       const fees = connector.getFeeSchedule();
       expect(fees.platformId).toBe(PlatformId.POLYMARKET);
       expect(fees.makerFeePercent).toBe(0);
       expect(fees.takerFeePercent).toBe(2);
+      expect(fees.gasEstimateUsd).toBe(0.003);
+      expect(mockGetGasEstimateUsd).toHaveBeenCalled();
     });
   });
 
@@ -152,6 +163,12 @@ describe('PolymarketConnector', () => {
             provide: OrderBookNormalizerService,
             useValue: {
               normalizePolymarket: mockNormalizePolymarket,
+            },
+          },
+          {
+            provide: GasEstimationService,
+            useValue: {
+              getGasEstimateUsd: mockGetGasEstimateUsd,
             },
           },
         ],

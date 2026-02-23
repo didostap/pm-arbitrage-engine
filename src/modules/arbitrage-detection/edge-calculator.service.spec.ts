@@ -543,4 +543,66 @@ describe('EdgeCalculatorService', () => {
 
     await expect(module.init()).rejects.toThrow('must not be negative');
   });
+
+  // ========================================================================
+  // Uses dynamic gasEstimateUsd from FeeSchedule when available (Story 6.0)
+  // ========================================================================
+  it('uses FeeSchedule.gasEstimateUsd when present (Polymarket dynamic gas)', () => {
+    // Polymarket returns gasEstimateUsd = 0.005 in its fee schedule
+    polymarketConnector.getFeeSchedule.mockReturnValue({
+      ...polymarketFees,
+      gasEstimateUsd: 0.005,
+    });
+
+    const dislocation = makeDislocation({
+      buyPlatformId: PlatformId.POLYMARKET,
+      sellPlatformId: PlatformId.KALSHI,
+      buyPrice: new FinancialDecimal(0.7),
+      sellPrice: new FinancialDecimal(0.2),
+      grossEdge: new FinancialDecimal(0.1),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    // Net edge = 0.1 - (0.7*0.02) - (0.2*0.07) - (0.005/300)
+    //          = 0.1 - 0.014 - 0.014 - 0.0000167 ≈ 0.072
+    // Should pass threshold (0.008) easily
+    expect(result.opportunities).toHaveLength(1);
+
+    // Verify gas fraction uses dynamic 0.005, not static 0.30
+    const gasFraction = result.opportunities[0]?.feeBreakdown.gasFraction;
+    expect(gasFraction).toBeDefined();
+    // gasFraction = 0.005 / 300 ≈ 0.0000167
+    expect(gasFraction!.toNumber()).toBeCloseTo(0.005 / 300, 6);
+  });
+
+  // ========================================================================
+  // Falls back to config when FeeSchedule.gasEstimateUsd is undefined (Kalshi path)
+  // ========================================================================
+  it('falls back to config gas estimate when FeeSchedule.gasEstimateUsd is undefined (Kalshi path)', () => {
+    // Neither fee schedule has gasEstimateUsd
+    kalshiConnector.getFeeSchedule.mockReturnValue(kalshiFees);
+    polymarketConnector.getFeeSchedule.mockReturnValue(polymarketFees);
+
+    configService.get.mockImplementation(
+      (key: string, defaultValue: number) => {
+        if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0.3;
+        if (key === 'DETECTION_POSITION_SIZE_USD') return 300;
+        return defaultValue;
+      },
+    );
+
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.7),
+      sellPrice: new FinancialDecimal(0.2),
+      grossEdge: new FinancialDecimal(0.1),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(1);
+    // gasFraction = 0.30 / 300 = 0.001
+    const gasFraction = result.opportunities[0]?.feeBreakdown.gasFraction;
+    expect(gasFraction!.toNumber()).toBeCloseTo(0.001, 6);
+  });
 });

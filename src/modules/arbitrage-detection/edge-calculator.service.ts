@@ -63,7 +63,14 @@ export class EdgeCalculatorService implements OnModuleInit {
     );
   }
 
-  private get gasEstimateUsd(): Decimal {
+  private getGasEstimateUsd(...feeSchedules: FeeSchedule[]): Decimal {
+    // Use dynamic gas estimate from FeeSchedule if available (Polymarket path)
+    for (const schedule of feeSchedules) {
+      if (schedule.gasEstimateUsd !== undefined) {
+        return new FinancialDecimal(schedule.gasEstimateUsd);
+      }
+    }
+    // Fallback to static config (Kalshi-only path)
     return new FinancialDecimal(
       this.configService.get<number>('DETECTION_GAS_ESTIMATE_USD', 0.3),
     );
@@ -138,13 +145,15 @@ export class EdgeCalculatorService implements OnModuleInit {
       dislocation.sellPlatformId,
     ).getFeeSchedule();
 
+    const gasEstimate = this.getGasEstimateUsd(buyFeeSchedule, sellFeeSchedule);
+
     const netEdge = FinancialMath.calculateNetEdge(
       dislocation.grossEdge,
       dislocation.buyPrice,
       dislocation.sellPrice,
       buyFeeSchedule,
       sellFeeSchedule,
-      this.gasEstimateUsd,
+      gasEstimate,
       this.positionSizeUsd,
     );
 
@@ -227,7 +236,8 @@ export class EdgeCalculatorService implements OnModuleInit {
     const sellFeeCost = dislocation.sellPrice.mul(
       new FinancialDecimal(sellFeeSchedule.takerFeePercent).div(100),
     );
-    const gasFraction = this.gasEstimateUsd.div(this.positionSizeUsd);
+    const gasEstimate = this.getGasEstimateUsd(buyFeeSchedule, sellFeeSchedule);
+    const gasFraction = gasEstimate.div(this.positionSizeUsd);
     const totalCosts = buyFeeCost.plus(sellFeeCost).plus(gasFraction);
 
     return {

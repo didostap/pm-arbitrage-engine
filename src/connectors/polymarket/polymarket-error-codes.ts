@@ -16,4 +16,6 @@ export const POLYMARKET_ERROR_CODES = {
   STALE_DATA: 1014,
   /** Connector not connected — error, no retry */
   NOT_CONNECTED: 1015,
+  /** Gas estimation failed (RPC or CoinGecko) — warning, fallback to config */
+  GAS_ESTIMATION_FAILED: 1016,
 } as const;

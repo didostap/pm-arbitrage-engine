@@ -79,3 +79,18 @@ export class DegradationProtocolDeactivatedEvent extends BaseEvent {
     super(correlationId);
   }
 }
+
+/**
+ * Event emitted when gas estimate changes significantly (>10% delta).
+ * [Story 6.0] Gas Estimation
+ */
+export class PlatformGasUpdatedEvent extends BaseEvent {
+  constructor(
+    public readonly previousEstimateUsd: string,
+    public readonly newEstimateUsd: string,
+    public readonly changePercent: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}

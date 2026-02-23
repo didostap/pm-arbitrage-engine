@@ -48,6 +48,16 @@ vi.mock('../modules/data-ingestion/data-ingestion.module', () => ({
   DataIngestionModule: class MockDataIngestionModule {},
 }));
 
+vi.mock('./polymarket/gas-estimation.service', () => ({
+  GasEstimationService: class MockGasEstimationService {
+    onModuleInit() {}
+    onModuleDestroy() {}
+    getGasEstimateUsd() {
+      return { toNumber: () => 0.003 };
+    }
+  },
+}));
+
 describe('ConnectorModule', () => {
   async function createModule(envOverrides: Record<string, string> = {}) {
     const moduleRef = await Test.createTestingModule({

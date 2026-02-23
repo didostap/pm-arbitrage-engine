@@ -71,4 +71,5 @@ export interface FeeSchedule {
   makerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
   takerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
   description: string;
+  gasEstimateUsd?: number; // Dynamic gas estimate in USD (Polymarket only)
 }
