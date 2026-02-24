@@ -15,6 +15,7 @@ import { loggerConfig } from './common/config/logger.config';
 import { ArbitrageDetectionModule } from './modules/arbitrage-detection/arbitrage-detection.module';
 import { ExitManagementModule } from './modules/exit-management/exit-management.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { MonitoringModule } from './modules/monitoring/monitoring.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
     ArbitrageDetectionModule,
     ExitManagementModule,
     ReconciliationModule,
+    MonitoringModule,
   ],
   controllers: [AppController],
   providers: [AppService],

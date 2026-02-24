@@ -47,6 +47,21 @@ export class ReconciliationCompleteEvent extends BaseEvent {
 }
 
 /**
+ * Emitted when critical system health issue detected (database failure, etc.)
+ */
+export class SystemHealthCriticalEvent extends BaseEvent {
+  constructor(
+    public readonly component: string,
+    public readonly diagnosticInfo: string,
+    public readonly recommendedActions: string[],
+    public readonly severity: 'critical',
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
  * Emitted for each discrepancy found during reconciliation.
  */
 export class ReconciliationDiscrepancyEvent extends BaseEvent {
