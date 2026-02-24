@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import { PositionStatus } from '@prisma/client';
@@ -28,6 +28,7 @@ import type {
   ReconciliationResult,
   ReconciliationDiscrepancy,
 } from '../common/types/reconciliation.types';
+import { AuditLogService } from '../modules/monitoring/audit-log.service';
 
 const API_CALL_TIMEOUT_MS = 10_000;
 const OVERALL_TIMEOUT_MS = 60_000;
@@ -49,6 +50,7 @@ export class StartupReconciliationService {
     private readonly riskManager: IRiskManager,
     private readonly positionRepository: PositionRepository,
     private readonly orderRepository: OrderRepository,
+    @Optional() private readonly auditLogService?: AuditLogService,
   ) {}
 
   getLastRunResult(): ReconciliationResult | null {
@@ -138,6 +140,24 @@ export class StartupReconciliationService {
 
     this.lastRunResult = result;
     this.lastRunAt = new Date();
+
+    // Audit trail — tamper-evident persistence
+    if (this.auditLogService) {
+      void this.auditLogService.append({
+        eventType: 'reconciliation.completed',
+        module: 'reconciliation',
+        details: {
+          positionsChecked,
+          discrepanciesFound: discrepancies.length,
+          discrepancies,
+          ordersVerified,
+          pendingOrdersResolved,
+          durationMs,
+          timedOut,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
 
     // Emit completion event
     this.eventEmitter.emit(
@@ -480,6 +500,21 @@ export class StartupReconciliationService {
       module: StartupReconciliationService.name,
       data: { positionId, action, rationale, newStatus },
     });
+
+    // Audit trail — tamper-evident persistence
+    if (this.auditLogService) {
+      void this.auditLogService.append({
+        eventType: 'reconciliation.discrepancy_resolved',
+        module: 'reconciliation',
+        details: {
+          positionId,
+          action,
+          rationale,
+          newStatus,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
 
     // Check if any RECONCILIATION_REQUIRED positions remain
     const remaining = await this.positionRepository.findByStatus(

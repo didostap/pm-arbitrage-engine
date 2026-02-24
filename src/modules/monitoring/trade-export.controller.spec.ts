@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { TradeExportController } from './trade-export.controller.js';
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
+import { PositionRepository } from '../../persistence/repositories/position.repository.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
 
 // Suppress logger output
@@ -37,6 +38,11 @@ describe('TradeExportController', () => {
   let mockOrderRepo: {
     findByDateRange: ReturnType<typeof vi.fn>;
   };
+  let mockPositionRepo: {
+    sumClosedEdgeByDateRange: ReturnType<typeof vi.fn>;
+    countOrdersByPlatformAndDateRange: ReturnType<typeof vi.fn>;
+    findByOrderIds: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -44,11 +50,17 @@ describe('TradeExportController', () => {
     mockOrderRepo = {
       findByDateRange: vi.fn().mockResolvedValue([makeMockOrder()]),
     };
+    mockPositionRepo = {
+      sumClosedEdgeByDateRange: vi.fn().mockResolvedValue('0'),
+      countOrdersByPlatformAndDateRange: vi.fn().mockResolvedValue(0),
+      findByOrderIds: vi.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TradeExportController],
       providers: [
         { provide: OrderRepository, useValue: mockOrderRepo },
+        { provide: PositionRepository, useValue: mockPositionRepo },
         {
           provide: CsvTradeLogService,
           useValue: { isEnabled: vi.fn().mockReturnValue(true) },
@@ -266,6 +278,149 @@ describe('TradeExportController', () => {
       );
 
       expect(reply.status).not.toHaveBeenCalledWith(429);
+    });
+  });
+
+  describe('exportTaxReport (Story 6.5)', () => {
+    it('should return CSV with correct headers', async () => {
+      const mockReply = {
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+      };
+
+      controller.resetRateLimiter();
+
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        mockReply as never,
+      );
+
+      expect(mockReply.header).toHaveBeenCalledWith('Content-Type', 'text/csv');
+      expect(mockReply.header).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'attachment; filename="2026-tax-report.csv"',
+      );
+    });
+
+    it('should include all three sections', async () => {
+      const mockReply = {
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+      };
+
+      controller.resetRateLimiter();
+
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        mockReply as never,
+      );
+
+      const csvContent = mockReply.send.mock.calls[0]![0] as string;
+      expect(csvContent).toContain('# TRADE LOG');
+      expect(csvContent).toContain('# QUARTERLY P&L SUMMARY');
+      expect(csvContent).toContain('# ANNUAL SUMMARY');
+      expect(csvContent).toContain('# DISCLAIMER');
+    });
+
+    it('should categorize Polymarket as on-chain', async () => {
+      mockOrderRepo.findByDateRange.mockResolvedValue([
+        makeMockOrder({ platform: 'POLYMARKET' }),
+      ]);
+
+      const mockReply = {
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+      };
+
+      controller.resetRateLimiter();
+
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        mockReply as never,
+      );
+
+      const csvContent = mockReply.send.mock.calls[0]![0] as string;
+      expect(csvContent).toContain('POLYMARKET,on-chain');
+    });
+
+    it('should categorize Kalshi as regulated-exchange', async () => {
+      mockOrderRepo.findByDateRange.mockResolvedValue([
+        makeMockOrder({ platform: 'KALSHI' }),
+      ]);
+
+      const mockReply = {
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+      };
+
+      controller.resetRateLimiter();
+
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        mockReply as never,
+      );
+
+      const csvContent = mockReply.send.mock.calls[0]![0] as string;
+      expect(csvContent).toContain('KALSHI,regulated-exchange');
+    });
+
+    it('should populate positionId from order-to-position lookup', async () => {
+      mockOrderRepo.findByDateRange.mockResolvedValue([
+        makeMockOrder({ orderId: 'order-1', platform: 'KALSHI' }),
+      ]);
+      mockPositionRepo.findByOrderIds.mockResolvedValue([
+        {
+          positionId: 'pos-abc',
+          kalshiOrderId: 'order-1',
+          polymarketOrderId: null,
+        },
+      ]);
+
+      const mockReply = {
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+      };
+
+      controller.resetRateLimiter();
+
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        mockReply as never,
+      );
+
+      const csvContent = mockReply.send.mock.calls[0]![0] as string;
+      expect(csvContent).toContain('pos-abc');
+    });
+
+    it('should share rate limit with trades endpoint', async () => {
+      const mockReply = () => ({
+        header: vi.fn().mockReturnThis(),
+        send: vi.fn().mockReturnThis(),
+        status: vi.fn().mockReturnThis(),
+      });
+
+      controller.resetRateLimiter();
+
+      // Fire 5 requests (mixed)
+      for (let i = 0; i < 5; i++) {
+        await controller.exportTrades(
+          {
+            startDate: '2026-02-20',
+            endDate: '2026-02-21',
+            format: 'json',
+          },
+          mockReply() as never,
+        );
+      }
+
+      // 6th — tax report should be rate limited
+      const reply6 = mockReply();
+      await controller.exportTaxReport(
+        { year: 2026, format: 'csv' },
+        reply6 as never,
+      );
+
+      expect(reply6.status).toHaveBeenCalledWith(429);
     });
   });
 });

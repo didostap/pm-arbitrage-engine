@@ -5,6 +5,7 @@ import { Logger } from '@nestjs/common';
 import { EventConsumerService } from './event-consumer.service.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
+import { AuditLogService } from './audit-log.service.js';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
 
@@ -516,6 +517,108 @@ describe('EventConsumerService', () => {
       await csvService.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       expect(mockCsvTradeLog.logTrade).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit log integration (Story 6.5)', () => {
+    let auditModule: TestingModule;
+    let auditService: EventConsumerService;
+    let mockAuditLogService: { append: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      mockAuditLogService = {
+        append: vi.fn().mockResolvedValue(undefined),
+      };
+
+      auditModule = await Test.createTestingModule({
+        imports: [
+          EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
+        ],
+        providers: [
+          EventConsumerService,
+          { provide: TelegramAlertService, useValue: mockTelegramService },
+          {
+            provide: AuditLogService,
+            useValue: mockAuditLogService,
+          },
+        ],
+      }).compile();
+
+      await auditModule.init();
+      auditService = auditModule.get(EventConsumerService);
+    });
+
+    afterEach(async () => {
+      await auditModule.close();
+    });
+
+    it('should call audit log append for events', async () => {
+      await auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+
+      // Wait for fire-and-forget to settle
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockAuditLogService.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: EVENT_NAMES.ORDER_FILLED,
+          module: 'execution',
+          correlationId: 'test-corr-123',
+        }),
+      );
+    });
+
+    it('should extract module from dot-notation event name', () => {
+      expect(auditService.extractModule('execution.order.filled')).toBe(
+        'execution',
+      );
+      expect(auditService.extractModule('risk.limit.breached')).toBe('risk');
+      expect(auditService.extractModule('platform.health.degraded')).toBe(
+        'platform',
+      );
+    });
+
+    it('should sanitize event for audit', () => {
+      const result = auditService.sanitizeEventForAudit({
+        timestamp: new Date('2024-01-01'),
+        correlationId: 'test',
+        extra: 'data',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          correlationId: 'test',
+          extra: 'data',
+        }),
+      );
+    });
+
+    it('should NOT audit monitoring.audit.* events (circular prevention)', async () => {
+      await auditService.handleEvent(
+        'monitoring.audit.write_failed',
+        makeBaseEvent(),
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockAuditLogService.append).not.toHaveBeenCalled();
+    });
+
+    it('should not block event routing on audit failure', async () => {
+      mockAuditLogService.append.mockRejectedValue(new Error('DB down'));
+
+      // Should NOT throw
+      await expect(
+        auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('audit log not injected', () => {
+    it('should work when AuditLogService is not injected', async () => {
+      // The default `service` from beforeEach does not inject AuditLogService
+      await expect(
+        service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
+      ).resolves.toBeUndefined();
     });
   });
 });

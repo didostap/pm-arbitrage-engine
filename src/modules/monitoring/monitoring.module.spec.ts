@@ -9,6 +9,7 @@ import { EventConsumerService } from './event-consumer.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { DailySummaryService } from './daily-summary.service.js';
 import { TradeExportController } from './trade-export.controller.js';
+import { AuditLogService } from './audit-log.service.js';
 import { PersistenceModule } from '../../common/persistence.module.js';
 
 describe('MonitoringModule', () => {
@@ -54,5 +55,11 @@ describe('MonitoringModule', () => {
     const controller = module.get<TradeExportController>(TradeExportController);
     expect(controller).toBeDefined();
     expect(controller).toBeInstanceOf(TradeExportController);
+  });
+
+  it('should compile and provide AuditLogService', () => {
+    const service = module.get<AuditLogService>(AuditLogService);
+    expect(service).toBeDefined();
+    expect(service).toBeInstanceOf(AuditLogService);
   });
 });

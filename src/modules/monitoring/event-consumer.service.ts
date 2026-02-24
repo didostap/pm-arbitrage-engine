@@ -15,6 +15,7 @@ import {
   CsvTradeLogService,
   type TradeLogRecord,
 } from './csv-trade-log.service.js';
+import { AuditLogService } from './audit-log.service.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
 
 /**
@@ -86,6 +87,9 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(CsvTradeLogService)
     private readonly csvTradeLogService?: CsvTradeLogService,
+    @Optional()
+    @Inject(AuditLogService)
+    private readonly auditLogService?: AuditLogService,
   ) {}
 
   onModuleInit(): void {
@@ -171,6 +175,19 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
         if (record) {
           void this.csvTradeLogService.logTrade(record);
         }
+      }
+
+      // Audit trail — log ALL events for tamper-evident persistence
+      // Skip monitoring.audit.* events to prevent infinite recursion
+      if (this.auditLogService && !eventName.startsWith('monitoring.audit.')) {
+        void this.auditLogService
+          .append({
+            eventType: eventName,
+            module: this.extractModule(eventName),
+            correlationId: event?.correlationId,
+            details: this.sanitizeEventForAudit(event),
+          })
+          .catch(() => {}); // Error already handled internally by AuditLogService
       }
     } catch (error) {
       this.errorsCount++;
@@ -270,6 +287,20 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return null;
+  }
+
+  /** Extracts module name from dot-notation event name (e.g., 'execution' from 'execution.order.filled'). */
+  extractModule(eventName: string): string {
+    return eventName.split('.')[0] ?? 'unknown';
+  }
+
+  /** Safely converts event to a plain object for JSON storage in audit trail. */
+  sanitizeEventForAudit(event: unknown): Record<string, unknown> {
+    try {
+      return JSON.parse(JSON.stringify(event)) as Record<string, unknown>;
+    } catch {
+      return { raw: String(event) };
+    }
   }
 
   private summarizeEvent(event: BaseEvent): Record<string, unknown> | string {

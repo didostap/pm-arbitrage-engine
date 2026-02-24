@@ -18,6 +18,7 @@ import {
   createMockPlatformConnector,
   createMockRiskManager,
 } from '../test/mock-factories.js';
+import { AuditLogService } from '../modules/monitoring/audit-log.service';
 
 const createMockOrder = (overrides: Record<string, unknown> = {}) => ({
   orderId: 'order-1',
@@ -807,6 +808,85 @@ describe('StartupReconciliationService', () => {
         (d) => d.discrepancyType === 'pending_filled',
       );
       expect(disc).toBeDefined();
+    });
+  });
+
+  describe('audit log integration (Story 6.5)', () => {
+    let auditService: StartupReconciliationService;
+    let mockAuditLogService: { append: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      mockAuditLogService = {
+        append: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          StartupReconciliationService,
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
+          {
+            provide: POLYMARKET_CONNECTOR_TOKEN,
+            useValue: polymarketConnector,
+          },
+          { provide: EventEmitter2, useValue: eventEmitter },
+          { provide: RISK_MANAGER_TOKEN, useValue: riskManager },
+          { provide: PositionRepository, useValue: positionRepository },
+          { provide: OrderRepository, useValue: orderRepository },
+          {
+            provide: AuditLogService,
+            useValue: mockAuditLogService,
+          },
+        ],
+      }).compile();
+
+      auditService = module.get(StartupReconciliationService);
+    });
+
+    it('should call AuditLogService.append on reconciliation completion', async () => {
+      await auditService.reconcile();
+
+      // Wait for fire-and-forget to settle
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockAuditLogService.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'reconciliation.completed',
+          module: 'reconciliation',
+        }),
+      );
+    });
+
+    it('should call AuditLogService.append on discrepancy resolution', async () => {
+      positionRepository.findById.mockResolvedValue(
+        createMockPosition({ status: 'RECONCILIATION_REQUIRED' }),
+      );
+      positionRepository.findByStatus.mockResolvedValue([]);
+
+      await auditService.resolveDiscrepancy(
+        'pos-1',
+        'force_close',
+        'Test resolution',
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockAuditLogService.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'reconciliation.discrepancy_resolved',
+          module: 'reconciliation',
+          details: expect.objectContaining({
+            positionId: 'pos-1',
+            action: 'force_close',
+            rationale: 'Test resolution',
+          }),
+        }),
+      );
+    });
+
+    it('should work when AuditLogService is not injected', async () => {
+      // The default `service` from outer beforeEach does not inject AuditLogService
+      await expect(service.reconcile()).resolves.toBeDefined();
     });
   });
 });

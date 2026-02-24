@@ -127,6 +127,12 @@ export const EVENT_NAMES = {
   // [Story 6.4] Compliance Events
   /** Emitted when trade is blocked by compliance validation */
   COMPLIANCE_BLOCKED: 'execution.compliance.blocked',
+
+  // [Story 6.5] Audit Events
+  /** Emitted when audit log write fails */
+  AUDIT_LOG_FAILED: 'monitoring.audit.write_failed',
+  /** Emitted when hash chain integrity check fails */
+  AUDIT_CHAIN_BROKEN: 'monitoring.audit.chain_broken',
 } as const;
 
 /**

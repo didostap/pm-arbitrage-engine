@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConnectorModule } from '../connectors/connector.module';
 import { RiskManagementModule } from '../modules/risk-management/risk-management.module';
+import { MonitoringModule } from '../modules/monitoring/monitoring.module';
 import { PositionRepository } from '../persistence/repositories/position.repository';
 import { OrderRepository } from '../persistence/repositories/order.repository';
 import { StartupReconciliationService } from './startup-reconciliation.service';
 import { ReconciliationController } from './reconciliation.controller';
 
 @Module({
-  imports: [ConnectorModule, RiskManagementModule],
+  imports: [ConnectorModule, RiskManagementModule, MonitoringModule],
   providers: [
     StartupReconciliationService,
     PositionRepository,

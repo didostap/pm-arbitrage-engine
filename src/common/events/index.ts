@@ -6,4 +6,5 @@ export * from './system.events';
 export * from './detection.events';
 export * from './risk.events';
 export * from './execution.events';
+export * from './monitoring.events';
 export * from './event-catalog';

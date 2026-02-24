@@ -6,6 +6,8 @@ import { EventConsumerService } from './event-consumer.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { DailySummaryService } from './daily-summary.service.js';
 import { TradeExportController } from './trade-export.controller.js';
+import { AuditLogService } from './audit-log.service.js';
+import { AuditLogRepository } from '../../persistence/repositories/audit-log.repository.js';
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
 import { PositionRepository } from '../../persistence/repositories/position.repository.js';
 
@@ -17,9 +19,16 @@ import { PositionRepository } from '../../persistence/repositories/position.repo
     EventConsumerService,
     CsvTradeLogService,
     DailySummaryService,
+    AuditLogService,
+    AuditLogRepository,
     OrderRepository,
     PositionRepository,
   ],
-  exports: [TelegramAlertService, EventConsumerService, CsvTradeLogService],
+  exports: [
+    TelegramAlertService,
+    EventConsumerService,
+    CsvTradeLogService,
+    AuditLogService,
+  ],
 })
 export class MonitoringModule {}

@@ -180,6 +180,23 @@ model OpenPosition {
   @@map("open_positions")
 }
 
+// Tamper-evident audit trail with SHA-256 hash chain (NFR-S3: 7-year retention)
+model AuditLog {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  eventType     String   @map("event_type")
+  module        String
+  correlationId String?  @map("correlation_id")
+  details       Json
+  previousHash  String   @map("previous_hash") @db.VarChar(64)
+  currentHash   String   @map("current_hash") @db.VarChar(64)
+
+  @@index([createdAt], map: "idx_audit_logs_created_at")
+  @@index([eventType], map: "idx_audit_logs_event_type")
+  @@index([correlationId], map: "idx_audit_logs_correlation_id")
+  @@map("audit_logs")
+}
+
 // Operator risk override audit trail
 model RiskOverrideLog {
   id                      Int      @id @default(autoincrement())

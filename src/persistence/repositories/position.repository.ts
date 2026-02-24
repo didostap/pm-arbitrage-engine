@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Platform } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
 @Injectable()
@@ -138,5 +138,43 @@ export class PositionRepository {
       _sum: { expectedEdge: true },
     });
     return result._sum.expectedEdge?.toString() ?? '0';
+  }
+
+  /**
+   * Counts orders by platform within a date range.
+   * Used by tax report for per-platform trade counts.
+   */
+  async countOrdersByPlatformAndDateRange(
+    platform: Platform,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    return this.prisma.order.count({
+      where: {
+        platform,
+        createdAt: { gte: startDate, lte: endDate },
+      },
+    });
+  }
+
+  /**
+   * Finds positions by their associated order IDs (kalshi or polymarket leg).
+   * Returns minimal projection for building orderId→positionId lookup maps.
+   */
+  async findByOrderIds(orderIds: string[]) {
+    if (orderIds.length === 0) return [];
+    return this.prisma.openPosition.findMany({
+      where: {
+        OR: [
+          { kalshiOrderId: { in: orderIds } },
+          { polymarketOrderId: { in: orderIds } },
+        ],
+      },
+      select: {
+        positionId: true,
+        kalshiOrderId: true,
+        polymarketOrderId: true,
+      },
+    });
   }
 }
