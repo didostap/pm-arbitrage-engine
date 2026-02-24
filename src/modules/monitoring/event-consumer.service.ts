@@ -3,12 +3,18 @@ import {
   Logger,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
 import type { AlertSeverity } from './formatters/telegram-message.formatter.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
+import {
+  CsvTradeLogService,
+  type TradeLogRecord,
+} from './csv-trade-log.service.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
 
 /**
@@ -77,6 +83,9 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly eventEmitter: EventEmitter2,
     private readonly telegramAlertService: TelegramAlertService,
+    @Optional()
+    @Inject(CsvTradeLogService)
+    private readonly csvTradeLogService?: CsvTradeLogService,
   ) {}
 
   onModuleInit(): void {
@@ -155,6 +164,14 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
           this.processingDepth--;
         }
       }
+
+      // CSV trade logging — fire-and-forget for trade-related events
+      if (this.csvTradeLogService) {
+        const record = this.buildTradeLogRecord(eventName, event);
+        if (record) {
+          void this.csvTradeLogService.logTrade(record);
+        }
+      }
     } catch (error) {
       this.errorsCount++;
       this.logger.error({
@@ -191,6 +208,68 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     this.severityCounts = { critical: 0, warning: 0, info: 0 };
     this.lastEventTimestamp = null;
     this.errorsCount = 0;
+  }
+
+  /** Safely coerce unknown event field to string. */
+  private str(value: unknown, fallback: string = 'N/A'): string {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean')
+      return value.toString();
+    return fallback;
+  }
+
+  /**
+   * Builds a TradeLogRecord from trade-related events.
+   * Returns null for non-trade events.
+   */
+  private buildTradeLogRecord(
+    eventName: string,
+    event: BaseEvent,
+  ): TradeLogRecord | null {
+    const e = event as unknown as Record<string, unknown>;
+
+    if (eventName === EVENT_NAMES.ORDER_FILLED) {
+      return {
+        timestamp: event.timestamp.toISOString(),
+        platform: this.str(e['platform']),
+        contractId: 'N/A', // Not available in OrderFilledEvent
+        side: this.str(e['side']),
+        price: this.str(e['price'], '0'),
+        size: this.str(e['size'], '0'),
+        fillPrice: this.str(e['fillPrice'], '0'),
+        fees: 'N/A', // Not available in event payload
+        gas: 'N/A', // Not available in event payload
+        edge: 'N/A', // Not available in event payload
+        pnl: '0', // P&L is realized on exit
+        positionId: this.str(e['positionId']),
+        pairId: 'N/A', // Not available in OrderFilledEvent
+        isPaper: Boolean(e['isPaper']),
+        correlationId: event.correlationId ?? '',
+      };
+    }
+
+    if (eventName === EVENT_NAMES.EXIT_TRIGGERED) {
+      return {
+        timestamp: event.timestamp.toISOString(),
+        platform: 'N/A', // Exit spans both platforms
+        contractId: 'N/A',
+        side: this.str(e['exitType'], 'exit'),
+        price: '0',
+        size: '0',
+        fillPrice: '0',
+        fees: 'N/A',
+        gas: 'N/A',
+        edge: this.str(e['finalEdge']),
+        pnl: this.str(e['realizedPnl'], '0'),
+        positionId: this.str(e['positionId']),
+        pairId: this.str(e['pairId']),
+        isPaper: Boolean(e['isPaper']),
+        correlationId: event.correlationId ?? '',
+      };
+    }
+
+    return null;
   }
 
   private summarizeEvent(event: BaseEvent): Record<string, unknown> | string {

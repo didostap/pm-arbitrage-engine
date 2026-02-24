@@ -4,6 +4,7 @@ import { EventEmitterModule, EventEmitter2 } from '@nestjs/event-emitter';
 import { Logger } from '@nestjs/common';
 import { EventConsumerService } from './event-consumer.service.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
+import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
 
@@ -429,6 +430,92 @@ describe('EventConsumerService', () => {
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         expect.anything(),
       );
+    });
+  });
+
+  describe('CSV trade logging delegation (Story 6.3)', () => {
+    let csvModule: TestingModule;
+    let csvService: EventConsumerService;
+    let mockCsvTradeLog: { logTrade: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      mockCsvTradeLog = {
+        logTrade: vi.fn().mockResolvedValue(undefined),
+      };
+
+      csvModule = await Test.createTestingModule({
+        imports: [
+          EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
+        ],
+        providers: [
+          EventConsumerService,
+          { provide: TelegramAlertService, useValue: mockTelegramService },
+          { provide: CsvTradeLogService, useValue: mockCsvTradeLog },
+        ],
+      }).compile();
+
+      await csvModule.init();
+      csvService = csvModule.get(EventConsumerService);
+    });
+
+    afterEach(async () => {
+      await csvModule.close();
+    });
+
+    it('should delegate ORDER_FILLED events to CsvTradeLogService', async () => {
+      const event = {
+        ...makeBaseEvent(),
+        platform: 'KALSHI',
+        side: 'buy',
+        price: 0.55,
+        size: 100,
+        fillPrice: 0.5501,
+        fillSize: 100,
+        positionId: 'pos-123',
+        isPaper: false,
+      };
+
+      await csvService.handleEvent(EVENT_NAMES.ORDER_FILLED, event as never);
+
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledTimes(1);
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platform: 'KALSHI',
+          side: 'buy',
+          positionId: 'pos-123',
+          isPaper: false,
+        }),
+      );
+    });
+
+    it('should delegate EXIT_TRIGGERED events to CsvTradeLogService', async () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-456',
+        pairId: 'pair-789',
+        exitType: 'take_profit',
+        initialEdge: '0.012',
+        finalEdge: '0.003',
+        realizedPnl: '5.50',
+        isPaper: true,
+      };
+
+      await csvService.handleEvent(EVENT_NAMES.EXIT_TRIGGERED, event as never);
+
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledTimes(1);
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pnl: '5.50',
+          pairId: 'pair-789',
+          isPaper: true,
+        }),
+      );
+    });
+
+    it('should NOT delegate non-trade events to CsvTradeLogService', async () => {
+      await csvService.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+
+      expect(mockCsvTradeLog.logTrade).not.toHaveBeenCalled();
     });
   });
 });

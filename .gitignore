@@ -63,3 +63,6 @@ config/contract-pairs.yaml
 # Kalshi credentials
 secrets/
 *.pem
+
+# Trade log data (CSV files, daily summaries)
+data/

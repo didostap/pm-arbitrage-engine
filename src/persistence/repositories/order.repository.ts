@@ -50,4 +50,30 @@ export class OrderRepository {
       data,
     });
   }
+
+  /** Counts filled orders within a date range. */
+  async countByDateRange(startDate: Date, endDate: Date): Promise<number> {
+    return this.prisma.order.count({
+      where: {
+        status: 'FILLED',
+        createdAt: { gte: startDate, lte: endDate },
+      },
+    });
+  }
+
+  /** Finds orders within a date range with pair relation. */
+  async findByDateRange(
+    startDate: Date,
+    endDate: Date,
+    options?: { isPaper?: boolean },
+  ) {
+    return this.prisma.order.findMany({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+        ...(options?.isPaper !== undefined ? { isPaper: options.isPaper } : {}),
+      },
+      include: { pair: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 }

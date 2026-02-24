@@ -98,4 +98,45 @@ export class PositionRepository {
       data,
     });
   }
+
+  /** Counts all positions with a given status (both live and paper). */
+  async countByStatus(
+    status: Prisma.OpenPositionWhereInput['status'],
+  ): Promise<number> {
+    return this.prisma.openPosition.count({ where: { status } });
+  }
+
+  /** Counts positions closed within a date range. */
+  async countClosedByDateRange(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    return this.prisma.openPosition.count({
+      where: {
+        status: 'CLOSED',
+        updatedAt: { gte: startDate, lte: endDate },
+      },
+    });
+  }
+
+  /**
+   * Sums expectedEdge for positions closed in date range.
+   * NOTE: This is a proxy for realized P&L — OpenPosition has no dedicated realizedPnl
+   * Decimal column. The reconciliationContext JSON may contain actual P&L but extracting
+   * from JSON aggregates is unreliable. True realized P&L tracking requires a schema
+   * migration (deferred to Phase 1).
+   */
+  async sumClosedEdgeByDateRange(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<string> {
+    const result = await this.prisma.openPosition.aggregate({
+      where: {
+        status: 'CLOSED',
+        updatedAt: { gte: startDate, lte: endDate },
+      },
+      _sum: { expectedEdge: true },
+    });
+    return result._sum.expectedEdge?.toString() ?? '0';
+  }
 }
