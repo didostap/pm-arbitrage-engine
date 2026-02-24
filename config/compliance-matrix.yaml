@@ -1,0 +1,26 @@
+# Compliance Matrix Configuration (Story 6.4)
+# Defines per-platform blocked contract categories for trade gating.
+# Any trade whose eventDescription matches a blocked category (case-insensitive substring)
+# is hard-blocked before order submission.
+
+compliance:
+  # Default: allow all categories unless explicitly blocked
+  defaultAction: allow
+  rules:
+    - platform: KALSHI
+      blockedCategories:
+        - "adult-content"
+        - "assassination"
+        - "terrorism"
+      notes: "Kalshi CFTC-regulated — these categories are not offered"
+    - platform: POLYMARKET
+      blockedCategories:
+        - "adult-content"
+        - "assassination"
+        - "terrorism"
+      notes: "Polymarket ToS prohibitions"
+  # Jurisdictional constraints (MVP: informational, logged on startup)
+  jurisdiction:
+    entity: "US"
+    kalshiRequirement: "US entity/residency required"
+    polymarketNote: "Global access with geo-restrictions"

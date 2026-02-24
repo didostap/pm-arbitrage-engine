@@ -21,6 +21,8 @@ import {
   ExecutionFailedEvent,
   SingleLegExposureEvent,
 } from '../../common/events/execution.events';
+import { ComplianceValidatorService } from './compliance/compliance-validator.service';
+import type { ComplianceDecision } from './compliance/compliance-config';
 import {
   calculateSingleLegPnlScenarios,
   buildRecommendedActions,
@@ -46,6 +48,7 @@ export class ExecutionService implements IExecutionEngine {
     private readonly eventEmitter: EventEmitter2,
     private readonly orderRepository: OrderRepository,
     private readonly positionRepository: PositionRepository,
+    private readonly complianceValidator: ComplianceValidatorService,
   ) {}
 
   async execute(
@@ -93,6 +96,50 @@ export class ExecutionService implements IExecutionEngine {
       primaryLeg === 'kalshi'
         ? dislocation.pairConfig.polymarketContractId
         : dislocation.pairConfig.kalshiContractId;
+
+    // === COMPLIANCE GATE ===
+    let complianceResult: ComplianceDecision;
+    try {
+      complianceResult = this.complianceValidator.validate(
+        {
+          pairId,
+          opportunityId: opportunity.reservationRequest.opportunityId,
+          primaryPlatform,
+          secondaryPlatform,
+          eventDescription: dislocation.pairConfig.eventDescription,
+          kalshiContractId: dislocation.pairConfig.kalshiContractId,
+          polymarketContractId: dislocation.pairConfig.polymarketContractId,
+        },
+        isPaper,
+        mixedMode,
+      );
+    } catch (err) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED,
+          `Compliance validation error: ${err instanceof Error ? err.message : String(err)}`,
+          'error',
+          undefined,
+          { pairId },
+        ),
+      };
+    }
+
+    if (!complianceResult.approved) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED,
+          `Trade blocked by compliance: ${complianceResult.violations.map((v) => v.rule).join(', ')}`,
+          'warning',
+          undefined,
+          { pairId, violations: complianceResult.violations },
+        ),
+      };
+    }
 
     // Determine sides: the buy platform buys, the sell platform sells
     const primarySide =

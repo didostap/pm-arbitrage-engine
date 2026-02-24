@@ -5,6 +5,7 @@ import {
   ExitTriggeredEvent,
   SingleLegExposureEvent,
   SingleLegResolvedEvent,
+  ComplianceBlockedEvent,
 } from './execution.events';
 import { PlatformId } from '../types/platform.type';
 import { EVENT_NAMES } from './event-catalog';
@@ -516,5 +517,45 @@ describe('ExitTriggeredEvent', () => {
       );
       expect(event.exitType).toBe(exitType);
     }
+  });
+});
+
+describe('ComplianceBlockedEvent', () => {
+  const violations = [
+    {
+      platform: 'KALSHI',
+      category: 'assassination',
+      rule: 'Blocked category: assassination',
+    },
+  ];
+
+  it('should construct with all fields', () => {
+    const event = new ComplianceBlockedEvent(
+      'opp-1',
+      'pair-1',
+      violations,
+      'corr-1',
+      true,
+      false,
+    );
+
+    expect(event.opportunityId).toBe('opp-1');
+    expect(event.pairId).toBe('pair-1');
+    expect(event.violations).toEqual(violations);
+    expect(event.isPaper).toBe(true);
+    expect(event.mixedMode).toBe(false);
+    expect(event.correlationId).toBe('corr-1');
+    expect(event.timestamp).toBeInstanceOf(Date);
+  });
+
+  it('should default isPaper and mixedMode to false', () => {
+    const event = new ComplianceBlockedEvent('opp-1', 'pair-1', violations);
+
+    expect(event.isPaper).toBe(false);
+    expect(event.mixedMode).toBe(false);
+  });
+
+  it('should match EVENT_NAMES.COMPLIANCE_BLOCKED catalog entry', () => {
+    expect(EVENT_NAMES.COMPLIANCE_BLOCKED).toBe('execution.compliance.blocked');
   });
 });

@@ -14,6 +14,7 @@ import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { SingleLegExposureEvent } from '../../common/events/execution.events';
 import { createMockPlatformConnector } from '../../test/mock-factories.js';
+import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 import type {
   RankedOpportunity,
   BudgetReservation,
@@ -153,6 +154,9 @@ describe('ExecutionService', () => {
     create: ReturnType<typeof vi.fn>;
     findById: ReturnType<typeof vi.fn>;
   };
+  let complianceValidator: {
+    validate: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
@@ -186,6 +190,9 @@ describe('ExecutionService', () => {
       })),
       findById: vi.fn(),
     };
+    complianceValidator = {
+      validate: vi.fn().mockReturnValue({ approved: true, violations: [] }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -195,6 +202,7 @@ describe('ExecutionService', () => {
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: OrderRepository, useValue: orderRepo },
         { provide: PositionRepository, useValue: positionRepo },
+        { provide: ComplianceValidatorService, useValue: complianceValidator },
       ],
     }).compile();
 
@@ -740,6 +748,166 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(false);
       expect(result.partialFill).toBe(false);
       expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('compliance gate', () => {
+    it('should call compliance check before depth verification', async () => {
+      // Compliance blocks — depth should never be checked
+      complianceValidator.validate.mockReturnValue({
+        approved: false,
+        violations: [
+          {
+            platform: 'KALSHI',
+            category: 'assassination',
+            rule: 'Blocked category: assassination',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+
+      await service.execute(
+        makeOpportunity({
+          pairConfig: { eventDescription: 'Assassination contract' },
+        }),
+        makeReservation(),
+      );
+
+      expect(complianceValidator.validate).toHaveBeenCalled();
+      expect(kalshiConnector.getOrderBook).not.toHaveBeenCalled();
+    });
+
+    it('should return ExecutionError(2009) on compliance block', async () => {
+      complianceValidator.validate.mockReturnValue({
+        approved: false,
+        violations: [
+          {
+            platform: 'KALSHI',
+            category: 'terrorism',
+            rule: 'Blocked category: terrorism',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(false);
+      expect(result.error?.code).toBe(EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED);
+    });
+
+    it('should proceed to depth verification on compliance approval', async () => {
+      complianceValidator.validate.mockReturnValue({
+        approved: true,
+        violations: [],
+      });
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(complianceValidator.validate).toHaveBeenCalled();
+      expect(kalshiConnector.getOrderBook).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+    });
+
+    it('should pass correct context to compliance validator', async () => {
+      complianceValidator.validate.mockReturnValue({
+        approved: false,
+        violations: [
+          {
+            platform: 'KALSHI',
+            category: 'test',
+            rule: 'test',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+
+      await service.execute(
+        makeOpportunity({
+          pairConfig: {
+            eventDescription: 'Test event description',
+            kalshiContractId: 'kalshi-c1',
+            polymarketContractId: 'pm-c1',
+          },
+        }),
+        makeReservation(),
+      );
+
+      expect(complianceValidator.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pairId: 'pair-1',
+          opportunityId: 'opp-1',
+          primaryPlatform: PlatformId.KALSHI,
+          secondaryPlatform: PlatformId.POLYMARKET,
+          eventDescription: 'Test event description',
+          kalshiContractId: 'kalshi-c1',
+          polymarketContractId: 'pm-c1',
+        }),
+        false,
+        false,
+      );
+    });
+
+    it('should not trigger single-leg handling on compliance failure', async () => {
+      complianceValidator.validate.mockReturnValue({
+        approved: false,
+        violations: [
+          {
+            platform: 'KALSHI',
+            category: 'terrorism',
+            rule: 'Blocked category: terrorism',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      });
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      // No orders should have been submitted
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+      expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
+      // No single-leg events emitted
+      const singleLegEmit = eventEmitter.emit.mock.calls.find(
+        (call: unknown[]) => call[0] === EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+      );
+      expect(singleLegEmit).toBeUndefined();
+    });
+
+    it('should fail safely when compliance validator throws', async () => {
+      complianceValidator.validate.mockImplementation(() => {
+        throw new Error('Unexpected compliance error');
+      });
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe(EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED);
+      expect(result.error?.message).toContain('Compliance validation error');
     });
   });
 });

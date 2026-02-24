@@ -123,6 +123,10 @@ export const EVENT_NAMES = {
   // [Story 6.0] Gas Estimation Events
   /** Emitted when gas estimate changes significantly (>10% delta) */
   PLATFORM_GAS_UPDATED: 'platform.gas.updated',
+
+  // [Story 6.4] Compliance Events
+  /** Emitted when trade is blocked by compliance validation */
+  COMPLIANCE_BLOCKED: 'execution.compliance.blocked',
 } as const;
 
 /**

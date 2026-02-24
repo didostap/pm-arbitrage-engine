@@ -58,6 +58,7 @@ describe('ExecutionError', () => {
       expect(EXECUTION_ERROR_CODES.ORDER_REJECTED).toBe(2002);
       expect(EXECUTION_ERROR_CODES.ORDER_TIMEOUT).toBe(2003);
       expect(EXECUTION_ERROR_CODES.SINGLE_LEG_EXPOSURE).toBe(2004);
+      expect(EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED).toBe(2009);
     });
   });
 });

@@ -90,6 +90,23 @@ export class ExitTriggeredEvent extends BaseEvent {
   }
 }
 
+export class ComplianceBlockedEvent extends BaseEvent {
+  constructor(
+    public readonly opportunityId: string,
+    public readonly pairId: string,
+    public readonly violations: Array<{
+      platform: string;
+      category: string;
+      rule: string;
+    }>,
+    correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
+  ) {
+    super(correlationId);
+  }
+}
+
 export class SingleLegResolvedEvent extends BaseEvent {
   constructor(
     public readonly positionId: string,

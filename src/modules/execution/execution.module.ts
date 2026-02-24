@@ -15,6 +15,8 @@ import { ExposureTrackerService } from './exposure-tracker.service';
 import { SingleLegResolutionService } from './single-leg-resolution.service';
 import { SingleLegResolutionController } from './single-leg-resolution.controller';
 import { ExposureAlertScheduler } from './exposure-alert-scheduler.service';
+import { ComplianceConfigLoaderService } from './compliance/compliance-config-loader.service';
+import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 
 @Module({
   imports: [RiskManagementModule, ConnectorModule],
@@ -27,6 +29,8 @@ import { ExposureAlertScheduler } from './exposure-alert-scheduler.service';
     ExposureTrackerService,
     SingleLegResolutionService,
     ExposureAlertScheduler,
+    ComplianceConfigLoaderService,
+    ComplianceValidatorService,
     {
       provide: EXECUTION_ENGINE_TOKEN,
       useClass: ExecutionService,
@@ -40,6 +44,7 @@ import { ExposureAlertScheduler } from './exposure-alert-scheduler.service';
     ExecutionLockService,
     EXECUTION_QUEUE_TOKEN,
     EXECUTION_ENGINE_TOKEN,
+    ComplianceConfigLoaderService,
   ],
 })
 export class ExecutionModule {}
