@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OnEvent } from '@nestjs/event-emitter';
 import { Cron } from '@nestjs/schedule';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import { SystemHealthError } from '../../common/errors/system-health-error.js';
@@ -26,6 +25,7 @@ import {
   formatTestAlert,
   getEventSeverity,
 } from './formatters/telegram-message.formatter.js';
+import type { BaseEvent } from '../../common/events/base.event.js';
 import type { OpportunityIdentifiedEvent } from '../../common/events/detection.events.js';
 import type {
   OrderFilledEvent,
@@ -62,6 +62,90 @@ const SEVERITY_PRIORITY: Record<AlertSeverity, number> = {
   warning: 2,
   info: 1,
 };
+
+/**
+ * The 14 events that have dedicated Telegram formatters.
+ * Used by TelegramAlertService.sendEventAlert() for formatter dispatch.
+ * NOTE: EventConsumerService uses its own hybrid routing logic (Critical/Warning → always,
+ * Info → TELEGRAM_ELIGIBLE_INFO_EVENTS allowlist) rather than this set directly.
+ * Exported for testing and future dashboard integration.
+ */
+export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
+  EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+  EVENT_NAMES.ORDER_FILLED,
+  EVENT_NAMES.EXECUTION_FAILED,
+  EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+  EVENT_NAMES.SINGLE_LEG_RESOLVED,
+  EVENT_NAMES.EXIT_TRIGGERED,
+  EVENT_NAMES.LIMIT_APPROACHED,
+  EVENT_NAMES.LIMIT_BREACHED,
+  EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
+  EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
+  EVENT_NAMES.SYSTEM_TRADING_HALTED,
+  EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+  EVENT_NAMES.RECONCILIATION_DISCREPANCY,
+  EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
+]);
+
+/**
+ * Event-name-to-formatter registry.
+ * Each entry maps an event name to a function that formats the event for Telegram.
+ */
+const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
+  [
+    EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+    (e) => formatOpportunityIdentified(e as OpportunityIdentifiedEvent),
+  ],
+  [EVENT_NAMES.ORDER_FILLED, (e) => formatOrderFilled(e as OrderFilledEvent)],
+  [
+    EVENT_NAMES.EXECUTION_FAILED,
+    (e) => formatExecutionFailed(e as ExecutionFailedEvent),
+  ],
+  [
+    EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+    (e) => formatSingleLegExposure(e as SingleLegExposureEvent),
+  ],
+  [
+    EVENT_NAMES.SINGLE_LEG_RESOLVED,
+    (e) => formatSingleLegResolved(e as SingleLegResolvedEvent),
+  ],
+  [
+    EVENT_NAMES.EXIT_TRIGGERED,
+    (e) => formatExitTriggered(e as ExitTriggeredEvent),
+  ],
+  [
+    EVENT_NAMES.LIMIT_APPROACHED,
+    (e) => formatLimitApproached(e as LimitApproachedEvent),
+  ],
+  [
+    EVENT_NAMES.LIMIT_BREACHED,
+    (e) => formatLimitBreached(e as LimitBreachedEvent),
+  ],
+  [
+    EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
+    (e) => formatPlatformDegraded(e as PlatformDegradedEvent),
+  ],
+  [
+    EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
+    (e) => formatPlatformRecovered(e as PlatformRecoveredEvent),
+  ],
+  [
+    EVENT_NAMES.SYSTEM_TRADING_HALTED,
+    (e) => formatTradingHalted(e as TradingHaltedEvent),
+  ],
+  [
+    EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+    (e) => formatTradingResumed(e as TradingResumedEvent),
+  ],
+  [
+    EVENT_NAMES.RECONCILIATION_DISCREPANCY,
+    (e) => formatReconciliationDiscrepancy(e as ReconciliationDiscrepancyEvent),
+  ],
+  [
+    EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
+    (e) => formatSystemHealthCritical(e as SystemHealthCriticalEvent),
+  ],
+]);
 
 @Injectable()
 export class TelegramAlertService implements OnModuleInit {
@@ -238,10 +322,44 @@ export class TelegramAlertService implements OnModuleInit {
     }
   }
 
-  // ─── Event Handlers ─────────────────────────────────────────────────────────
-  // All handlers use { async: true } to never block the emitter's call chain.
-  // All handlers wrap in try-catch to ensure errors never propagate.
-  // On formatter error, a fallback plain-text alert is sent to prevent silent loss.
+  // ─── Public Event Dispatch ─────────────────────────────────────────────────
+  // Called by EventConsumerService. Replaces the removed @OnEvent handlers.
+
+  /**
+   * Dispatch an event to the appropriate Telegram formatter and send.
+   * For events with dedicated formatters, uses the formatter registry.
+   * For events without formatters (new critical/warning events), sends a generic alert.
+   */
+  async sendEventAlert(eventName: string, event: BaseEvent): Promise<void> {
+    const formatter = FORMATTER_REGISTRY.get(eventName);
+
+    if (formatter) {
+      await this.handleEvent(
+        eventName,
+        () => formatter(event),
+        getEventSeverity(eventName),
+        event?.correlationId,
+      );
+    } else {
+      // Generic alert for events without formatters (e.g., new critical/warning events)
+      const severity = getEventSeverity(eventName);
+      const emoji =
+        severity === 'critical'
+          ? '\u{1F534}'
+          : severity === 'warning'
+            ? '\u{1F7E1}'
+            : '\u{1F535}';
+      const genericMsg = `${emoji} <b>${severity.toUpperCase()} Event</b>\n\nEvent: <code>${eventName}</code>${event?.correlationId ? `\nCorrelation: <code>${event.correlationId}</code>` : ''}\nTimestamp: ${event?.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString()}`;
+      await this.handleEvent(
+        eventName,
+        () => genericMsg,
+        severity,
+        event?.correlationId,
+      );
+    }
+  }
+
+  // ─── Private Event Helper ──────────────────────────────────────────────────
 
   private async handleEvent(
     eventName: string,
@@ -267,152 +385,6 @@ export class TelegramAlertService implements OnModuleInit {
         // Truly nothing we can do — already logged above
       }
     }
-  }
-
-  @OnEvent(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, { async: true })
-  async handleOpportunityIdentified(
-    event: OpportunityIdentifiedEvent,
-  ): Promise<void> {
-    await this.handleEvent(
-      'OPPORTUNITY_IDENTIFIED',
-      () => formatOpportunityIdentified(event),
-      getEventSeverity(EVENT_NAMES.OPPORTUNITY_IDENTIFIED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.ORDER_FILLED, { async: true })
-  async handleOrderFilled(event: OrderFilledEvent): Promise<void> {
-    await this.handleEvent(
-      'ORDER_FILLED',
-      () => formatOrderFilled(event),
-      getEventSeverity(EVENT_NAMES.ORDER_FILLED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.EXECUTION_FAILED, { async: true })
-  async handleExecutionFailed(event: ExecutionFailedEvent): Promise<void> {
-    await this.handleEvent(
-      'EXECUTION_FAILED',
-      () => formatExecutionFailed(event),
-      getEventSeverity(EVENT_NAMES.EXECUTION_FAILED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE, { async: true })
-  async handleSingleLegExposure(event: SingleLegExposureEvent): Promise<void> {
-    await this.handleEvent(
-      'SINGLE_LEG_EXPOSURE',
-      () => formatSingleLegExposure(event),
-      getEventSeverity(EVENT_NAMES.SINGLE_LEG_EXPOSURE),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.SINGLE_LEG_RESOLVED, { async: true })
-  async handleSingleLegResolved(event: SingleLegResolvedEvent): Promise<void> {
-    await this.handleEvent(
-      'SINGLE_LEG_RESOLVED',
-      () => formatSingleLegResolved(event),
-      getEventSeverity(EVENT_NAMES.SINGLE_LEG_RESOLVED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.EXIT_TRIGGERED, { async: true })
-  async handleExitTriggered(event: ExitTriggeredEvent): Promise<void> {
-    await this.handleEvent(
-      'EXIT_TRIGGERED',
-      () => formatExitTriggered(event),
-      getEventSeverity(EVENT_NAMES.EXIT_TRIGGERED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.LIMIT_APPROACHED, { async: true })
-  async handleLimitApproached(event: LimitApproachedEvent): Promise<void> {
-    await this.handleEvent(
-      'LIMIT_APPROACHED',
-      () => formatLimitApproached(event),
-      getEventSeverity(EVENT_NAMES.LIMIT_APPROACHED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.LIMIT_BREACHED, { async: true })
-  async handleLimitBreached(event: LimitBreachedEvent): Promise<void> {
-    await this.handleEvent(
-      'LIMIT_BREACHED',
-      () => formatLimitBreached(event),
-      getEventSeverity(EVENT_NAMES.LIMIT_BREACHED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.PLATFORM_HEALTH_DEGRADED, { async: true })
-  async handlePlatformDegraded(event: PlatformDegradedEvent): Promise<void> {
-    await this.handleEvent(
-      'PLATFORM_HEALTH_DEGRADED',
-      () => formatPlatformDegraded(event),
-      getEventSeverity(EVENT_NAMES.PLATFORM_HEALTH_DEGRADED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.PLATFORM_HEALTH_RECOVERED, { async: true })
-  async handlePlatformRecovered(event: PlatformRecoveredEvent): Promise<void> {
-    await this.handleEvent(
-      'PLATFORM_HEALTH_RECOVERED',
-      () => formatPlatformRecovered(event),
-      getEventSeverity(EVENT_NAMES.PLATFORM_HEALTH_RECOVERED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.SYSTEM_TRADING_HALTED, { async: true })
-  async handleTradingHalted(event: TradingHaltedEvent): Promise<void> {
-    await this.handleEvent(
-      'SYSTEM_TRADING_HALTED',
-      () => formatTradingHalted(event),
-      getEventSeverity(EVENT_NAMES.SYSTEM_TRADING_HALTED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.SYSTEM_TRADING_RESUMED, { async: true })
-  async handleTradingResumed(event: TradingResumedEvent): Promise<void> {
-    await this.handleEvent(
-      'SYSTEM_TRADING_RESUMED',
-      () => formatTradingResumed(event),
-      getEventSeverity(EVENT_NAMES.SYSTEM_TRADING_RESUMED),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.RECONCILIATION_DISCREPANCY, { async: true })
-  async handleReconciliationDiscrepancy(
-    event: ReconciliationDiscrepancyEvent,
-  ): Promise<void> {
-    await this.handleEvent(
-      'RECONCILIATION_DISCREPANCY',
-      () => formatReconciliationDiscrepancy(event),
-      getEventSeverity(EVENT_NAMES.RECONCILIATION_DISCREPANCY),
-      event.correlationId,
-    );
-  }
-
-  @OnEvent(EVENT_NAMES.SYSTEM_HEALTH_CRITICAL, { async: true })
-  async handleSystemHealthCritical(
-    event: SystemHealthCriticalEvent,
-  ): Promise<void> {
-    await this.handleEvent(
-      'SYSTEM_HEALTH_CRITICAL',
-      () => formatSystemHealthCritical(event),
-      getEventSeverity(EVENT_NAMES.SYSTEM_HEALTH_CRITICAL),
-      event.correlationId,
-    );
   }
 
   // ─── Daily Test Alert ───────────────────────────────────────────────────────

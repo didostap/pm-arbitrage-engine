@@ -2,4 +2,6 @@
 export const MONITORING_ERROR_CODES = {
   /** Telegram alert send failed — warning, retry via buffer drain */
   TELEGRAM_SEND_FAILED: 4006,
+  /** Event consumer handler failed — warning, error isolated */
+  EVENT_CONSUMER_HANDLER_FAILED: 4007,
 } as const;

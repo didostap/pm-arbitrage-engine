@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -16,6 +17,7 @@ import { ArbitrageDetectionModule } from './modules/arbitrage-detection/arbitrag
 import { ExitManagementModule } from './modules/exit-management/exit-management.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { SystemErrorFilter } from './common/filters/system-error.filter';
 
 @Module({
   imports: [
@@ -44,6 +46,6 @@ import { MonitoringModule } from './modules/monitoring/monitoring.module';
     MonitoringModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_FILTER, useClass: SystemErrorFilter }],
 })
 export class AppModule {}

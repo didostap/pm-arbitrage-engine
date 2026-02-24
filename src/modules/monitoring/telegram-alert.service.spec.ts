@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
-import { TelegramAlertService } from './telegram-alert.service.js';
+import {
+  TelegramAlertService,
+  TELEGRAM_ELIGIBLE_EVENTS,
+} from './telegram-alert.service.js';
+import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 
 // Mock global fetch
 const mockFetch = vi.fn();
@@ -454,19 +458,19 @@ describe('TelegramAlertService', () => {
     });
   });
 
-  describe('event handlers (AC #2, #6)', () => {
-    beforeEach(() => {
-      service.onModuleInit();
-      mockFetch.mockResolvedValue(makeTelegramResponse(true));
-    });
-
+  describe('sendEventAlert dispatch (AC #2, #6)', () => {
     const baseEvent = {
       timestamp: new Date('2024-01-15T10:00:00Z'),
       correlationId: 'test-corr',
     };
 
-    it('should handle OPPORTUNITY_IDENTIFIED and send info-level alert', async () => {
-      await service.handleOpportunityIdentified({
+    beforeEach(() => {
+      service.onModuleInit();
+      mockFetch.mockResolvedValue(makeTelegramResponse(true));
+    });
+
+    it('should dispatch OPPORTUNITY_IDENTIFIED via formatter', async () => {
+      await service.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
         opportunity: { netEdge: '0.01', pairId: 'p-1', positionSizeUsd: '100' },
         ...baseEvent,
       } as never);
@@ -478,8 +482,8 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('Opportunity Identified');
     });
 
-    it('should handle ORDER_FILLED and send info-level alert', async () => {
-      await service.handleOrderFilled({
+    it('should dispatch ORDER_FILLED via formatter', async () => {
+      await service.sendEventAlert(EVENT_NAMES.ORDER_FILLED, {
         orderId: 'ord-1',
         platform: 'KALSHI',
         side: 'BUY',
@@ -498,8 +502,8 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('Order Filled');
     });
 
-    it('should handle EXECUTION_FAILED and send warning-level alert', async () => {
-      await service.handleExecutionFailed({
+    it('should dispatch EXECUTION_FAILED via formatter', async () => {
+      await service.sendEventAlert(EVENT_NAMES.EXECUTION_FAILED, {
         reasonCode: 2001,
         reason: 'Depth issue',
         opportunityId: 'opp-1',
@@ -514,8 +518,8 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('Execution Failed');
     });
 
-    it('should handle SINGLE_LEG_EXPOSURE and send critical-level alert', async () => {
-      await service.handleSingleLegExposure({
+    it('should dispatch SINGLE_LEG_EXPOSURE via formatter', async () => {
+      await service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_EXPOSURE, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         expectedEdge: 0.012,
@@ -551,8 +555,8 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('SINGLE LEG EXPOSURE');
     });
 
-    it('should handle SINGLE_LEG_RESOLVED', async () => {
-      await service.handleSingleLegResolved({
+    it('should dispatch SINGLE_LEG_RESOLVED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_RESOLVED, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         resolutionType: 'retried',
@@ -572,8 +576,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle EXIT_TRIGGERED', async () => {
-      await service.handleExitTriggered({
+    it('should dispatch EXIT_TRIGGERED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.EXIT_TRIGGERED, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         exitType: 'take_profit',
@@ -588,8 +592,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle LIMIT_APPROACHED', async () => {
-      await service.handleLimitApproached({
+    it('should dispatch LIMIT_APPROACHED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.LIMIT_APPROACHED, {
         limitType: 'daily_loss',
         currentValue: 400,
         threshold: 500,
@@ -600,8 +604,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle LIMIT_BREACHED', async () => {
-      await service.handleLimitBreached({
+    it('should dispatch LIMIT_BREACHED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.LIMIT_BREACHED, {
         limitType: 'daily_loss',
         currentValue: 550,
         threshold: 500,
@@ -611,8 +615,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle PLATFORM_HEALTH_DEGRADED', async () => {
-      await service.handlePlatformDegraded({
+    it('should dispatch PLATFORM_HEALTH_DEGRADED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_DEGRADED, {
         platformId: 'KALSHI',
         health: { status: 'degraded', latencyMs: 2500 },
         previousStatus: 'healthy',
@@ -622,8 +626,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle PLATFORM_HEALTH_RECOVERED', async () => {
-      await service.handlePlatformRecovered({
+    it('should dispatch PLATFORM_HEALTH_RECOVERED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_RECOVERED, {
         platformId: 'KALSHI',
         health: { status: 'healthy', latencyMs: 100 },
         previousStatus: 'degraded',
@@ -633,8 +637,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle SYSTEM_TRADING_HALTED', async () => {
-      await service.handleTradingHalted({
+    it('should dispatch SYSTEM_TRADING_HALTED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_HALTED, {
         reason: 'DAILY_LOSS_LIMIT',
         details: {},
         haltTimestamp: new Date(),
@@ -645,8 +649,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle SYSTEM_TRADING_RESUMED', async () => {
-      await service.handleTradingResumed({
+    it('should dispatch SYSTEM_TRADING_RESUMED', async () => {
+      await service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_RESUMED, {
         removedReason: 'DAILY_LOSS_LIMIT',
         remainingReasons: [],
         resumeTimestamp: new Date(),
@@ -656,8 +660,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle RECONCILIATION_DISCREPANCY', async () => {
-      await service.handleReconciliationDiscrepancy({
+    it('should dispatch RECONCILIATION_DISCREPANCY', async () => {
+      await service.sendEventAlert(EVENT_NAMES.RECONCILIATION_DISCREPANCY, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         discrepancyType: 'order_status_mismatch',
@@ -670,8 +674,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle SYSTEM_HEALTH_CRITICAL', async () => {
-      await service.handleSystemHealthCritical({
+    it('should dispatch SYSTEM_HEALTH_CRITICAL', async () => {
+      await service.sendEventAlert(EVENT_NAMES.SYSTEM_HEALTH_CRITICAL, {
         component: 'database',
         diagnosticInfo: 'Pool exhausted',
         recommendedActions: ['Restart'],
@@ -682,9 +686,20 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should never throw from event handlers (try-catch wrapping)', async () => {
+    it('should send generic alert for unknown events without formatter', async () => {
+      await service.sendEventAlert('some.unknown.event', {
+        ...baseEvent,
+      } as never);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text).toContain('some.unknown.event');
+    });
+
+    it('should never throw from sendEventAlert (try-catch wrapping)', async () => {
       // Make the formatter throw by passing a malformed event
-      // The handleEvent wrapper should catch and send fallback
       const badEvent = {
         timestamp: new Date(),
         correlationId: 'corr-bad',
@@ -692,15 +707,21 @@ describe('TelegramAlertService', () => {
 
       // This should NOT throw even with incomplete event data
       await expect(
-        service.handleOpportunityIdentified(badEvent as never),
+        service.sendEventAlert(
+          EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+          badEvent as never,
+        ),
       ).resolves.toBeUndefined();
 
       await expect(
-        service.handleOrderFilled(badEvent as never),
+        service.sendEventAlert(EVENT_NAMES.ORDER_FILLED, badEvent as never),
       ).resolves.toBeUndefined();
 
       await expect(
-        service.handleSingleLegExposure(badEvent as never),
+        service.sendEventAlert(
+          EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+          badEvent as never,
+        ),
       ).resolves.toBeUndefined();
     });
 
@@ -708,7 +729,10 @@ describe('TelegramAlertService', () => {
       // Pass event that will cause formatter to throw due to missing fields
       const badEvent = { timestamp: new Date(), correlationId: 'bad-corr' };
 
-      await service.handleSingleLegExposure(badEvent as never);
+      await service.sendEventAlert(
+        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+        badEvent as never,
+      );
 
       // Should still have attempted to send something (fallback message)
       expect(mockFetch).toHaveBeenCalled();
@@ -724,12 +748,40 @@ describe('TelegramAlertService', () => {
       );
       svc.onModuleInit();
 
-      await svc.handleOpportunityIdentified({
+      await svc.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
         opportunity: {},
         timestamp: new Date(),
       } as never);
 
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('TELEGRAM_ELIGIBLE_EVENTS constant', () => {
+    it('should contain exactly 14 events', () => {
+      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(14);
+    });
+
+    it('should contain all expected events', () => {
+      const expected = [
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        EVENT_NAMES.ORDER_FILLED,
+        EVENT_NAMES.EXECUTION_FAILED,
+        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
+        EVENT_NAMES.SINGLE_LEG_RESOLVED,
+        EVENT_NAMES.EXIT_TRIGGERED,
+        EVENT_NAMES.LIMIT_APPROACHED,
+        EVENT_NAMES.LIMIT_BREACHED,
+        EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
+        EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
+        EVENT_NAMES.SYSTEM_TRADING_HALTED,
+        EVENT_NAMES.SYSTEM_TRADING_RESUMED,
+        EVENT_NAMES.RECONCILIATION_DISCREPANCY,
+        EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
+      ];
+      for (const eventName of expected) {
+        expect(TELEGRAM_ELIGIBLE_EVENTS.has(eventName)).toBe(true);
+      }
     });
   });
 

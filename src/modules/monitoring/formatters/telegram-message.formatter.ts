@@ -490,14 +490,21 @@ export function formatTestAlert(): string {
 // ─── Event Severity Mapping ───────────────────────────────────────────────────
 
 const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
+  // Critical
   'execution.single_leg.exposure': 'critical',
   'risk.limit.breached': 'critical',
   'system.trading.halted': 'critical',
   'system.health.critical': 'critical',
   'system.reconciliation.discrepancy': 'critical',
+  'time.drift.halt': 'critical',
+  // Warning
   'execution.order.failed': 'warning',
   'risk.limit.approached': 'warning',
   'platform.health.degraded': 'warning',
+  'time.drift.critical': 'warning',
+  'time.drift.warning': 'warning',
+  'degradation.protocol.activated': 'warning',
+  // Info (explicitly mapped for completeness — unknown events also default to 'info')
   'execution.exit.triggered': 'info',
   'execution.order.filled': 'info',
   'detection.opportunity.identified': 'info',
