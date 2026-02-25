@@ -9,13 +9,21 @@ import {
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthTokenGuard } from '../../common/guards/auth-token.guard';
 import type { IRiskManager } from '../../common/interfaces/risk-manager.interface';
 import { RISK_ERROR_CODES } from '../../common/errors/risk-limit-error';
 import { RiskOverrideDto } from './dto/risk-override.dto';
 import { RISK_MANAGER_TOKEN } from './risk-management.constants';
 
-@Controller('api/risk')
+@ApiTags('Risk Management')
+@ApiBearerAuth()
+@Controller('risk')
 @UseGuards(AuthTokenGuard)
 export class RiskOverrideController {
   private readonly logger = new Logger(RiskOverrideController.name);
@@ -27,6 +35,12 @@ export class RiskOverrideController {
 
   @Post('override')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Submit operator risk override for an opportunity' })
+  @ApiResponse({ status: 200, description: 'Override approved' })
+  @ApiResponse({
+    status: 403,
+    description: 'Override denied — trading halt active',
+  })
   async override(
     @Body(new ValidationPipe({ whitelist: true })) dto: RiskOverrideDto,
   ) {

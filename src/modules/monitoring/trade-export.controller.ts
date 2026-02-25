@@ -8,6 +8,12 @@ import {
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthTokenGuard } from '../../common/guards/auth-token.guard.js';
 
 /** Minimal Fastify reply interface — avoids direct fastify dependency. */
@@ -34,7 +40,9 @@ const PLATFORM_TX_TYPE: Record<string, string> = {
 };
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-@Controller('api/exports')
+@ApiTags('Exports')
+@ApiBearerAuth()
+@Controller('exports')
 @UseGuards(AuthTokenGuard)
 export class TradeExportController {
   private readonly logger = new Logger(TradeExportController.name);
@@ -46,6 +54,10 @@ export class TradeExportController {
   ) {}
 
   @Get('trades')
+  @ApiOperation({ summary: 'Export trade log (JSON or CSV)' })
+  @ApiResponse({ status: 200, description: 'Trade log data' })
+  @ApiResponse({ status: 400, description: 'Invalid date range' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async exportTrades(
     @Query() query: TradeExportQueryDto,
@@ -124,6 +136,9 @@ export class TradeExportController {
   }
 
   @Get('tax-report')
+  @ApiOperation({ summary: 'Export annual tax report (CSV)' })
+  @ApiResponse({ status: 200, description: 'Tax report CSV' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async exportTaxReport(
     @Query() query: TaxReportQueryDto,

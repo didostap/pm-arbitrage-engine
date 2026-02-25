@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { Logger } from '@nestjs/common';
 import WebSocket from 'ws';
 import { PlatformId, PriceLevel } from '../../common/types/index.js';
@@ -184,8 +185,8 @@ export class PolymarketWebSocketClient {
     }));
 
     // Sort bids descending, asks ascending
-    bids.sort((a, b) => b.price - a.price);
-    asks.sort((a, b) => a.price - b.price);
+    bids.sort((a, b) => new Decimal(b.price).minus(a.price).toNumber());
+    asks.sort((a, b) => new Decimal(a.price).minus(b.price).toNumber());
 
     const state: LocalOrderBookState = {
       bids,

@@ -296,7 +296,6 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   validatePosition(_opportunity: unknown): Promise<RiskDecision> {
     // FIRST: Check daily loss halt (Story 4.2) — before any other computation
     if (this.isTradingHalted()) {

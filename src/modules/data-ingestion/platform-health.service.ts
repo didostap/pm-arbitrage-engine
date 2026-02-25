@@ -253,7 +253,6 @@ export class PlatformHealthService {
   /**
    * Calculates update frequency for diagnostics.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private calculateUpdateFrequency(_platform: PlatformId): number {
     // Placeholder - implement if needed for diagnostics
     return 0;

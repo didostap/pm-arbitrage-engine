@@ -9,6 +9,12 @@ import {
   Logger,
   ValidationPipe,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthTokenGuard } from '../../common/guards/auth-token.guard';
 import { SingleLegResolutionService } from './single-leg-resolution.service';
 import { RetryLegDto } from './retry-leg.dto';
@@ -18,7 +24,9 @@ import {
   EXECUTION_ERROR_CODES,
 } from '../../common/errors/execution-error';
 
-@Controller('api/positions')
+@ApiTags('Positions')
+@ApiBearerAuth()
+@Controller('positions')
 @UseGuards(AuthTokenGuard)
 export class SingleLegResolutionController {
   private readonly logger = new Logger(SingleLegResolutionController.name);
@@ -27,6 +35,10 @@ export class SingleLegResolutionController {
 
   @Post(':id/retry-leg')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Retry the failed leg of a single-leg exposure' })
+  @ApiResponse({ status: 200, description: 'Retry result' })
+  @ApiResponse({ status: 409, description: 'Invalid position state' })
+  @ApiResponse({ status: 502, description: 'Platform connector failure' })
   async retryLeg(
     @Param('id') positionId: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: RetryLegDto,
@@ -44,6 +56,10 @@ export class SingleLegResolutionController {
 
   @Post(':id/close-leg')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Close the filled leg to exit single-leg exposure' })
+  @ApiResponse({ status: 200, description: 'Close result' })
+  @ApiResponse({ status: 409, description: 'Invalid position state' })
+  @ApiResponse({ status: 422, description: 'Cannot determine close price' })
   async closeLeg(
     @Param('id') positionId: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: CloseLegDto,

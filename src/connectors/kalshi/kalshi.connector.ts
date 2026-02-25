@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
@@ -208,7 +209,10 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
 
     try {
       // Convert internal decimal price (0.00-1.00) to Kalshi cents (1-99)
-      const priceCents = Math.round(params.price * 100);
+      const priceCents = new Decimal(params.price.toString())
+        .mul(100)
+        .round()
+        .toNumber();
 
       const response = await withRetry(
         () =>
@@ -255,7 +259,10 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       const filledQuantity = order.taker_fill_count;
       const filledPrice =
         filledQuantity > 0 && order.taker_fill_cost > 0
-          ? order.taker_fill_cost / filledQuantity / 100
+          ? new Decimal(order.taker_fill_cost.toString())
+              .div(filledQuantity)
+              .div(100)
+              .toNumber()
           : 0;
 
       return {
@@ -368,7 +375,10 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       const fillCount = order.fill_count;
       const fillPrice =
         fillCount > 0 && order.taker_fill_cost > 0
-          ? order.taker_fill_cost / fillCount / 100
+          ? new Decimal(order.taker_fill_cost.toString())
+              .div(fillCount)
+              .div(100)
+              .toNumber()
           : undefined;
 
       return {

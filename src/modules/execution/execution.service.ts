@@ -481,18 +481,18 @@ export class ExecutionService implements IExecutionEngine {
       const book = await connector.getOrderBook(contractId);
       const levels: PriceLevel[] = side === 'buy' ? book.asks : book.bids;
 
-      let availableQty = 0;
+      let availableQty = new Decimal(0);
       for (const level of levels) {
         const priceOk =
           side === 'buy'
             ? level.price <= targetPrice
             : level.price >= targetPrice;
         if (priceOk) {
-          availableQty += level.quantity;
+          availableQty = availableQty.plus(level.quantity);
         }
       }
 
-      return availableQty >= targetSize;
+      return availableQty.gte(targetSize);
     } catch {
       // Rate limited or API error — treat as insufficient liquidity
       return false;
@@ -633,14 +633,20 @@ export class ExecutionService implements IExecutionEngine {
     const kalshiFee = this.kalshiConnector.getFeeSchedule();
     const polymarketFee = this.polymarketConnector.getFeeSchedule();
 
-    const primaryTakerFeeDecimal =
-      (primaryPlatform === PlatformId.KALSHI
+    const primaryTakerFeeDecimal = new Decimal(
+      primaryPlatform === PlatformId.KALSHI
         ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent) / 100;
-    const secondaryTakerFeeDecimal =
-      (secondaryPlatform === PlatformId.KALSHI
+        : polymarketFee.takerFeePercent,
+    )
+      .div(100)
+      .toNumber();
+    const secondaryTakerFeeDecimal = new Decimal(
+      secondaryPlatform === PlatformId.KALSHI
         ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent) / 100;
+        : polymarketFee.takerFeePercent,
+    )
+      .div(100)
+      .toNumber();
 
     const pnlScenarios = calculateSingleLegPnlScenarios({
       filledPlatform: primaryPlatform,

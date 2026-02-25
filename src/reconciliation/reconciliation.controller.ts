@@ -10,6 +10,12 @@ import {
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthTokenGuard } from '../common/guards/auth-token.guard';
 import { StartupReconciliationService } from './startup-reconciliation.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
@@ -17,7 +23,9 @@ import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 
 const DEBOUNCE_MS = 30_000;
 
-@Controller('api/reconciliation')
+@ApiTags('Reconciliation')
+@ApiBearerAuth()
+@Controller('reconciliation')
 @UseGuards(AuthTokenGuard)
 export class ReconciliationController {
   private readonly logger = new Logger(ReconciliationController.name);
@@ -29,6 +37,13 @@ export class ReconciliationController {
 
   @Post(':id/resolve')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Resolve a reconciliation discrepancy' })
+  @ApiResponse({ status: 200, description: 'Discrepancy resolved' })
+  @ApiResponse({ status: 404, description: 'Position not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Position not in reconciliation state',
+  })
   async resolve(
     @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true }))
@@ -84,6 +99,9 @@ export class ReconciliationController {
 
   @Post('run')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Trigger manual reconciliation run' })
+  @ApiResponse({ status: 200, description: 'Reconciliation result' })
+  @ApiResponse({ status: 429, description: 'Reconciliation debounce active' })
   async run() {
     const lastRunAt = this.reconciliationService.lastRunAt;
     if (lastRunAt && Date.now() - lastRunAt.getTime() < DEBOUNCE_MS) {
@@ -125,6 +143,10 @@ export class ReconciliationController {
   }
 
   @Get('status')
+  @ApiOperation({
+    summary: 'Get reconciliation status and outstanding discrepancies',
+  })
+  @ApiResponse({ status: 200, description: 'Reconciliation status' })
   async status() {
     const lastRun = this.reconciliationService.getLastRunResult();
     // Live positions only (isPaper defaults to false) — paper positions are excluded

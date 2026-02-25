@@ -33,7 +33,6 @@ export class ExposureTrackerService implements OnModuleInit {
   }
 
   @OnEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onSingleLegExposure(_event: SingleLegExposureEvent): void {
     const now = new Date();
     const monthKey = this.getMonthKey(now);

@@ -90,9 +90,9 @@ export class SingleLegResolutionService {
     const contractId = this.getContractId(position.pair, failedPlatform);
     const side = this.getSide(position, failedPlatform);
     const sizes = position.sizes as { kalshi: string; polymarket: string };
-    const size = parseFloat(
+    const size = new Decimal(
       failedPlatform === PlatformId.KALSHI ? sizes.kalshi : sizes.polymarket,
-    );
+    ).toNumber();
 
     // Compute paper/mixed mode from connector health
     const kalshiHealth = this.kalshiConnector.getHealth();
@@ -151,7 +151,10 @@ export class SingleLegResolutionService {
         ? new Decimal(filledOrder.fillPrice?.toString() ?? '0').toNumber()
         : 0;
 
-      const newEdge = Math.abs(entryFillPrice - orderResult.filledPrice);
+      const newEdge = new Decimal(entryFillPrice.toString())
+        .minus(orderResult.filledPrice)
+        .abs()
+        .toNumber();
 
       this.eventEmitter.emit(
         EVENT_NAMES.ORDER_FILLED,
@@ -550,14 +553,20 @@ export class SingleLegResolutionService {
 
     const kalshiFee = this.kalshiConnector.getFeeSchedule();
     const polymarketFee = this.polymarketConnector.getFeeSchedule();
-    const filledTakerFeeDecimal =
-      (filledPlatform === PlatformId.KALSHI
+    const filledTakerFeeDecimal = new Decimal(
+      filledPlatform === PlatformId.KALSHI
         ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent) / 100;
-    const failedTakerFeeDecimal =
-      (failedPlatform === PlatformId.KALSHI
+        : polymarketFee.takerFeePercent,
+    )
+      .div(100)
+      .toNumber();
+    const failedTakerFeeDecimal = new Decimal(
+      failedPlatform === PlatformId.KALSHI
         ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent) / 100;
+        : polymarketFee.takerFeePercent,
+    )
+      .div(100)
+      .toNumber();
 
     const pnlScenarios = calculateSingleLegPnlScenarios({
       filledPlatform,

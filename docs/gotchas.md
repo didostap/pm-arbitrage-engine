@@ -2,7 +2,7 @@
 
 Known gotchas discovered across Epics 1–4. Each entry includes a problem demonstration and solution.
 
-Last updated: 2026-02-22 (Story 5.5.0)
+Last updated: 2026-02-25 (Story 6.5.0)
 
 ---
 
@@ -160,11 +160,13 @@ resetDaily() {
 
 ---
 
-## 6. `FinancialDecimal` / `Decimal` Precision — Never Use Native `number` for Financial Math
+## 6. `FinancialDecimal` / `Decimal` Precision — Absolute Rule: No Native Arithmetic on Monetary Fields
 
-**Source:** Story 4.5.1 (property-based testing), Epic 4 Retro
+**Source:** Story 4.5.1 (property-based testing), Epic 4 Retro, Epic 6 Retro, Story 6.5.0 (codebase-wide audit)
 
-Native JavaScript `number` uses IEEE 754 floating-point, which introduces rounding errors that accumulate in financial calculations. All monetary and probability arithmetic must use `Decimal` via the `FinancialMath` utility.
+**Absolute rule:** Any arithmetic operation (`+`, `-`, `*`, `/`, `Math.abs()`, `Math.round()`) on a field that touches money uses `decimal.js`, regardless of where the code lives — connectors, formatters, logging, utilities, display code. No context-based exceptions.
+
+Native JavaScript `number` uses IEEE 754 floating-point, which introduces rounding errors that accumulate in financial calculations. All monetary and probability arithmetic must use `Decimal` via the `FinancialMath` utility or direct `decimal.js` calls.
 
 **Problem:**
 
@@ -185,6 +187,31 @@ const positionSize = FinancialMath.calculatePositionSize(bankroll, maxPct);
 // Never convert to number until final display/serialization
 // Property-based tests (Story 4.5.1) verify composition chain correctness
 ```
+
+**Non-obvious violation sites discovered in Story 6.5.0 audit:**
+
+| Site | Example | Why it's not obvious |
+|------|---------|---------------------|
+| Connector price conversions | `priceCents / 100` in Kalshi connector | "Just a unit conversion" — but it produces a price used in order submission |
+| Sort comparators on price arrays | `bids.sort((a, b) => b.price - a.price)` | "Just comparison" — but arithmetic on price fields, fix for consistency |
+| Spread calculation in logging | `bestAsk.price - bestBid.price` in log object | "Just logging" — but native subtraction on price fields |
+| Fee percent-to-decimal conversions | `takerFeePercent / 100` | "Just conversion" — but fee value used in P&L scenarios |
+| Fill price calculation | `taker_fill_cost / filledQuantity / 100` | Multi-step division on monetary values with cumulative precision loss |
+| Edge recalculation | `Math.abs(entryFillPrice - orderResult.filledPrice)` | Combines `Math.abs` + native subtraction on fill prices |
+
+**Decimal constructor best practice — use `.toString()` bridge:**
+
+```typescript
+// Prefer toString() when converting from number to Decimal
+new Decimal(value.toString())  // explicit — signals intent
+new Decimal(value)             // implicit — acceptable but less clear
+```
+
+**Sort comparator performance trade-off:**
+
+`array.sort((a, b) => new Decimal(b.price).minus(a.price).toNumber())` creates Decimal objects per comparison. This is acceptable because order book sorts run once per message (~10-50 levels), not in a tight loop. The consistency benefit outweighs the negligible GC overhead.
+
+**Audit summary (Story 6.5.0):** 11 violation sites across 7 files identified and fixed. All fixes use `decimal.js` internally and convert to `number` at the interface boundary via `.toNumber()`. See story file for full audit table.
 
 ---
 

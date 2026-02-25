@@ -62,8 +62,9 @@ export class SystemErrorFilter implements ExceptionFilter {
     }
 
     const ctx = host.switchToHttp();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const response = ctx.getResponse();
+    const response: {
+      status: (code: number) => { send: (body: unknown) => void };
+    } = ctx.getResponse();
 
     // Map severity to HTTP status (SystemError severity: 'critical' | 'error' | 'warning')
     const statusCode =
@@ -83,12 +84,6 @@ export class SystemErrorFilter implements ExceptionFilter {
     };
 
     // Fastify response
-    void (
-      response as {
-        status: (code: number) => { send: (body: unknown) => void };
-      }
-    )
-      .status(statusCode)
-      .send(errorResponse);
+    void response.status(statusCode).send(errorResponse);
   }
 }

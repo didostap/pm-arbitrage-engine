@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   NormalizedOrderBook,
@@ -56,7 +57,7 @@ export class OrderBookNormalizerService {
         contractId: kalshiBook.market_ticker,
         bestBid: bestBid.price,
         bestAsk: bestAsk.price,
-        spread: bestAsk.price - bestBid.price,
+        spread: new Decimal(bestAsk.price).minus(bestBid.price).toNumber(),
       });
     }
 
@@ -153,7 +154,7 @@ export class OrderBookNormalizerService {
         contractId: polymarketBook.asset_id,
         bestBid: bestBid.price,
         bestAsk: bestAsk.price,
-        spread: bestAsk.price - bestBid.price,
+        spread: new Decimal(bestAsk.price).minus(bestBid.price).toNumber(),
       });
     }
 

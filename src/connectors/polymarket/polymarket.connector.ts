@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   Injectable,
   Logger,
@@ -314,8 +315,8 @@ export class PolymarketConnector
   getFeeSchedule(): FeeSchedule {
     return {
       platformId: PlatformId.POLYMARKET,
-      makerFeePercent: POLYMARKET_MAKER_FEE * 100, // Convert decimal (0.00) to percent (0)
-      takerFeePercent: POLYMARKET_TAKER_FEE * 100, // Convert decimal (0.02) to percent (2)
+      makerFeePercent: new Decimal(POLYMARKET_MAKER_FEE).mul(100).toNumber(), // Convert decimal (0.00) to percent (0)
+      takerFeePercent: new Decimal(POLYMARKET_TAKER_FEE).mul(100).toNumber(), // Convert decimal (0.02) to percent (2)
       gasEstimateUsd: this.gasEstimation.getGasEstimateUsd().toNumber(),
       description:
         'Polymarket: ~2% taker fee, 0% maker fee. Gas estimate includes 20% buffer for on-chain settlement.',
