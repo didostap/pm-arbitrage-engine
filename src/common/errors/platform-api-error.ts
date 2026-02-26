@@ -12,6 +12,9 @@ import { RetryStrategy, SystemError } from './system-error.js';
  * - 1005: Insufficient Funds (WARNING, no retry)
  * - 1006: Order Rejected (WARNING, no retry)
  * - 1007: Schema Change (CRITICAL, no retry)
+ * - 1100: Not Implemented (WARNING, no retry)
+ *
+ * Polymarket codes: 1008-1099 (see polymarket-error-codes.ts)
  */
 export class PlatformApiError extends SystemError {
   constructor(
@@ -34,6 +37,8 @@ export const KALSHI_ERROR_CODES = {
   INSUFFICIENT_FUNDS: 1005,
   ORDER_REJECTED: 1006,
   SCHEMA_CHANGE: 1007,
+  /** Method not implemented — warning, no retry */
+  NOT_IMPLEMENTED: 1100,
 } as const;
 
 export const RETRY_STRATEGIES = {

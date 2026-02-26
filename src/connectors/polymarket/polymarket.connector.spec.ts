@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PolymarketConnector } from './polymarket.connector.js';
 import { GasEstimationService } from './gas-estimation.service.js';
 import { PlatformId } from '../../common/types/index.js';
@@ -100,6 +101,10 @@ describe('PolymarketConnector', () => {
             getGasEstimateUsd: mockGetGasEstimateUsd,
           },
         },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: vi.fn() },
+        },
       ],
     }).compile();
 
@@ -170,6 +175,10 @@ describe('PolymarketConnector', () => {
             useValue: {
               getGasEstimateUsd: mockGetGasEstimateUsd,
             },
+          },
+          {
+            provide: EventEmitter2,
+            useValue: { emit: vi.fn() },
           },
         ],
       }).compile();
@@ -694,10 +703,17 @@ describe('PolymarketConnector', () => {
   });
 
   describe('placeholder methods', () => {
-    it('getPositions should throw not-implemented error', () => {
-      expect(() => connector.getPositions()).toThrow(
-        'getPositions not implemented',
-      );
+    it('getPositions should throw PlatformApiError with code 1017', () => {
+      let caught: PlatformApiError | undefined;
+      try {
+        void connector.getPositions();
+      } catch (error) {
+        caught = error as PlatformApiError;
+      }
+      expect(caught).toBeInstanceOf(PlatformApiError);
+      expect(caught?.code).toBe(1017);
+      expect(caught?.severity).toBe('warning');
+      expect(caught?.platformId).toBe(PlatformId.POLYMARKET);
     });
   });
 

@@ -81,6 +81,21 @@ export class DegradationProtocolDeactivatedEvent extends BaseEvent {
 }
 
 /**
+ * Event emitted when WebSocket order book data is detected as stale (>30s).
+ * [Story 6.5.0a] Data staleness monitoring
+ */
+export class DataStaleEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly tokenId: string,
+    public readonly stalenessMs: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
  * Event emitted when gas estimate changes significantly (>10% delta).
  * [Story 6.0] Gas Estimation
  */

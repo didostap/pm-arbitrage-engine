@@ -470,10 +470,17 @@ describe('KalshiConnector', () => {
   });
 
   describe('placeholder methods', () => {
-    it('getPositions should throw not-implemented error', () => {
-      expect(() => connector.getPositions()).toThrow(
-        'getPositions not implemented',
-      );
+    it('getPositions should throw PlatformApiError with code 1100 (NOT_IMPLEMENTED)', () => {
+      let caught: PlatformApiError | undefined;
+      try {
+        void connector.getPositions();
+      } catch (error) {
+        caught = error as PlatformApiError;
+      }
+      expect(caught).toBeInstanceOf(PlatformApiError);
+      expect(caught?.code).toBe(1100);
+      expect(caught?.severity).toBe('warning');
+      expect(caught?.platformId).toBe(PlatformId.KALSHI);
     });
   });
 

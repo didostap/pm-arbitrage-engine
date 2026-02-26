@@ -234,3 +234,42 @@ const kalshiCost = new Decimal(order.kalshiOrder.fillPrice.toString()).mul(new D
 const polyCost = new Decimal(order.polymarketOrder.fillPrice.toString()).mul(new Decimal(order.polymarketOrder.fillSize.toString()));
 const pnl = kalshiCost.plus(polyCost).minus(totalCapitalDeployed); // Correct — uses actual fill data
 ```
+
+---
+
+## 8. Polymarket WebSocket `price_change` Message Schema
+
+**Source:** Story 6.5.0a, Code Review Finding #5
+
+The Polymarket WebSocket `price_change` event uses a nested `price_changes` array, **not** flat top-level fields. Our original `PolymarketPriceChangeMessage` type had `{ asset_id, price, timestamp }` at the top level, which caused `handlePriceChange` to silently do nothing (`msg.asset_id` was always `undefined`).
+
+**Actual API message structure** (confirmed via [nautilus_trader issue #2980](https://github.com/nautechsystems/nautilus_trader/issues/2980)):
+
+```json
+{
+  "market": "...",
+  "price_changes": [
+    {
+      "asset_id": "...",
+      "price": "0.71",
+      "size": "100",
+      "side": "BUY",
+      "hash": "...",
+      "best_bid": "0.94",
+      "best_ask": "0.999"
+    }
+  ],
+  "timestamp": "1758561033084",
+  "event_type": "price_change"
+}
+```
+
+**Key differences from our original type:**
+- `price_changes` is an array (one entry per affected asset in a market)
+- Each entry has `best_bid` and `best_ask` (updated top-of-book after trade)
+- `timestamp` is a string (not number)
+- `asset_id`, `price`, `size`, `side` are per-entry, not top-level
+
+**Fix:** Updated `PolymarketPriceChangeMessage` type and `handlePriceChange` handler to iterate the `price_changes` array and update top-of-book from `best_bid`/`best_ask`. Note: `price_change` only gives top-of-book — deeper levels remain from the last `book` snapshot.
+
+**Limitation:** The `size` field in `price_change` entries represents the trade size, not the remaining quantity at that level. We do not update `quantity` of the top-of-book level from price_change — only the price. Full depth updates come from `book` snapshots.

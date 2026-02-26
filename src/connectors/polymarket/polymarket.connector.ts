@@ -6,6 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClobClient, Side } from '@polymarket/clob-client';
 import { Wallet } from '@ethersproject/wallet';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
@@ -56,6 +57,7 @@ export class PolymarketConnector
     private readonly configService: ConfigService,
     private readonly normalizer: OrderBookNormalizerService,
     private readonly gasEstimation: GasEstimationService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     this.privateKey = this.configService.get<string>(
       'POLYMARKET_PRIVATE_KEY',
@@ -167,7 +169,10 @@ export class PolymarketConnector
       );
 
       // Step 5: Initialize WebSocket client
-      this.wsClient = new PolymarketWebSocketClient({ wsUrl: this.wsUrl });
+      this.wsClient = new PolymarketWebSocketClient({
+        wsUrl: this.wsUrl,
+        eventEmitter: this.eventEmitter,
+      });
       await this.wsClient.connect();
 
       this.connected = true;
@@ -324,7 +329,14 @@ export class PolymarketConnector
   }
 
   getPositions(): Promise<Position[]> {
-    throw new Error('getPositions not implemented - Epic 5');
+    throw new PlatformApiError(
+      1017,
+      'getPositions not implemented — positions tracked via Prisma OpenPosition model',
+      PlatformId.POLYMARKET,
+      'warning',
+      undefined,
+      { reason: 'unimplemented', plannedEpic: 'Phase 1' },
+    );
   }
 
   async submitOrder(params: OrderParams): Promise<OrderResult> {

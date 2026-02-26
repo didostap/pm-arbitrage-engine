@@ -1,8 +1,11 @@
 import Decimal from 'decimal.js';
 import { Logger } from '@nestjs/common';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import WebSocket from 'ws';
 import { PlatformId, PriceLevel } from '../../common/types/index.js';
 import { RETRY_STRATEGIES } from '../../common/errors/index.js';
+import { DataStaleEvent } from '../../common/events/platform.events.js';
+import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type {
   PolymarketOrderBookMessage,
   PolymarketPriceChangeMessage,
@@ -23,6 +26,7 @@ interface LocalOrderBookState {
  */
 export class PolymarketWebSocketClient {
   private readonly logger = new Logger(PolymarketWebSocketClient.name);
+  private readonly eventEmitter: EventEmitter2;
   private ws: WebSocket | null = null;
   private orderbookState = new Map<string, LocalOrderBookState>();
   private subscribers: Array<(book: PolymarketOrderBookMessage) => void> = [];
@@ -32,7 +36,9 @@ export class PolymarketWebSocketClient {
   private isConnected = false;
   private shouldReconnect = true;
 
-  constructor(private readonly config: PolymarketWebSocketConfig) {}
+  constructor(private readonly config: PolymarketWebSocketConfig) {
+    this.eventEmitter = config.eventEmitter;
+  }
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -199,14 +205,32 @@ export class PolymarketWebSocketClient {
   }
 
   private handlePriceChange(msg: PolymarketPriceChangeMessage): void {
-    const state = this.orderbookState.get(msg.asset_id);
-    if (!state) return;
+    const changes = msg.price_changes;
+    if (!Array.isArray(changes)) return;
 
-    // price_change updates best bid/ask — update top of book
-    const price = parseFloat(msg.price);
-    if (!isNaN(price)) {
-      state.timestamp = msg.timestamp ?? Date.now();
-      this.emitUpdate(msg.asset_id, state);
+    const msgTimestamp = parseInt(String(msg.timestamp), 10) || Date.now();
+
+    for (const entry of changes) {
+      const state = this.orderbookState.get(entry.asset_id);
+      if (!state) continue;
+
+      // Skip price updates if no book snapshot received yet — we have no
+      // quantity data, so emitting would produce misleading zero-liquidity levels.
+      if (state.bids.length === 0 && state.asks.length === 0) continue;
+
+      const bestBid = parseFloat(entry.best_bid);
+      const bestAsk = parseFloat(entry.best_ask);
+
+      // Update top-of-book from best_bid/best_ask
+      if (!isNaN(bestBid) && state.bids.length > 0 && state.bids[0]) {
+        state.bids[0].price = bestBid;
+      }
+      if (!isNaN(bestAsk) && state.asks.length > 0 && state.asks[0]) {
+        state.asks[0].price = bestAsk;
+      }
+
+      state.timestamp = msgTimestamp;
+      this.emitUpdate(entry.asset_id, state);
     }
   }
 
@@ -220,6 +244,10 @@ export class PolymarketWebSocketClient {
         platformId: PlatformId.POLYMARKET,
         metadata: { tokenId, stalenessMs: staleness },
       });
+      this.eventEmitter.emit(
+        EVENT_NAMES.DATA_STALE,
+        new DataStaleEvent(PlatformId.POLYMARKET, tokenId, staleness),
+      );
       return; // Don't emit stale data (defensive: prevents trading on old prices)
     }
 

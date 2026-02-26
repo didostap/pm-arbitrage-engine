@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PolymarketWebSocketClient } from './polymarket-websocket.client.js';
+import { EVENT_NAMES } from '../../common/events/event-catalog.js';
+import { DataStaleEvent } from '../../common/events/platform.events.js';
 import type { PolymarketOrderBookMessage } from './polymarket.types.js';
 
 // Mock ws module
@@ -11,11 +13,15 @@ vi.mock('ws', () => {
 
 describe('PolymarketWebSocketClient', () => {
   let client: PolymarketWebSocketClient;
+  let mockEventEmitter: { emit: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEventEmitter = { emit: vi.fn() };
     client = new PolymarketWebSocketClient({
       wsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+      eventEmitter:
+        mockEventEmitter as unknown as import('@nestjs/event-emitter').EventEmitter2,
     });
   });
 
@@ -114,16 +120,73 @@ describe('PolymarketWebSocketClient', () => {
       });
       client.handleMessage(bookMsg);
 
-      // Then send price_change (timestamp slightly after initial book)
+      // Then send price_change with price_changes array
       const priceMsg = JSON.stringify({
         event_type: 'price_change',
-        asset_id: 'token-123',
-        price: '0.63',
-        timestamp: Date.now() + 1000, // 1 second later
+        market: 'market-1',
+        timestamp: String(Date.now() + 1000),
+        price_changes: [
+          {
+            asset_id: 'token-123',
+            price: '0.63',
+            size: '100',
+            side: 'BUY',
+            hash: 'xyz',
+            best_bid: '0.63',
+            best_ask: '0.66',
+          },
+        ],
       });
       client.handleMessage(priceMsg);
 
       expect(callback).toHaveBeenCalledTimes(2);
+    });
+
+    it('should update top-of-book prices from best_bid/best_ask', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      // Initialize state with book snapshot
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'book',
+          asset_id: 'token-123',
+          market: 'market-1',
+          timestamp: Date.now(),
+          bids: [{ price: '0.62', size: '1000' }],
+          asks: [{ price: '0.65', size: '800' }],
+          hash: 'abc',
+        }),
+      );
+
+      // Send price_change with updated best_bid/best_ask
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'price_change',
+          market: 'market-1',
+          timestamp: String(Date.now() + 1000),
+          price_changes: [
+            {
+              asset_id: 'token-123',
+              price: '0.63',
+              size: '50',
+              side: 'BUY',
+              hash: 'xyz',
+              best_bid: '0.64',
+              best_ask: '0.67',
+            },
+          ],
+        }),
+      );
+
+      expect(callback).toHaveBeenCalledTimes(2);
+      const updatedBook = callback.mock.calls[1]?.[0] as {
+        bids: Array<{ price: string }>;
+        asks: Array<{ price: string }>;
+      };
+      // Verify top-of-book prices are updated
+      expect(updatedBook.bids[0]?.price).toBe('0.64');
+      expect(updatedBook.asks[0]?.price).toBe('0.67');
     });
 
     it('should ignore price_change for untracked token', () => {
@@ -132,13 +195,84 @@ describe('PolymarketWebSocketClient', () => {
 
       const priceMsg = JSON.stringify({
         event_type: 'price_change',
-        asset_id: 'unknown-token',
-        price: '0.55',
-        timestamp: Date.now(),
+        market: 'market-1',
+        timestamp: String(Date.now()),
+        price_changes: [
+          {
+            asset_id: 'unknown-token',
+            price: '0.55',
+            size: '100',
+            side: 'BUY',
+            hash: 'xyz',
+            best_bid: '0.54',
+            best_ask: '0.56',
+          },
+        ],
       });
       client.handleMessage(priceMsg);
 
       expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('should handle multiple price_changes entries in one message', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      // Initialize two tokens
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'book',
+          asset_id: 'token-a',
+          market: 'market-1',
+          timestamp: Date.now(),
+          bids: [{ price: '0.50', size: '100' }],
+          asks: [{ price: '0.55', size: '200' }],
+          hash: 'x',
+        }),
+      );
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'book',
+          asset_id: 'token-b',
+          market: 'market-1',
+          timestamp: Date.now(),
+          bids: [{ price: '0.30', size: '50' }],
+          asks: [{ price: '0.35', size: '60' }],
+          hash: 'y',
+        }),
+      );
+
+      // Send price_change affecting both tokens
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'price_change',
+          market: 'market-1',
+          timestamp: String(Date.now() + 1000),
+          price_changes: [
+            {
+              asset_id: 'token-a',
+              price: '0.51',
+              size: '10',
+              side: 'BUY',
+              hash: 'h1',
+              best_bid: '0.51',
+              best_ask: '0.54',
+            },
+            {
+              asset_id: 'token-b',
+              price: '0.31',
+              size: '20',
+              side: 'BUY',
+              hash: 'h2',
+              best_bid: '0.31',
+              best_ask: '0.34',
+            },
+          ],
+        }),
+      );
+
+      // 2 book snapshots + 2 price_change updates
+      expect(callback).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -184,6 +318,68 @@ describe('PolymarketWebSocketClient', () => {
 
       client.handleMessage(JSON.stringify({ event_type: 'unknown', data: {} }));
       expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('staleness event emission (AC #4)', () => {
+    it('should emit DataStaleEvent when order book data is stale (>30s)', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      // Send book with timestamp >30s in the past
+      const staleTimestamp = Date.now() - 35000;
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'book',
+          asset_id: 'stale-token',
+          market: 'market-1',
+          timestamp: staleTimestamp,
+          bids: [{ price: '0.50', size: '100' }],
+          asks: [{ price: '0.55', size: '200' }],
+          hash: '',
+        }),
+      );
+
+      // Subscriber should NOT be called (stale data discarded)
+      expect(callback).not.toHaveBeenCalled();
+
+      // DataStaleEvent should be emitted
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.DATA_STALE,
+      );
+      expect(staleCalls).toHaveLength(1);
+
+      const event = staleCalls[0]![1] as DataStaleEvent;
+      expect(event).toBeInstanceOf(DataStaleEvent);
+      expect(event.platformId).toBe('polymarket');
+      expect(event.tokenId).toBe('stale-token');
+      expect(event.stalenessMs).toBeGreaterThanOrEqual(30000);
+    });
+
+    it('should NOT emit DataStaleEvent when data is fresh (<30s)', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      client.handleMessage(
+        JSON.stringify({
+          event_type: 'book',
+          asset_id: 'fresh-token',
+          market: 'market-1',
+          timestamp: Date.now(),
+          bids: [{ price: '0.50', size: '100' }],
+          asks: [{ price: '0.55', size: '200' }],
+          hash: '',
+        }),
+      );
+
+      // Subscriber should be called (fresh data)
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      // No DataStaleEvent should be emitted
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.DATA_STALE,
+      );
+      expect(staleCalls).toHaveLength(0);
     });
   });
 

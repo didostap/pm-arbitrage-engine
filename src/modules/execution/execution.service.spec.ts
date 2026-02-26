@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
@@ -11,8 +12,12 @@ import { OrderRepository } from '../../persistence/repositories/order.repository
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { PlatformId } from '../../common/types/platform.type';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
+import { PlatformApiError } from '../../common/errors/platform-api-error';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
-import { SingleLegExposureEvent } from '../../common/events/execution.events';
+import {
+  SingleLegExposureEvent,
+  DepthCheckFailedEvent,
+} from '../../common/events/execution.events';
 import { createMockPlatformConnector } from '../../test/mock-factories.js';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 import type {
@@ -908,6 +913,109 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe(EXECUTION_ERROR_CODES.COMPLIANCE_BLOCKED);
       expect(result.error?.message).toContain('Compliance validation error');
+    });
+  });
+
+  describe('verifyDepth — error handling (AC #1)', () => {
+    it('should return false when connector.getOrderBook throws', async () => {
+      kalshiConnector.getOrderBook.mockRejectedValue(
+        new PlatformApiError(
+          1002,
+          'Rate limit exceeded',
+          PlatformId.KALSHI,
+          'warning',
+        ),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(false);
+      expect(result.error?.code).toBe(
+        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+      );
+    });
+
+    it('should emit DepthCheckFailedEvent when getOrderBook throws', async () => {
+      kalshiConnector.getOrderBook.mockRejectedValue(
+        new PlatformApiError(
+          1002,
+          'Rate limit exceeded',
+          PlatformId.KALSHI,
+          'warning',
+        ),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const depthFailedCalls = eventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.DEPTH_CHECK_FAILED,
+      );
+      expect(depthFailedCalls).toHaveLength(1);
+
+      const event = depthFailedCalls[0]![1] as DepthCheckFailedEvent;
+      expect(event).toBeInstanceOf(DepthCheckFailedEvent);
+      expect(event.platform).toBe(PlatformId.KALSHI);
+      expect(event.contractId).toBe('kalshi-contract-1');
+      expect(event.side).toBe('buy');
+      expect(event.errorType).toBe('PlatformApiError');
+      expect(event.errorMessage).toBe('Rate limit exceeded');
+    });
+
+    it('should emit structured warning log when getOrderBook throws', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const warnSpy = vi.spyOn((service as any).logger as Logger, 'warn');
+      kalshiConnector.getOrderBook.mockRejectedValue(
+        new PlatformApiError(
+          1002,
+          'Rate limit exceeded',
+          PlatformId.KALSHI,
+          'warning',
+        ),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Depth verification failed',
+          module: 'execution',
+          platform: PlatformId.KALSHI,
+          contractId: 'kalshi-contract-1',
+          side: 'buy',
+          errorType: 'PlatformApiError',
+          errorMessage: 'Rate limit exceeded',
+        }),
+      );
+    });
+
+    it('should emit DepthCheckFailedEvent for secondary depth failure', async () => {
+      // Primary depth OK + fills
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      // Secondary depth throws
+      polymarketConnector.getOrderBook.mockRejectedValue(
+        new Error('Connection timeout'),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const depthFailedCalls = eventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.DEPTH_CHECK_FAILED,
+      );
+      expect(depthFailedCalls).toHaveLength(1);
+
+      const event = depthFailedCalls[0]![1] as DepthCheckFailedEvent;
+      expect(event.platform).toBe(PlatformId.POLYMARKET);
+      expect(event.contractId).toBe('pm-contract-1');
+      expect(event.side).toBe('sell');
+      expect(event.errorType).toBe('Error');
+      expect(event.errorMessage).toBe('Connection timeout');
     });
   });
 });

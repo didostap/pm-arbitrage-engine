@@ -107,6 +107,19 @@ export class ComplianceBlockedEvent extends BaseEvent {
   }
 }
 
+export class DepthCheckFailedEvent extends BaseEvent {
+  constructor(
+    public readonly platform: PlatformId,
+    public readonly contractId: string,
+    public readonly side: 'buy' | 'sell',
+    public readonly errorType: string,
+    public readonly errorMessage: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
 export class SingleLegResolvedEvent extends BaseEvent {
   constructor(
     public readonly positionId: string,

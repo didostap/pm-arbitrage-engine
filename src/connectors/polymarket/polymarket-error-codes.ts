@@ -18,4 +18,6 @@ export const POLYMARKET_ERROR_CODES = {
   NOT_CONNECTED: 1015,
   /** Gas estimation failed (RPC or CoinGecko) — warning, fallback to config */
   GAS_ESTIMATION_FAILED: 1016,
+  /** Method not implemented — warning, no retry */
+  NOT_IMPLEMENTED: 1017,
 } as const;

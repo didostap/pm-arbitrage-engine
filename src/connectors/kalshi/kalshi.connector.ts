@@ -201,7 +201,14 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
   }
 
   getPositions(): Promise<Position[]> {
-    throw new Error('getPositions not implemented - Epic 5 Story 5.1');
+    throw new PlatformApiError(
+      KALSHI_ERROR_CODES.NOT_IMPLEMENTED,
+      'getPositions not implemented — positions tracked via Prisma OpenPosition model',
+      PlatformId.KALSHI,
+      'warning',
+      undefined,
+      { reason: 'unimplemented', plannedEpic: 'Phase 1' },
+    );
   }
 
   async submitOrder(params: OrderParams): Promise<OrderResult> {

@@ -20,6 +20,7 @@ import {
   OrderFilledEvent,
   ExecutionFailedEvent,
   SingleLegExposureEvent,
+  DepthCheckFailedEvent,
 } from '../../common/events/execution.events';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 import type { ComplianceDecision } from './compliance/compliance-config';
@@ -158,6 +159,7 @@ export class ExecutionService implements IExecutionEngine {
 
     // Step 1: Verify depth on primary platform
     const primaryDepthOk = await this.verifyDepth(
+      primaryPlatform,
       primaryConnector,
       primaryContractId,
       primarySide,
@@ -251,6 +253,7 @@ export class ExecutionService implements IExecutionEngine {
       .toNumber();
 
     const secondaryDepthOk = await this.verifyDepth(
+      secondaryPlatform,
       secondaryConnector,
       secondaryContractId,
       secondarySide,
@@ -471,6 +474,7 @@ export class ExecutionService implements IExecutionEngine {
   }
 
   private async verifyDepth(
+    platformId: PlatformId,
     connector: IPlatformConnector,
     contractId: string,
     side: 'buy' | 'sell',
@@ -493,8 +497,26 @@ export class ExecutionService implements IExecutionEngine {
       }
 
       return availableQty.gte(targetSize);
-    } catch {
-      // Rate limited or API error — treat as insufficient liquidity
+    } catch (error) {
+      this.logger.warn({
+        message: 'Depth verification failed',
+        module: 'execution',
+        platform: platformId,
+        contractId,
+        side,
+        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.DEPTH_CHECK_FAILED,
+        new DepthCheckFailedEvent(
+          platformId,
+          contractId,
+          side,
+          error instanceof Error ? error.constructor.name : 'Unknown',
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
       return false;
     }
   }
