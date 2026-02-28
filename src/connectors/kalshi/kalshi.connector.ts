@@ -75,7 +75,7 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
     );
     const baseUrl = this.configService.get<string>(
       'KALSHI_API_BASE_URL',
-      'https://demo-api.kalshi.co/trade-api/v2',
+      'https://api.elections.kalshi.com/trade-api/v2',
     );
 
     let privateKeyPem = '';
@@ -178,14 +178,20 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
 
       this.lastHeartbeat = new Date();
       const orderbook = response.data.orderbook;
+      const yesRaw: [number, number][] | undefined = orderbook?.yes as
+        | [number, number][]
+        | undefined;
+      const noRaw: [number, number][] | undefined = orderbook?.no as
+        | [number, number][]
+        | undefined;
 
-      // Null-guard SDK response before passing to shared utility
-      const yesBids: [number, number][] = (orderbook?.true ?? []).map(
-        ([p, q]: number[]) => [p ?? 0, q ?? 0],
-      );
-      const noBids: [number, number][] = (orderbook?.false ?? []).map(
-        ([p, q]: number[]) => [p ?? 0, q ?? 0],
-      );
+      // Kalshi API returns orderbook.yes / orderbook.no (not true/false)
+      const yesBids: [number, number][] = Array.isArray(yesRaw)
+        ? yesRaw.map(([p, q]: number[]) => [p ?? 0, q ?? 0])
+        : [];
+      const noBids: [number, number][] = Array.isArray(noRaw)
+        ? noRaw.map(([p, q]: number[]) => [p ?? 0, q ?? 0])
+        : [];
       const { bids, asks } = normalizeKalshiLevels(yesBids, noBids);
 
       return {

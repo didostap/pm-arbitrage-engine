@@ -16,10 +16,7 @@ import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
 import { SystemHealthError } from '../../common/errors';
 import { toPlatformEnum } from '../../common/utils';
 import { DegradationProtocolService } from './degradation-protocol.service';
-
-/** Placeholder token ID for Polymarket polling - will be replaced by Epic 3 contract pairs */
-const POLYMARKET_PLACEHOLDER_TOKEN_ID =
-  '110251828161543119357013227499774714771527179764174739487025581227481937033858';
+import { ContractPairLoaderService } from '../contract-matching/contract-pair-loader.service';
 
 /** Serialize price levels to Prisma JSON: build JsonObject so types align without cast. */
 function priceLevelsToJsonArray(levels: PriceLevel[]): Prisma.JsonArray {
@@ -43,6 +40,7 @@ export class DataIngestionService implements OnModuleInit {
     private readonly degradationService: DegradationProtocolService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly contractPairLoader: ContractPairLoaderService,
   ) {}
 
   /**
@@ -98,6 +96,33 @@ export class DataIngestionService implements OnModuleInit {
    * Polling path called by TradingEngineService during each cycle.
    * Fetches current orderbooks from all connected platforms.
    */
+  /**
+   * Retrieves configured tickers from contract pair configuration.
+   * Returns empty arrays if no pairs are configured (with warning log).
+   */
+  private getConfiguredTickers(correlationId: string): {
+    kalshiTickers: string[];
+    polymarketTokens: string[];
+  } {
+    const activePairs = this.contractPairLoader.getActivePairs();
+
+    if (activePairs.length === 0) {
+      this.logger.warn({
+        message:
+          'No active contract pairs configured — skipping order book ingestion',
+        module: 'data-ingestion',
+        correlationId,
+        timestamp: new Date().toISOString(),
+      });
+      return { kalshiTickers: [], polymarketTokens: [] };
+    }
+
+    return {
+      kalshiTickers: activePairs.map((p) => p.kalshiContractId),
+      polymarketTokens: activePairs.map((p) => p.polymarketContractId),
+    };
+  }
+
   async ingestCurrentOrderBooks(): Promise<void> {
     const correlationId = randomUUID();
 
@@ -108,13 +133,16 @@ export class DataIngestionService implements OnModuleInit {
       timestamp: new Date().toISOString(),
     });
 
+    const { kalshiTickers, polymarketTokens } =
+      this.getConfiguredTickers(correlationId);
+
+    if (kalshiTickers.length === 0 && polymarketTokens.length === 0) {
+      return;
+    }
+
     // Ingest Kalshi (isolated try/catch) — skip if degraded
     if (!this.degradationService.isDegraded(PlatformId.KALSHI)) {
       try {
-        // For MVP, we'll use a placeholder market ticker
-        // In production, this would iterate over configured market tickers
-        const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
-
         for (const ticker of kalshiTickers) {
           const startTime = Date.now();
 
@@ -172,10 +200,6 @@ export class DataIngestionService implements OnModuleInit {
     // Ingest Polymarket (isolated try/catch) — skip if degraded
     if (!this.degradationService.isDegraded(PlatformId.POLYMARKET)) {
       try {
-        // Placeholder token IDs - these will fail against real API
-        // Real token IDs will come from Epic 3 contract pair configuration
-        const polymarketTokens = [POLYMARKET_PLACEHOLDER_TOKEN_ID];
-
         for (const tokenId of polymarketTokens) {
           const startTime = Date.now();
 
@@ -293,7 +317,8 @@ export class DataIngestionService implements OnModuleInit {
    * Tags data with platformHealth: 'degraded' and tracks polling cycles.
    */
   private async pollDegradedPlatforms(correlationId: string): Promise<void> {
-    const kalshiTickers = ['KXTABLETENNIS-26FEB121755MLADPY-MLA']; // Placeholder
+    const { kalshiTickers, polymarketTokens } =
+      this.getConfiguredTickers(correlationId);
 
     const connectors = [
       {
@@ -303,7 +328,7 @@ export class DataIngestionService implements OnModuleInit {
       },
       {
         connector: this.polymarketConnector,
-        contracts: [POLYMARKET_PLACEHOLDER_TOKEN_ID],
+        contracts: polymarketTokens,
         platformId: PlatformId.POLYMARKET,
       },
     ];

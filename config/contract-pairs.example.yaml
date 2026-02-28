@@ -3,27 +3,32 @@
 # Operators manually curate this file — verify each pair before adding.
 #
 # Fields:
-#   polymarketContractId  - Polymarket condition ID (required)
-#   kalshiContractId      - Kalshi ticker/event ID (required)
-#   eventDescription      - Human-readable event description (required)
+#   polymarketContractId  - Polymarket condition ID / clobTokenId (required, large decimal string)
+#   kalshiContractId      - Kalshi ticker (required, e.g. KXEVENT-YYMM format)
+#   eventDescription      - Human-readable event description (required, min 3 chars)
 #   operatorVerificationTimestamp - ISO 8601 datetime when operator verified the match (required)
 #   primaryLeg            - Which platform to execute first: "kalshi" (default) or "polymarket" (optional)
+#
+# Validation rules:
+#   - Max 30 pairs
+#   - No duplicate (polymarketContractId, kalshiContractId) combinations
+#   - eventDescription must not match compliance-matrix.yaml blocked categories
 
 pairs:
-  - polymarketContractId: "0x1234567890abcdef1234567890abcdef12345678"
-    kalshiContractId: "PRES-2026-DEM"
-    eventDescription: "Will the Democratic candidate win the 2026 presidential election?"
-    operatorVerificationTimestamp: "2026-02-15T10:30:00Z"
-    primaryLeg: kalshi
-
-  - polymarketContractId: "0xabcdef1234567890abcdef1234567890abcdef12"
-    kalshiContractId: "FED-RATE-MAR26"
-    eventDescription: "Will the Fed raise rates in March 2026?"
-    operatorVerificationTimestamp: "2026-02-15T11:00:00Z"
+  - polymarketContractId: '82155281377141165143204560708045813743531231692081828482927028490588408258574'
+    kalshiContractId: 'KXLOSEMAJORITY-27JAN01'
+    eventDescription: 'Will Republicans lose the House majority before the midterms?'
+    operatorVerificationTimestamp: '2026-11-03T10:30:00Z'
     primaryLeg: polymarket
 
-  - polymarketContractId: "0x9876543210fedcba9876543210fedcba98765432"
-    kalshiContractId: "BTC-100K-MAR26"
-    eventDescription: "Will Bitcoin exceed $100k by end of March 2026?"
-    operatorVerificationTimestamp: "2026-02-15T11:30:00Z"
-    # primaryLeg defaults to "kalshi" when omitted
+  - polymarketContractId: '47113934605305582772590235372495078183833796521066344951188393486940857661087'
+    kalshiContractId: 'KXBTCVSGOLD-26'
+    eventDescription: 'Will Bitcoin outperform Gold in 2026?'
+    operatorVerificationTimestamp: '2026-12-31T23:59:59Z'
+    primaryLeg: kalshi
+
+  # primaryLeg defaults to "kalshi" when omitted
+  # - polymarketContractId: '123456789...'
+  #   kalshiContractId: 'KXEVENT-26'
+  #   eventDescription: 'Will event X happen?'
+  #   operatorVerificationTimestamp: '2026-01-01T00:00:00Z'

@@ -17,8 +17,10 @@ declare module 'kalshi-typescript' {
   }
 
   export interface Orderbook {
-    true?: Array<Array<number>>;
-    false?: Array<Array<number>>;
+    /** YES side bids: [price_cents, quantity][] */
+    yes?: Array<Array<number>>;
+    /** NO side bids: [price_cents, quantity][] */
+    no?: Array<Array<number>>;
     yes_dollars: Array<Array<string>>;
     no_dollars: Array<Array<string>>;
   }

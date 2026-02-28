@@ -121,8 +121,8 @@ describe('KalshiConnector', () => {
       mockGetMarketOrderbook.mockResolvedValue({
         data: {
           orderbook: {
-            true: [[62, 1000]], // 62¢ YES bid
-            false: [[38, 800]], // 38¢ NO bid → 62¢ YES ask (1 - 0.38)
+            yes: [[62, 1000]], // 62¢ YES bid
+            no: [[38, 800]], // 38¢ NO bid → 62¢ YES ask (1 - 0.38)
           },
         },
       });
@@ -151,8 +151,8 @@ describe('KalshiConnector', () => {
       mockGetMarketOrderbook.mockResolvedValue({
         data: {
           orderbook: {
-            true: undefined,
-            false: undefined,
+            yes: undefined,
+            no: undefined,
           },
         },
       });
