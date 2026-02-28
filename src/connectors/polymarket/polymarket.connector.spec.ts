@@ -11,6 +11,7 @@ import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-b
 
 const mockCreateOrDeriveApiKey = vi.fn();
 const mockGetOrderBook = vi.fn();
+const mockGetOrderBooks = vi.fn();
 const mockCreateOrder = vi.fn();
 const mockPostOrder = vi.fn();
 const mockGetOrder = vi.fn();
@@ -23,6 +24,7 @@ vi.mock('@polymarket/clob-client', () => {
   class MockClobClient {
     createOrDeriveApiKey = mockCreateOrDeriveApiKey;
     getOrderBook = mockGetOrderBook;
+    getOrderBooks = mockGetOrderBooks;
     createOrder = mockCreateOrder;
     postOrder = mockPostOrder;
     getOrder = mockGetOrder;
@@ -298,6 +300,275 @@ describe('PolymarketConnector', () => {
       await expect(connector.getOrderBook('token-123')).rejects.toThrow(
         PlatformApiError,
       );
+    });
+  });
+
+  describe('getOrderBooks (batch)', () => {
+    const setupConnected = () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrderBook: mockGetOrderBook,
+        getOrderBooks: mockGetOrderBooks,
+      };
+    };
+
+    it('should throw when not connected (clobClient null)', async () => {
+      await expect(
+        connector.getOrderBooks(['token-1', 'token-2']),
+      ).rejects.toThrow(PlatformApiError);
+    });
+
+    it('should return empty array for empty input without SDK call', async () => {
+      setupConnected();
+
+      const result = await connector.getOrderBooks([]);
+
+      expect(result).toEqual([]);
+      expect(mockGetOrderBooks).not.toHaveBeenCalled();
+    });
+
+    it('should return normalized books for batch of 3 tokens', async () => {
+      setupConnected();
+
+      mockGetOrderBooks.mockResolvedValue([
+        {
+          asset_id: 'token-1',
+          market: 'market-1',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.62', size: '1000' }],
+          asks: [{ price: '0.65', size: '800' }],
+          hash: 'hash-1',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.63',
+        },
+        {
+          asset_id: 'token-2',
+          market: 'market-2',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.55', size: '500' }],
+          asks: [{ price: '0.58', size: '300' }],
+          hash: 'hash-2',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.56',
+        },
+        {
+          asset_id: 'token-3',
+          market: 'market-3',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.70', size: '200' }],
+          asks: [{ price: '0.75', size: '150' }],
+          hash: 'hash-3',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.72',
+        },
+      ]);
+
+      const normalizedBook1 = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'token-1',
+        bids: [{ price: 0.62, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+      const normalizedBook2 = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'token-2',
+        bids: [{ price: 0.55, quantity: 500 }],
+        asks: [{ price: 0.58, quantity: 300 }],
+        timestamp: new Date(),
+      };
+      const normalizedBook3 = {
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'token-3',
+        bids: [{ price: 0.7, quantity: 200 }],
+        asks: [{ price: 0.75, quantity: 150 }],
+        timestamp: new Date(),
+      };
+
+      mockNormalizePolymarket
+        .mockReturnValueOnce(normalizedBook1)
+        .mockReturnValueOnce(normalizedBook2)
+        .mockReturnValueOnce(normalizedBook3);
+
+      const result = await connector.getOrderBooks([
+        'token-1',
+        'token-2',
+        'token-3',
+      ]);
+
+      expect(result).toHaveLength(3);
+      expect(result[0]).toBe(normalizedBook1);
+      expect(result[1]).toBe(normalizedBook2);
+      expect(result[2]).toBe(normalizedBook3);
+      // Single SDK call
+      expect(mockGetOrderBooks).toHaveBeenCalledOnce();
+    });
+
+    it('should handle partial results — log warning for missing tokens', async () => {
+      setupConnected();
+
+      // Request 3 tokens, only 2 returned
+      mockGetOrderBooks.mockResolvedValue([
+        {
+          asset_id: 'token-1',
+          market: 'market-1',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.62', size: '1000' }],
+          asks: [{ price: '0.65', size: '800' }],
+          hash: 'hash-1',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.63',
+        },
+        {
+          asset_id: 'token-3',
+          market: 'market-3',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.70', size: '200' }],
+          asks: [{ price: '0.75', size: '150' }],
+          hash: 'hash-3',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.72',
+        },
+      ]);
+
+      mockNormalizePolymarket
+        .mockReturnValueOnce({
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        })
+        .mockReturnValueOnce({
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'token-3',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        });
+
+      const loggerSpy = vi.spyOn(connector['logger'], 'warn');
+
+      const result = await connector.getOrderBooks([
+        'token-1',
+        'token-2',
+        'token-3',
+      ]);
+
+      expect(result).toHaveLength(2);
+
+      expect(loggerSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'No order book returned for token',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: expect.objectContaining({ tokenId: 'token-2' }),
+        }),
+      );
+    });
+
+    it('should filter out books that fail normalization', async () => {
+      setupConnected();
+
+      mockGetOrderBooks.mockResolvedValue([
+        {
+          asset_id: 'token-1',
+          market: 'market-1',
+          timestamp: '1709145352532',
+          bids: [{ price: '0.62', size: '1000' }],
+          asks: [{ price: '0.65', size: '800' }],
+          hash: 'hash-1',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0.63',
+        },
+        {
+          asset_id: 'token-2',
+          market: 'market-2',
+          timestamp: '1709145352532',
+          bids: [],
+          asks: [],
+          hash: 'hash-2',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0',
+        },
+      ]);
+
+      mockNormalizePolymarket
+        .mockReturnValueOnce({
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'token-1',
+          bids: [{ price: 0.62, quantity: 1000 }],
+          asks: [{ price: 0.65, quantity: 800 }],
+          timestamp: new Date(),
+        })
+        .mockReturnValueOnce(null); // Normalization fails
+
+      const result = await connector.getOrderBooks(['token-1', 'token-2']);
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.contractId).toBe('token-1');
+    });
+
+    it('should throw PlatformApiError on full SDK failure', async () => {
+      setupConnected();
+
+      mockGetOrderBooks.mockRejectedValue(new Error('Network error'));
+
+      await expect(
+        connector.getOrderBooks(['token-1', 'token-2']),
+      ).rejects.toThrow(PlatformApiError);
+    });
+
+    it('should rethrow PlatformApiError as-is', async () => {
+      setupConnected();
+
+      const apiError = new PlatformApiError(
+        1009,
+        'Rate limited',
+        PlatformId.POLYMARKET,
+        'warning',
+      );
+      mockGetOrderBooks.mockRejectedValue(apiError);
+
+      await expect(connector.getOrderBooks(['token-1'])).rejects.toBe(apiError);
+    });
+
+    it('should update lastHeartbeat after successful batch call', async () => {
+      setupConnected();
+
+      mockGetOrderBooks.mockResolvedValue([
+        {
+          asset_id: 'token-1',
+          market: '',
+          timestamp: '1709145352532',
+          bids: [],
+          asks: [],
+          hash: '',
+          tick_size: '0.01',
+          neg_risk: false,
+          last_trade_price: '0',
+        },
+      ]);
+
+      mockNormalizePolymarket.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: 'token-1',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      });
+
+      await connector.getOrderBooks(['token-1']);
+      const after = connector['lastHeartbeat'];
+
+      expect(after).toBeInstanceOf(Date);
+      expect(after?.getTime()).toBeGreaterThan(0);
     });
   });
 

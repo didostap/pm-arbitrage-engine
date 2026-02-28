@@ -83,20 +83,54 @@ describe('PlatformHealthService', () => {
   });
 
   describe('publishHealth()', () => {
-    it('should persist health log to database', async () => {
+    it('should NOT persist health log when status is unchanged (healthy → healthy)', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
       // Record an update to make platform healthy
       service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // First tick: both default to 'healthy', calculated as 'healthy' → no transition
+      await service.publishHealth();
+
+      expect(mockPrismaService.platformHealthLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should persist health log when status transitions (healthy → degraded)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Kalshi stale → degraded (transitions from default 'healthy')
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, sixtyOneSecondsAgo);
+
+      // Polymarket fresh → healthy (no transition from default 'healthy')
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
 
       await service.publishHealth();
 
+      // Only Kalshi should get a DB write (status changed)
+      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledTimes(
+        1,
+      );
       expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          platform: 'KALSHI', // Uppercase to match DB enum
-          status: 'healthy',
+          platform: 'KALSHI',
+          status: 'degraded',
         }),
       });
+    });
+
+    it('should persist on first-tick-degraded (differs from default healthy)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Don't record any updates — both platforms will calculate as degraded
+      // previousStatus defaults to 'healthy', so degraded != 'healthy' → DB write
+      await service.publishHealth();
+
+      // Both platforms should get a DB write
+      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledTimes(
+        2,
+      );
     });
 
     it('should emit platform.health.updated event', async () => {
@@ -172,30 +206,23 @@ describe('PlatformHealthService', () => {
       );
     });
 
-    it('should publish health for both KALSHI and POLYMARKET platforms', async () => {
+    it('should emit health events for both platforms even without DB write', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Record updates for both platforms
+      // Record updates for both platforms (both healthy, no transition from default)
       service.recordUpdate(PlatformId.KALSHI, 100);
       service.recordUpdate(PlatformId.POLYMARKET, 120);
 
       await service.publishHealth();
 
-      // Should persist health logs for both platforms
-      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            platform: 'KALSHI',
-          }),
-        }),
+      // No DB writes (no status transitions)
+      expect(mockPrismaService.platformHealthLog.create).not.toHaveBeenCalled();
+
+      // But events should still fire for both platforms
+      const healthUpdatedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === 'platform.health.updated',
       );
-      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            platform: 'POLYMARKET',
-          }),
-        }),
-      );
+      expect(healthUpdatedCalls).toHaveLength(2);
     });
 
     it('should emit degraded event for Polymarket when stale', async () => {

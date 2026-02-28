@@ -197,52 +197,40 @@ export class DataIngestionService implements OnModuleInit {
       }
     } // end Kalshi degradation check
 
-    // Ingest Polymarket (isolated try/catch) — skip if degraded
+    // Ingest Polymarket via batch (isolated try/catch) — skip if degraded
     if (!this.degradationService.isDegraded(PlatformId.POLYMARKET)) {
       try {
-        for (const tokenId of polymarketTokens) {
-          const startTime = Date.now();
+        const startTime = Date.now();
 
-          try {
-            // Connector returns already normalized data
-            const normalized =
-              await this.polymarketConnector.getOrderBook(tokenId);
+        const normalizedBooks =
+          await this.polymarketConnector.getOrderBooks(polymarketTokens);
 
-            await this.persistSnapshot(normalized, correlationId);
+        const batchLatency = Date.now() - startTime;
+        this.healthService.recordUpdate(PlatformId.POLYMARKET, batchLatency);
 
-            this.eventEmitter.emit(
-              EVENT_NAMES.ORDERBOOK_UPDATED,
-              new OrderBookUpdatedEvent(normalized),
-            );
+        for (const normalized of normalizedBooks) {
+          await this.persistSnapshot(normalized, correlationId);
 
-            const latency = Date.now() - startTime;
-            this.healthService.recordUpdate(PlatformId.POLYMARKET, latency);
+          this.eventEmitter.emit(
+            EVENT_NAMES.ORDERBOOK_UPDATED,
+            new OrderBookUpdatedEvent(normalized),
+          );
 
-            this.logger.log({
-              message: 'Order book ingested (polling)',
-              module: 'data-ingestion',
-              correlationId,
-              timestamp: new Date().toISOString(),
-              contractId: normalized.contractId,
-              latencyMs: latency,
-              metadata: {
-                platformId: normalized.platformId,
-                bidLevels: normalized.bids.length,
-                askLevels: normalized.asks.length,
-                bestBid: normalized.bids[0]?.price,
-                bestAsk: normalized.asks[0]?.price,
-              },
-            });
-          } catch (error) {
-            this.logger.error({
-              message: 'Failed to ingest order book',
-              module: 'data-ingestion',
-              correlationId,
-              tokenId,
-              error: error instanceof Error ? error.message : 'Unknown error',
-              timestamp: new Date().toISOString(),
-            });
-          }
+          this.logger.log({
+            message: 'Order book ingested (polling)',
+            module: 'data-ingestion',
+            correlationId,
+            timestamp: new Date().toISOString(),
+            contractId: normalized.contractId,
+            batchLatencyMs: batchLatency,
+            metadata: {
+              platformId: normalized.platformId,
+              bidLevels: normalized.bids.length,
+              askLevels: normalized.asks.length,
+              bestBid: normalized.bids[0]?.price,
+              bestAsk: normalized.asks[0]?.price,
+            },
+          });
         }
       } catch (error) {
         this.logger.error({
@@ -333,6 +321,10 @@ export class DataIngestionService implements OnModuleInit {
       },
     ];
 
+    // Degraded polling uses sequential per-contract getOrderBook() intentionally:
+    // - Isolates failures to individual contracts (one failure doesn't lose the whole batch)
+    // - Tracks per-contract latency for granular health recovery signals
+    // - Matches Kalshi's sequential pattern (no batch API available)
     for (const { connector, contracts, platformId } of connectors) {
       if (!this.degradationService.isDegraded(platformId)) continue;
 

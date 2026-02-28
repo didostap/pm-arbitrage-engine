@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -39,9 +39,10 @@ describe('DataIngestionService', () => {
 
   const mockKalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
 
-  const mockPolymarketConnector = createMockPlatformConnector(
-    PlatformId.POLYMARKET,
-  );
+  const mockPolymarketConnector = {
+    ...createMockPlatformConnector(PlatformId.POLYMARKET),
+    getOrderBooks: vi.fn(),
+  };
 
   const mockNormalizer = {
     normalize: vi.fn(),
@@ -151,13 +152,22 @@ describe('DataIngestionService', () => {
       };
 
       mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue({
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [],
-        asks: [],
-        timestamp: new Date(),
-      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-2',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await service.ingestCurrentOrderBooks();
@@ -175,13 +185,22 @@ describe('DataIngestionService', () => {
       };
 
       mockKalshiConnector.getOrderBook.mockResolvedValue(normalizedBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue({
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [],
-        asks: [],
-        timestamp: new Date(),
-      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-2',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await service.ingestCurrentOrderBooks();
@@ -240,23 +259,30 @@ describe('DataIngestionService', () => {
         timestamp: new Date(),
       };
 
-      const polymarketBook = {
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [{ price: 0.55, quantity: 1500 }],
-        asks: [{ price: 0.58, quantity: 1200 }],
-        timestamp: new Date(),
-      };
-
       mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-2',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await service.ingestCurrentOrderBooks();
 
       // Both connectors should be called
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledOnce();
 
       // Health tracking for both platforms
       expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
@@ -280,16 +306,23 @@ describe('DataIngestionService', () => {
         }),
       );
 
-      mockPolymarketConnector.getOrderBook.mockImplementation(
-        (tokenId: string) =>
-          Promise.resolve({
-            platformId: PlatformId.POLYMARKET,
-            contractId: tokenId,
-            bids: [{ price: 0.55, quantity: 1500 }],
-            asks: [{ price: 0.58, quantity: 1200 }],
-            timestamp: new Date(),
-          }),
-      );
+      // Batch call returns all Polymarket books at once
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-2',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
 
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
@@ -304,14 +337,12 @@ describe('DataIngestionService', () => {
       );
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalledTimes(2);
 
-      // Polymarket should be called with each token from TEST_PAIRS
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalledWith(
+      // Polymarket should use single batch call with all tokens
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledOnce();
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledWith([
         'pm-token-1',
-      );
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalledWith(
         'pm-token-2',
-      );
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalledTimes(2);
+      ]);
 
       // OrderBookUpdatedEvent emitted for each successful ingestion (2 Kalshi + 2 Polymarket)
       const orderbookEmits = mockEventEmitter.emit.mock.calls.filter(
@@ -327,31 +358,31 @@ describe('DataIngestionService', () => {
 
       // Neither connector should be called
       expect(mockKalshiConnector.getOrderBook).not.toHaveBeenCalled();
-      expect(mockPolymarketConnector.getOrderBook).not.toHaveBeenCalled();
+      expect(mockPolymarketConnector.getOrderBooks).not.toHaveBeenCalled();
 
       // No events emitted
       expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('should handle Kalshi failure without affecting Polymarket ingestion', async () => {
-      const polymarketBook = {
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [{ price: 0.55, quantity: 1500 }],
-        asks: [{ price: 0.58, quantity: 1200 }],
-        timestamp: new Date(),
-      };
-
       mockKalshiConnector.getOrderBook.mockRejectedValue(
         new Error('Kalshi API error'),
       );
-      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await expect(service.ingestCurrentOrderBooks()).resolves.not.toThrow();
 
-      // Polymarket should still be ingested
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+      // Polymarket should still be ingested via batch
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
       expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
         PlatformId.POLYMARKET,
         expect.any(Number),
@@ -368,7 +399,7 @@ describe('DataIngestionService', () => {
       };
 
       mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
-      mockPolymarketConnector.getOrderBook.mockRejectedValue(
+      mockPolymarketConnector.getOrderBooks.mockRejectedValue(
         new Error('Polymarket API error'),
       );
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
@@ -615,14 +646,15 @@ describe('DataIngestionService', () => {
       );
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
-      const polymarketBook = {
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [{ price: 0.55, quantity: 1500 }],
-        asks: [{ price: 0.58, quantity: 1200 }],
-        timestamp: new Date(),
-      };
-      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
 
       // Kalshi connector should return a book for degraded polling
       const kalshiBook = {
@@ -638,8 +670,8 @@ describe('DataIngestionService', () => {
 
       // Kalshi normal polling should be skipped (degraded)
       // But Kalshi degraded polling should still call getOrderBook
-      // Polymarket normal polling should proceed
-      expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalled();
+      // Polymarket normal polling should proceed via batch
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
     });
 
     it('should call pollDegradedPlatforms for degraded platforms', async () => {
@@ -655,13 +687,15 @@ describe('DataIngestionService', () => {
         timestamp: new Date(),
       };
       mockKalshiConnector.getOrderBook.mockResolvedValue(degradedBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue({
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [],
-        asks: [],
-        timestamp: new Date(),
-      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await service.ingestCurrentOrderBooks();
@@ -685,13 +719,15 @@ describe('DataIngestionService', () => {
         timestamp: new Date(),
       };
       mockKalshiConnector.getOrderBook.mockResolvedValue(degradedBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue({
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [],
-        asks: [],
-        timestamp: new Date(),
-      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 
       await service.ingestCurrentOrderBooks();
@@ -711,15 +747,16 @@ describe('DataIngestionService', () => {
         asks: [{ price: 0.65, quantity: 800 }],
         timestamp: new Date(),
       };
-      const polymarketBook = {
-        platformId: PlatformId.POLYMARKET,
-        contractId: 'pm-token-1',
-        bids: [],
-        asks: [],
-        timestamp: new Date(),
-      };
       mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
 
       await service.ingestCurrentOrderBooks();
 
@@ -740,15 +777,15 @@ describe('DataIngestionService', () => {
         asks: [{ price: 0.65, quantity: 800 }],
         timestamp: new Date(),
       };
-      const polymarketBook = {
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      // Degraded polling uses getOrderBook (per-token), not batch
+      mockPolymarketConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
         contractId: 'pm-token-1',
         bids: [],
         asks: [],
         timestamp: new Date(),
-      };
-      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
-      mockPolymarketConnector.getOrderBook.mockResolvedValue(polymarketBook);
+      });
 
       await service.ingestCurrentOrderBooks();
 
@@ -806,16 +843,29 @@ describe('DataIngestionService', () => {
         }),
       );
 
-      mockPolymarketConnector.getOrderBook.mockImplementation(
-        (tokenId: string) =>
-          Promise.resolve({
-            platformId: PlatformId.POLYMARKET,
-            contractId: tokenId,
-            bids: [{ price: 0.55, quantity: 1500 }],
-            asks: [{ price: 0.58, quantity: 1200 }],
-            timestamp: new Date(),
-          }),
-      );
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-a',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-b',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-c',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
 
       mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
 

@@ -50,31 +50,33 @@ export class PlatformHealthService {
         const previousStatus = this.previousStatus.get(platform) || 'healthy';
         const health = this.calculateHealth(platform);
 
-        // Persist to database (AWAIT to handle errors - not fire-and-forget)
-        try {
-          await this.prisma.platformHealthLog.create({
-            data: {
-              platform: toPlatformEnum(platform),
-              status: health.status,
-              last_update: health.lastHeartbeat || new Date(),
-              response_time_ms: health.latencyMs,
-              connection_state:
-                (health.metadata?.connectionState as string) || 'unknown',
-              created_at: new Date(),
-            },
-          });
-        } catch (error) {
-          this.logger.error({
-            message: 'Failed to persist health log',
-            module: 'data-ingestion',
-            correlationId,
-            platform,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-          // Continue processing - persistence failure shouldn't block monitoring
+        // Only persist to database on status transitions (reduces ~5,760 writes/day to ~0)
+        if (health.status !== previousStatus) {
+          try {
+            await this.prisma.platformHealthLog.create({
+              data: {
+                platform: toPlatformEnum(platform),
+                status: health.status,
+                last_update: health.lastHeartbeat || new Date(),
+                response_time_ms: health.latencyMs,
+                connection_state:
+                  (health.metadata?.connectionState as string) || 'unknown',
+                created_at: new Date(),
+              },
+            });
+          } catch (error) {
+            this.logger.error({
+              message: 'Failed to persist health log',
+              module: 'data-ingestion',
+              correlationId,
+              platform,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
+            // Continue processing - persistence failure shouldn't block monitoring
+          }
         }
 
-        // Emit base health update event
+        // Emit base health update event (every tick, regardless of DB write)
         this.eventEmitter.emit(EVENT_NAMES.PLATFORM_HEALTH_UPDATED, health);
 
         // Emit transition events (degradation AND recovery)

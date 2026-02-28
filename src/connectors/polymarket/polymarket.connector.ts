@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClobClient, Side } from '@polymarket/clob-client';
+import type { OrderBookSummary } from '@polymarket/clob-client';
 import { Wallet } from '@ethersproject/wallet';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
 import type {
@@ -266,6 +267,113 @@ export class PolymarketConnector
           PlatformId.POLYMARKET,
           'error',
         );
+      }
+
+      return normalized;
+    } catch (error) {
+      if (error instanceof PlatformApiError) throw error;
+      throw this.mapError(error);
+    }
+  }
+
+  /**
+   * Batch-fetch order books for multiple token IDs via a single SDK call.
+   * Uses POST /books endpoint — consumes 1 rate limit read token regardless of token count.
+   * side: Side.BUY is a placeholder to satisfy TypeScript; the API returns full books (bids + asks).
+   */
+  async getOrderBooks(contractIds: string[]): Promise<NormalizedOrderBook[]> {
+    // Early return for empty input — no SDK call, no rate limit token consumed
+    if (contractIds.length === 0) {
+      return [];
+    }
+
+    if (!this.clobClient) {
+      throw new PlatformApiError(
+        POLYMARKET_ERROR_CODES.UNAUTHORIZED,
+        'ClobClient not initialized — call connect() first',
+        PlatformId.POLYMARKET,
+        'critical',
+      );
+    }
+
+    await this.rateLimiter.acquireRead();
+
+    try {
+      // Build BookParams[] — side is typed as required but functionally optional
+      const params = contractIds.map((id) => ({
+        token_id: id,
+        side: Side.BUY,
+      }));
+
+      const response: OrderBookSummary[] = await withRetry(
+        () => this.clobClient!.getOrderBooks(params),
+        RETRY_STRATEGIES.NETWORK_ERROR,
+        (attempt, error) => {
+          this.logger.warn({
+            message: 'Retrying getOrderBooks (batch)',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.POLYMARKET,
+            metadata: {
+              tokenCount: contractIds.length,
+              attempt,
+              error: error.message,
+            },
+          });
+        },
+      );
+
+      this.lastHeartbeat = new Date();
+
+      // Detect missing tokens
+      const returnedIds = new Set(response.map((b) => b.asset_id));
+      for (const id of contractIds) {
+        if (!returnedIds.has(id)) {
+          this.logger.warn({
+            message: 'No order book returned for token',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.POLYMARKET,
+            metadata: { tokenId: id },
+          });
+        }
+      }
+
+      // Normalize each OrderBookSummary → PolymarketOrderBookMessage → NormalizedOrderBook
+      const normalized: NormalizedOrderBook[] = [];
+      for (const book of response) {
+        const epochMs = Number(book.timestamp);
+        const rawBook: PolymarketOrderBookMessage = {
+          asset_id: book.asset_id,
+          market: book.market,
+          timestamp: (() => {
+            if (!isNaN(epochMs) && epochMs > 0) return epochMs;
+            if (book.timestamp) {
+              const parsed = new Date(book.timestamp).getTime();
+              if (!isNaN(parsed)) return parsed;
+            }
+            return Date.now();
+          })(),
+          bids: book.bids ?? [],
+          asks: book.asks ?? [],
+          hash: book.hash,
+        };
+
+        // Batch normalization is lenient: filter out failures instead of throwing.
+        // Unlike getOrderBook() which throws on normalization failure (single contract = total failure),
+        // batch partial results are still valuable — one bad entry shouldn't discard the rest.
+        const result = this.normalizer.normalizePolymarket(rawBook);
+        if (result) {
+          normalized.push(result);
+        } else {
+          this.logger.warn({
+            message: 'Failed to normalize batch order book entry',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.POLYMARKET,
+            metadata: { assetId: rawBook.asset_id },
+          });
+        }
       }
 
       return normalized;
