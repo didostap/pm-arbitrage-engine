@@ -73,8 +73,9 @@ export class PolymarketConnector
     );
     this.chainId = this.configService.get<number>('POLYMARKET_CHAIN_ID', 137);
 
-    // Conservative rate limits: 10 read/s, 5 write/s with 20% safety buffer
-    this.rateLimiter = new RateLimiter(8, 4, 1, this.logger);
+    // Polymarket rate limits: ~100 req/min public, 300 req/10s for /books
+    // Bucket sized for burst headroom: 8 pairs per cycle needs ~8 reads, 20 gives 2.5x margin
+    this.rateLimiter = new RateLimiter(20, 4, 1, this.logger);
   }
 
   async onModuleInit(): Promise<void> {

@@ -110,7 +110,9 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       wsUrl: `${baseUrl.replace('https://', 'wss://')}/trade-api/v2/ws`,
     });
 
-    this.rateLimiter = RateLimiter.fromTier('BASIC', this.logger);
+    // Kalshi BASIC tier: 20 read/s, 10 write/s
+    // Bucket sized for burst headroom: 8 pairs + order polls per cycle, 24 gives ~2x margin
+    this.rateLimiter = new RateLimiter(24, 10, 1, this.logger);
   }
 
   async connect(): Promise<void> {
