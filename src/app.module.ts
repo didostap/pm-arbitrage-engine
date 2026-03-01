@@ -17,6 +17,7 @@ import { ArbitrageDetectionModule } from './modules/arbitrage-detection/arbitrag
 import { ExitManagementModule } from './modules/exit-management/exit-management.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { SystemErrorFilter } from './common/filters/system-error.filter';
 
 @Module({
@@ -31,7 +32,7 @@ import { SystemErrorFilter } from './common/filters/system-error.filter';
     EventEmitterModule.forRoot({
       wildcard: true,
       delimiter: '.',
-      maxListeners: 20, // Increased from 10 for Phase 1 multi-module subscriptions
+      maxListeners: 25, // Increased for Phase 1 multi-module subscriptions + dashboard gateway
       verboseMemoryLeak: true,
     }),
     ScheduleModule.forRoot(), // For @Cron decorators in PlatformHealthService
@@ -44,6 +45,7 @@ import { SystemErrorFilter } from './common/filters/system-error.filter';
     ExitManagementModule,
     ReconciliationModule,
     MonitoringModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_FILTER, useClass: SystemErrorFilter }],

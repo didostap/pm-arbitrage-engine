@@ -47,7 +47,15 @@ describe('RiskOverrideController', () => {
     });
 
     expect(result).toEqual({
-      data: decision,
+      data: {
+        approved: true,
+        reason: 'Override approved by operator',
+        maxPositionSizeUsd: '300',
+        currentOpenPairs: 5,
+        dailyPnl: undefined,
+        overrideApplied: true,
+        overrideRationale: 'High conviction opportunity',
+      },
       timestamp: expect.any(String) as string,
     });
     expect(mockRiskManager.processOverride).toHaveBeenCalledWith(
@@ -107,7 +115,7 @@ describe('RiskOverrideController', () => {
         error: {
           code: 4000,
           message: 'Internal error processing override',
-          severity: 'error',
+          severity: 'critical',
         },
         timestamp: expect.any(String) as string,
       });

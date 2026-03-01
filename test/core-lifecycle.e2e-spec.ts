@@ -3,6 +3,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/common/prisma.service';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -52,6 +53,7 @@ describe('Core Lifecycle (e2e)', () => {
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter(),
     );
+    app.useWebSocketAdapter(new WsAdapter(app));
     prisma = moduleFixture.get<PrismaService>(PrismaService);
     await app.init();
   });
@@ -68,11 +70,9 @@ describe('Core Lifecycle (e2e)', () => {
     expect(vi.mocked(prisma.$queryRaw)).toHaveBeenCalled();
   });
 
-  it('should run polling cycles during operation', () => {
-    // Polling cycles run automatically in background
-    // (scheduler uses 30s default, but lifecycle should be stable)
-    expect(app).toBeDefined();
-  });
+  it.todo(
+    'should run polling cycles during operation — verify scheduler triggers executeCycle and emits events',
+  );
 
   it('should shut down gracefully without errors', async () => {
     expect(app).toBeDefined();
@@ -118,6 +118,7 @@ describe('Core Lifecycle (e2e)', () => {
       failingModule.createNestApplication<NestFastifyApplication>(
         new FastifyAdapter(),
       );
+    failingApp.useWebSocketAdapter(new WsAdapter(failingApp));
 
     // Startup should fail when database connection fails
     await expect(failingApp.init()).rejects.toThrow('Connection failed');

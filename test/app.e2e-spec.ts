@@ -3,6 +3,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './../src/app.module';
 
 describe('AppController (e2e)', () => {
@@ -16,6 +17,7 @@ describe('AppController (e2e)', () => {
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter(),
     );
+    app.useWebSocketAdapter(new WsAdapter(app));
     await app.init();
   });
 
@@ -32,11 +34,14 @@ describe('AppController (e2e)', () => {
     expect(result.statusCode).toBe(200);
 
     const payload = JSON.parse(result.payload) as {
-      data: { status: string };
+      data: { status: string; service: string };
       timestamp: string;
     };
     expect(payload).toHaveProperty('data');
-    expect(payload.data).toEqual({ status: 'ok' });
+    expect(payload.data).toEqual({
+      status: 'ok',
+      service: 'pm-arbitrage-engine',
+    });
     expect(payload).toHaveProperty('timestamp');
     expect(typeof payload.timestamp).toBe('string');
   });

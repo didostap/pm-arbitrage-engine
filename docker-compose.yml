@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16
@@ -41,6 +39,34 @@ services:
       retries: 3
       start_period: 40s
     stop_grace_period: 15s
+    networks:
+      - pm-arbitrage-network
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ../pm-arbitrage-dashboard
+      dockerfile: Dockerfile
+    container_name: pm-arbitrage-dashboard
+    ports:
+      - '3000:80'
+    environment:
+      API_URL: http://engine:8080
+      WS_URL: ws://engine:8080
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:80/']
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
     networks:
       - pm-arbitrage-network
     restart: unless-stopped

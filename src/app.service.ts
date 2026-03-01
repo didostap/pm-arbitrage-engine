@@ -5,12 +5,14 @@ import {
   PrismaClientInitializationError,
   PrismaClientRustPanicError,
 } from '@prisma/client/runtime/library';
+import { HealthCheckResponseDto } from './common/dto/health-check-response.dto';
+import { SystemHealthError } from './common/errors/system-health-error';
 
 @Injectable()
 export class AppService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getHealth() {
+  async getHealth(): Promise<HealthCheckResponseDto> {
     try {
       // Verify database connectivity
       await this.prisma.$queryRaw`SELECT 1`;
@@ -18,6 +20,7 @@ export class AppService {
       return {
         data: {
           status: 'ok',
+          service: 'pm-arbitrage-engine',
         },
         timestamp: new Date().toISOString(),
       };
@@ -37,14 +40,7 @@ export class AppService {
         code = 4004;
       }
 
-      return {
-        error: {
-          code,
-          message,
-          severity: 'critical',
-        },
-        timestamp: new Date().toISOString(),
-      };
+      throw new SystemHealthError(code, message, 'critical');
     }
   }
 }

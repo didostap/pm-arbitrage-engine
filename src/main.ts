@@ -3,6 +3,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { Logger } from '@nestjs/common';
@@ -18,6 +19,14 @@ async function bootstrap() {
   // Replace default NestJS logger with nestjs-pino
   app.useLogger(app.get(PinoLogger));
 
+  // WebSocket adapter (native ws, NOT Socket.IO)
+  app.useWebSocketAdapter(new WsAdapter(app));
+
+  // CORS for dashboard SPA cross-origin requests in dev
+  app.enableCors({
+    origin: process.env.DASHBOARD_ORIGIN || 'http://localhost:5173',
+  });
+
   app.setGlobalPrefix('api');
 
   // Swagger/OpenAPI setup
@@ -28,7 +37,11 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
 
   // Bind to 0.0.0.0 in development (required for Docker container networking)
   // Production uses 127.0.0.1:8080 per architecture (localhost-only with SSH tunnel)

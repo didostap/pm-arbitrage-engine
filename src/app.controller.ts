@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AppService } from './app.service';
+import { HealthCheckResponseDto } from './common/dto/health-check-response.dto';
 
 @ApiTags('Health')
 @Controller()
@@ -9,8 +10,7 @@ export class AppController {
 
   @Get('health')
   @ApiOperation({ summary: 'System health check' })
-  @ApiResponse({ status: 200, description: 'System health status' })
-  getHealth() {
+  async getHealth(): Promise<HealthCheckResponseDto> {
     return this.appService.getHealth();
   }
 }

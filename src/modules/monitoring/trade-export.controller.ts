@@ -11,6 +11,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiProduces,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -55,7 +56,12 @@ export class TradeExportController {
 
   @Get('trades')
   @ApiOperation({ summary: 'Export trade log (JSON or CSV)' })
-  @ApiResponse({ status: 200, description: 'Trade log data' })
+  @ApiProduces('application/json', 'text/csv')
+  @ApiResponse({
+    status: 200,
+    description: 'Trade log data (JSON or CSV depending on format query param)',
+    schema: { type: 'string' },
+  })
   @ApiResponse({ status: 400, description: 'Invalid date range' })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -137,7 +143,12 @@ export class TradeExportController {
 
   @Get('tax-report')
   @ApiOperation({ summary: 'Export annual tax report (CSV)' })
-  @ApiResponse({ status: 200, description: 'Tax report CSV' })
+  @ApiProduces('text/csv')
+  @ApiResponse({
+    status: 200,
+    description: 'Tax report CSV file',
+    schema: { type: 'string' },
+  })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async exportTaxReport(

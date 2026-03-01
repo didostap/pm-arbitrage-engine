@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './common/prisma.service';
 import { PrismaClientInitializationError } from '@prisma/client/runtime/library';
+import { SystemHealthError } from './common/errors/system-health-error';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -33,7 +34,10 @@ describe('AppController', () => {
 
       expect(result).toHaveProperty('data');
       expect(result).toHaveProperty('timestamp');
-      expect(result.data).toEqual({ status: 'ok' });
+      expect(result.data).toEqual({
+        status: 'ok',
+        service: 'pm-arbitrage-engine',
+      });
       expect(typeof result.timestamp).toBe('string');
     });
   });
@@ -64,17 +68,13 @@ describe('AppController', () => {
       appController = app.get<AppController>(AppController);
     });
 
-    it('should return error with code 4002 when database fails', async () => {
-      const result = await appController.getHealth();
-
-      expect(result).toHaveProperty('error');
-      expect(result).toHaveProperty('timestamp');
-      expect(result.error).toEqual({
-        code: 4002,
-        message: 'Database initialization failed',
-        severity: 'critical',
-      });
-      expect(typeof result.timestamp).toBe('string');
+    it('should throw SystemHealthError when database fails', async () => {
+      await expect(appController.getHealth()).rejects.toThrow(
+        SystemHealthError,
+      );
+      await expect(appController.getHealth()).rejects.toThrow(
+        'Database initialization failed',
+      );
     });
   });
 });

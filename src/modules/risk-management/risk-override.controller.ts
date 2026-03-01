@@ -19,6 +19,7 @@ import { AuthTokenGuard } from '../../common/guards/auth-token.guard';
 import type { IRiskManager } from '../../common/interfaces/risk-manager.interface';
 import { RISK_ERROR_CODES } from '../../common/errors/risk-limit-error';
 import { RiskOverrideDto } from './dto/risk-override.dto';
+import { RiskOverrideResponseDto } from './dto/risk-override-response.dto';
 import { RISK_MANAGER_TOKEN } from './risk-management.constants';
 
 @ApiTags('Risk Management')
@@ -36,14 +37,13 @@ export class RiskOverrideController {
   @Post('override')
   @HttpCode(200)
   @ApiOperation({ summary: 'Submit operator risk override for an opportunity' })
-  @ApiResponse({ status: 200, description: 'Override approved' })
   @ApiResponse({
     status: 403,
     description: 'Override denied — trading halt active',
   })
   async override(
     @Body(new ValidationPipe({ whitelist: true })) dto: RiskOverrideDto,
-  ) {
+  ): Promise<RiskOverrideResponseDto> {
     try {
       const decision = await this.riskManager.processOverride(
         dto.opportunityId,
@@ -64,7 +64,18 @@ export class RiskOverrideController {
         );
       }
 
-      return { data: decision, timestamp: new Date().toISOString() };
+      return {
+        data: {
+          approved: decision.approved,
+          reason: decision.reason,
+          maxPositionSizeUsd: decision.maxPositionSizeUsd.toString(),
+          currentOpenPairs: decision.currentOpenPairs,
+          dailyPnl: decision.dailyPnl?.toString(),
+          overrideApplied: decision.overrideApplied,
+          overrideRationale: decision.overrideRationale,
+        },
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -81,7 +92,7 @@ export class RiskOverrideController {
           error: {
             code: 4000,
             message: 'Internal error processing override',
-            severity: 'error',
+            severity: 'critical',
           },
           timestamp: new Date().toISOString(),
         },

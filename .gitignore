@@ -67,3 +67,6 @@ secrets/
 
 # Trade log data (CSV files, daily summaries)
 data/
+
+# Generated OpenAPI spec (served live at /api/docs-json)
+api-spec.json

@@ -20,6 +20,11 @@ import { AuthTokenGuard } from '../common/guards/auth-token.guard';
 import { StartupReconciliationService } from './startup-reconciliation.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
+import {
+  ResolveDiscrepancyResponseDto,
+  ReconciliationRunResponseDto,
+  ReconciliationStatusResponseDto,
+} from './dto/reconciliation-response.dto';
 
 const DEBOUNCE_MS = 30_000;
 
@@ -38,7 +43,6 @@ export class ReconciliationController {
   @Post(':id/resolve')
   @HttpCode(200)
   @ApiOperation({ summary: 'Resolve a reconciliation discrepancy' })
-  @ApiResponse({ status: 200, description: 'Discrepancy resolved' })
   @ApiResponse({ status: 404, description: 'Position not found' })
   @ApiResponse({
     status: 409,
@@ -48,7 +52,7 @@ export class ReconciliationController {
     @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true }))
     dto: ResolveReconciliationDto,
-  ) {
+  ): Promise<ResolveDiscrepancyResponseDto> {
     try {
       const result = await this.reconciliationService.resolveDiscrepancy(
         id,
@@ -88,7 +92,7 @@ export class ReconciliationController {
           error: {
             code: 4000,
             message: 'Internal error resolving discrepancy',
-            severity: 'error',
+            severity: 'critical',
           },
           timestamp: new Date().toISOString(),
         },
@@ -100,9 +104,8 @@ export class ReconciliationController {
   @Post('run')
   @HttpCode(200)
   @ApiOperation({ summary: 'Trigger manual reconciliation run' })
-  @ApiResponse({ status: 200, description: 'Reconciliation result' })
   @ApiResponse({ status: 429, description: 'Reconciliation debounce active' })
-  async run() {
+  async run(): Promise<ReconciliationRunResponseDto> {
     const lastRunAt = this.reconciliationService.lastRunAt;
     if (lastRunAt && Date.now() - lastRunAt.getTime() < DEBOUNCE_MS) {
       throw new HttpException(
@@ -133,7 +136,7 @@ export class ReconciliationController {
           error: {
             code: 4000,
             message: 'Internal error running reconciliation',
-            severity: 'error',
+            severity: 'critical',
           },
           timestamp: new Date().toISOString(),
         },
@@ -146,8 +149,7 @@ export class ReconciliationController {
   @ApiOperation({
     summary: 'Get reconciliation status and outstanding discrepancies',
   })
-  @ApiResponse({ status: 200, description: 'Reconciliation status' })
-  async status() {
+  async status(): Promise<ReconciliationStatusResponseDto> {
     const lastRun = this.reconciliationService.getLastRunResult();
     // Live positions only (isPaper defaults to false) — paper positions are excluded
     const outstandingPositions = await this.positionRepository.findByStatus(

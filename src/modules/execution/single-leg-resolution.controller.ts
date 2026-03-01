@@ -20,6 +20,10 @@ import { SingleLegResolutionService } from './single-leg-resolution.service';
 import { RetryLegDto } from './retry-leg.dto';
 import { CloseLegDto } from './close-leg.dto';
 import {
+  RetryLegResponseDto,
+  CloseLegResponseDto,
+} from './dto/single-leg-response.dto';
+import {
   ExecutionError,
   EXECUTION_ERROR_CODES,
 } from '../../common/errors/execution-error';
@@ -36,13 +40,12 @@ export class SingleLegResolutionController {
   @Post(':id/retry-leg')
   @HttpCode(200)
   @ApiOperation({ summary: 'Retry the failed leg of a single-leg exposure' })
-  @ApiResponse({ status: 200, description: 'Retry result' })
   @ApiResponse({ status: 409, description: 'Invalid position state' })
   @ApiResponse({ status: 502, description: 'Platform connector failure' })
   async retryLeg(
     @Param('id') positionId: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: RetryLegDto,
-  ) {
+  ): Promise<RetryLegResponseDto> {
     try {
       const result = await this.resolutionService.retryLeg(
         positionId,
@@ -57,13 +60,12 @@ export class SingleLegResolutionController {
   @Post(':id/close-leg')
   @HttpCode(200)
   @ApiOperation({ summary: 'Close the filled leg to exit single-leg exposure' })
-  @ApiResponse({ status: 200, description: 'Close result' })
   @ApiResponse({ status: 409, description: 'Invalid position state' })
   @ApiResponse({ status: 422, description: 'Cannot determine close price' })
   async closeLeg(
     @Param('id') positionId: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: CloseLegDto,
-  ) {
+  ): Promise<CloseLegResponseDto> {
     try {
       const result = await this.resolutionService.closeLeg(
         positionId,
@@ -127,7 +129,7 @@ export class SingleLegResolutionController {
         error: {
           code: 4000,
           message: 'Internal error processing request',
-          severity: 'error',
+          severity: 'critical',
         },
         timestamp: new Date().toISOString(),
       },
