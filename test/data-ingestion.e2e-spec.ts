@@ -301,7 +301,7 @@ describe('Data Ingestion (e2e)', () => {
       degradationService.deactivateProtocol(PlatformId.KALSHI);
     });
 
-    it('should recover when fresh data arrives after degradation', async () => {
+    it('should recover when fresh data arrives after degradation (2 consecutive healthy ticks)', async () => {
       // Set up degradation
       degradationService.activateProtocol(
         PlatformId.KALSHI,
@@ -309,12 +309,20 @@ describe('Data Ingestion (e2e)', () => {
       );
       healthService['previousStatus'].set(PlatformId.KALSHI, 'degraded');
 
-      // Simulate fresh data arrival (WebSocket resumes)
+      // Tick 1: fresh data arrival (WebSocket resumes) — not enough, need 2 ticks
       healthService.recordUpdate(PlatformId.KALSHI, 50);
-
+      healthService.recordUpdate(PlatformId.POLYMARKET, 50);
       await healthService.publishHealth();
 
-      // Protocol should be deactivated (fresh data within 30s)
+      // Still degraded after single healthy tick (hysteresis)
+      expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(true);
+
+      // Tick 2: still fresh — now should recover
+      healthService.recordUpdate(PlatformId.KALSHI, 50);
+      healthService.recordUpdate(PlatformId.POLYMARKET, 50);
+      await healthService.publishHealth();
+
+      // Protocol should be deactivated (2 consecutive healthy ticks with fresh data)
       expect(degradationService.isDegraded(PlatformId.KALSHI)).toBe(false);
     });
 

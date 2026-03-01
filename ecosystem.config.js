@@ -4,10 +4,11 @@ module.exports = {
     {
       name: 'pm-arbitrage-engine',
       script: 'dist/src/main.js',
+      cwd: __dirname, // Ensure PM2 runs from the engine directory (resolves .env.production correctly)
       node_args: '-r dotenv/config', // Load .env via dotenv before NestJS starts
       env: {
         NODE_ENV: 'production',
-        DOTENV_CONFIG_PATH: '.env', // dotenv reads this file
+        DOTENV_CONFIG_PATH: '.env.production', // dotenv reads this file
       },
       max_restarts: 10,
       restart_delay: 5000,

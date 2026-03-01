@@ -7,6 +7,7 @@ import { TelegramAlertService } from './telegram-alert.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { AuditLogService } from './audit-log.service.js';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
+import Decimal from 'decimal.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
 
 // Suppress logger output
@@ -619,6 +620,153 @@ describe('EventConsumerService', () => {
       await expect(
         service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('summarizeEvent serialization (AC #4)', () => {
+    // Access private method for unit testing
+    function summarize(event: BaseEvent): Record<string, unknown> | string {
+      return service['summarizeEvent'](event);
+    }
+
+    it('should serialize Date values to ISO strings', () => {
+      const event = makeBaseEvent({
+        timestamp: new Date('2026-03-01T12:00:00.000Z'),
+      });
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['timestamp']).toBe('2026-03-01T12:00:00.000Z');
+    });
+
+    it('should serialize arrays as actual arrays', () => {
+      const event = {
+        ...makeBaseEvent(),
+        healthyPlatforms: ['kalshi', 'polymarket'],
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['healthyPlatforms']).toEqual(['kalshi', 'polymarket']);
+    });
+
+    it('should serialize array of Dates as array of ISO strings', () => {
+      const event = {
+        ...makeBaseEvent(),
+        dates: [new Date('2026-01-01'), new Date('2026-02-01')],
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['dates']).toEqual([
+        '2026-01-01T00:00:00.000Z',
+        '2026-02-01T00:00:00.000Z',
+      ]);
+    });
+
+    it('should serialize Decimal instances to string', () => {
+      const event = {
+        ...makeBaseEvent(),
+        price: new Decimal('0.55'),
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['price']).toBe('0.55');
+    });
+
+    it('should serialize nested plain objects recursively', () => {
+      const event = {
+        ...makeBaseEvent(),
+        impactSummary: { pollingCycleCount: 3, reason: 'websocket_timeout' },
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['impactSummary']).toEqual({
+        pollingCycleCount: 3,
+        reason: 'websocket_timeout',
+      });
+    });
+
+    it('should passthrough null', () => {
+      const event = {
+        ...makeBaseEvent(),
+        lastDataTimestamp: null,
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['lastDataTimestamp']).toBeNull();
+    });
+
+    it('should passthrough primitives', () => {
+      const event = {
+        ...makeBaseEvent(),
+        count: 42,
+        active: true,
+        label: 'test',
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      expect(result['count']).toBe(42);
+      expect(result['active']).toBe(true);
+      expect(result['label']).toBe('test');
+    });
+
+    it('should never produce [object] in any output', () => {
+      const event = {
+        ...makeBaseEvent(),
+        nested: { a: { b: 'deep' } },
+        arr: [1, 2, 3],
+        date: new Date(),
+        decimal: new Decimal('1.5'),
+      } as unknown as BaseEvent;
+      const result = summarize(event);
+      const json = JSON.stringify(result);
+      expect(json).not.toContain('[object]');
+    });
+
+    it('should handle circular references with [Circular]', () => {
+      const obj: Record<string, unknown> = { a: 1 };
+      obj['self'] = obj;
+      const event = {
+        ...makeBaseEvent(),
+        circular: obj,
+      } as unknown as BaseEvent;
+      const result = summarize(event) as Record<string, unknown>;
+      const circular = result['circular'] as Record<string, unknown>;
+      expect(circular['self']).toBe('[Circular]');
+    });
+
+    it('should handle deep nesting (>10 levels) with [MaxDepth]', () => {
+      let obj: Record<string, unknown> = { value: 'bottom' };
+      for (let i = 0; i < 15; i++) {
+        obj = { nested: obj };
+      }
+      const event = {
+        ...makeBaseEvent(),
+        deep: obj,
+      } as unknown as BaseEvent;
+      const result = summarize(event);
+      const json = JSON.stringify(result);
+      expect(json).toContain('[MaxDepth]');
+    });
+
+    it('should return fallback object on serialization error', () => {
+      // Create a getter that throws
+      const badEvent = Object.create(null) as Record<string, unknown>;
+      Object.defineProperty(badEvent, 'timestamp', {
+        get() {
+          return new Date();
+        },
+        enumerable: true,
+      });
+      Object.defineProperty(badEvent, 'correlationId', {
+        get() {
+          return 'test';
+        },
+        enumerable: true,
+      });
+      Object.defineProperty(badEvent, 'bomb', {
+        get() {
+          throw new Error('serialization bomb');
+        },
+        enumerable: true,
+      });
+
+      const result = summarize(badEvent as unknown as BaseEvent) as Record<
+        string,
+        unknown
+      >;
+      expect(result['error']).toBe('serialization_failed');
     });
   });
 });

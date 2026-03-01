@@ -458,14 +458,37 @@ describe('PlatformHealthService', () => {
     });
   });
 
-  describe('WebSocket timeout detection (81s)', () => {
-    it('should trigger degradation protocol at 81s timeout', async () => {
+  describe('Consecutive-check hysteresis', () => {
+    it('should NOT degrade on single unhealthy tick', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Set last update to 82s ago (beyond 81s threshold)
-      const eightyTwoSecondsAgo = Date.now() - 82_000;
-      service['lastUpdateTime'].set(PlatformId.KALSHI, eightyTwoSecondsAgo);
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
 
+      // Make Kalshi stale (>60s)
+      const sixtyFiveSecondsAgo = Date.now() - 65_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, sixtyFiveSecondsAgo);
+
+      await service.publishHealth();
+
+      expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
+    });
+
+    it('should degrade after 2 consecutive unhealthy ticks', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Tick 1: Kalshi stale
+      const sixtyFiveSecondsAgo = Date.now() - 65_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, sixtyFiveSecondsAgo);
+      await service.publishHealth();
+
+      expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
+
+      // Tick 2: Kalshi still stale
+      service.recordUpdate(PlatformId.POLYMARKET, 100); // keep polymarket fresh
       await service.publishHealth();
 
       expect(mockDegradationService.activateProtocol).toHaveBeenCalledWith(
@@ -475,49 +498,113 @@ describe('PlatformHealthService', () => {
       );
     });
 
-    it('should NOT trigger protocol below 81s (60s staleness emits degraded but not protocol)', async () => {
+    it('should NOT recover on single healthy tick after degradation', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Set last update to 70s ago (above 60s staleness, below 81s timeout)
-      const seventySecondsAgo = Date.now() - 70_000;
-      service['lastUpdateTime'].set(PlatformId.KALSHI, seventySecondsAgo);
-      // Keep Polymarket fresh so it doesn't trigger the protocol either
+      // Simulate previously degraded state
+      service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      // Make Kalshi fresh now
+      service.recordUpdate(PlatformId.KALSHI, 100);
       service.recordUpdate(PlatformId.POLYMARKET, 100);
 
+      // Tick 1: healthy — but should not deactivate yet
       await service.publishHealth();
 
+      expect(mockDegradationService.deactivateProtocol).not.toHaveBeenCalled();
+    });
+
+    it('should recover after 2 consecutive healthy ticks', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Simulate previously degraded state
+      service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+
+      // Tick 1: fresh
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      expect(mockDegradationService.deactivateProtocol).not.toHaveBeenCalled();
+
+      // Tick 2: still fresh
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      expect(mockDegradationService.deactivateProtocol).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+      );
+    });
+
+    it('should reset unhealthy counter when healthy observation occurs', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Tick 1: Kalshi stale (unhealthy=1)
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 65_000);
+      await service.publishHealth();
+
+      // Tick 2: Kalshi fresh (unhealthy=0, healthy=1)
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Tick 3: Kalshi stale again (unhealthy=1, NOT 2)
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 65_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Should NOT have activated protocol because counter was reset
       expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
     });
 
-    it('should not re-activate protocol if already degraded', async () => {
-      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
-      mockDegradationService.isDegraded.mockReturnValue(true);
+    it('should initialize counters to 0 for all platforms', () => {
+      expect(service['consecutiveUnhealthyTicks'].get(PlatformId.KALSHI)).toBe(
+        0,
+      );
+      expect(
+        service['consecutiveUnhealthyTicks'].get(PlatformId.POLYMARKET),
+      ).toBe(0);
+      expect(service['consecutiveHealthyTicks'].get(PlatformId.KALSHI)).toBe(0);
+      expect(
+        service['consecutiveHealthyTicks'].get(PlatformId.POLYMARKET),
+      ).toBe(0);
+    });
 
-      // Set both platforms to 82s ago so both are timed out
-      const eightyTwoSecondsAgo = Date.now() - 82_000;
-      service['lastUpdateTime'].set(PlatformId.KALSHI, eightyTwoSecondsAgo);
-      service['lastUpdateTime'].set(PlatformId.POLYMARKET, eightyTwoSecondsAgo);
-
-      await service.publishHealth();
-
-      // Should NOT activate because isDegraded returns true for all
-      expect(mockDegradationService.activateProtocol).not.toHaveBeenCalled();
+    it('should not have standalone 81s direct-activation path', () => {
+      // Verify the WEBSOCKET_TIMEOUT_THRESHOLD property no longer exists
+      expect(service).not.toHaveProperty('WEBSOCKET_TIMEOUT_THRESHOLD');
     });
   });
 
   describe('Recovery validation', () => {
-    it('should deactivate protocol when data is fresh on recovery', async () => {
+    it('should deactivate protocol when data is fresh after 2 consecutive healthy ticks', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
       mockDegradationService.isDegraded.mockImplementation(
         (p: PlatformId) => p === PlatformId.KALSHI,
       );
 
-      // First, make Kalshi degraded (previous status)
+      // Make Kalshi degraded (previous status)
       service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
 
-      // Now record fresh update (makes healthy)
+      // Tick 1: fresh (healthyTicks=1)
       service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
 
+      // Not yet — needs 2 consecutive ticks
+      expect(mockDegradationService.deactivateProtocol).not.toHaveBeenCalled();
+
+      // Tick 2: still fresh (healthyTicks=2)
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
       await service.publishHealth();
 
       expect(mockDegradationService.deactivateProtocol).toHaveBeenCalledWith(
@@ -534,16 +621,69 @@ describe('PlatformHealthService', () => {
       // Make previousStatus degraded
       service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
 
-      // Set last update to 35s ago (stale for recovery validation, but within 60s staleness threshold)
-      // We need to make calculateHealth return 'healthy', so last update must be within 60s
-      // But for recovery validation, data must be >30s old
+      // Tick 1: data within 60s but >30s (so calculateHealth returns healthy, but freshness check fails)
       const thirtyFiveSecondsAgo = Date.now() - 35_000;
       service['lastUpdateTime'].set(PlatformId.KALSHI, thirtyFiveSecondsAgo);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
 
+      // Tick 2: same stale data (but still within 60s)
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
       await service.publishHealth();
 
       // Recovery validation should reject (data is >30s old)
       expect(mockDegradationService.deactivateProtocol).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Degradation protocol exception safety', () => {
+    it('should not crash publishHealth when activateProtocol throws', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      mockDegradationService.activateProtocol.mockImplementation(() => {
+        throw new Error('degradation service exploded');
+      });
+
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Tick 1 + 2: Kalshi stale
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 65_000);
+      await service.publishHealth();
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Should not throw — error is caught internally
+      // And health events should still fire for both platforms
+      const healthUpdatedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === 'platform.health.updated',
+      );
+      expect(healthUpdatedCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should not crash publishHealth when deactivateProtocol throws', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      mockDegradationService.isDegraded.mockImplementation(
+        (p: PlatformId) => p === PlatformId.KALSHI,
+      );
+      mockDegradationService.deactivateProtocol.mockImplementation(() => {
+        throw new Error('deactivation service exploded');
+      });
+
+      service['previousStatus'].set(PlatformId.KALSHI, 'degraded');
+
+      // Tick 1 + 2: fresh
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Should not throw — error is caught internally
+      const healthUpdatedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === 'platform.health.updated',
+      );
+      expect(healthUpdatedCalls.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

@@ -35,13 +35,15 @@ export class PolymarketWebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnected = false;
   private shouldReconnect = true;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: PolymarketWebSocketConfig) {
     this.eventEmitter = config.eventEmitter;
   }
 
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    const connectPromise = new Promise<void>((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.config.wsUrl);
 
@@ -60,6 +62,9 @@ export class PolymarketWebSocketClient {
             this.sendSubscribe(tokenId);
           }
 
+          // Start keepalive ping interval
+          this.startPingInterval();
+
           resolve();
         });
 
@@ -67,8 +72,16 @@ export class PolymarketWebSocketClient {
           this.handleMessage(data);
         });
 
+        this.ws.on('pong', () => {
+          if (this.pongTimeout) {
+            clearTimeout(this.pongTimeout);
+            this.pongTimeout = null;
+          }
+        });
+
         this.ws.on('close', (code: number, reason: Buffer) => {
           this.isConnected = false;
+          this.clearPingTimers();
           this.logger.warn({
             message: 'WebSocket disconnected',
             module: 'connector',
@@ -80,6 +93,7 @@ export class PolymarketWebSocketClient {
         });
 
         this.ws.on('error', (error: Error) => {
+          this.clearPingTimers();
           this.logger.error({
             message: 'WebSocket error',
             module: 'connector',
@@ -95,10 +109,19 @@ export class PolymarketWebSocketClient {
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
+
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('WebSocket connect timeout (10s)'));
+      }, 10_000);
+    });
+
+    return Promise.race([connectPromise, timeoutPromise]);
   }
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.clearPingTimers();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -182,12 +205,12 @@ export class PolymarketWebSocketClient {
 
   private handleBookSnapshot(msg: PolymarketOrderBookMessage): void {
     const bids: PriceLevel[] = (msg.bids ?? []).map((b) => ({
-      price: parseFloat(b.price),
-      quantity: parseFloat(b.size),
+      price: new Decimal(b.price).toNumber(),
+      quantity: new Decimal(b.size).toNumber(),
     }));
     const asks: PriceLevel[] = (msg.asks ?? []).map((a) => ({
-      price: parseFloat(a.price),
-      quantity: parseFloat(a.size),
+      price: new Decimal(a.price).toNumber(),
+      quantity: new Decimal(a.size).toNumber(),
     }));
 
     // Sort bids descending, asks ascending
@@ -218,8 +241,8 @@ export class PolymarketWebSocketClient {
       // quantity data, so emitting would produce misleading zero-liquidity levels.
       if (state.bids.length === 0 && state.asks.length === 0) continue;
 
-      const bestBid = parseFloat(entry.best_bid);
-      const bestAsk = parseFloat(entry.best_ask);
+      const bestBid = new Decimal(entry.best_bid).toNumber();
+      const bestAsk = new Decimal(entry.best_ask).toNumber();
 
       // Update top-of-book from best_bid/best_ask
       if (!isNaN(bestBid) && state.bids.length > 0 && state.bids[0]) {
@@ -272,11 +295,56 @@ export class PolymarketWebSocketClient {
     }
   }
 
+  private startPingInterval(): void {
+    this.clearPingTimers();
+    this.pingInterval = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      // Clear any existing pong timeout to prevent overlapping timeouts
+      if (this.pongTimeout) {
+        clearTimeout(this.pongTimeout);
+        this.pongTimeout = null;
+      }
+      this.ws.ping();
+      this.pongTimeout = setTimeout(() => {
+        this.logger.warn({
+          message: 'Pong timeout — forcing reconnect',
+          module: 'connector',
+          timestamp: new Date().toISOString(),
+          platformId: PlatformId.POLYMARKET,
+        });
+        this.ws?.terminate();
+      }, 10_000);
+    }, 30_000);
+  }
+
+  private clearPingTimers(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+  }
+
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
 
-    const { initialDelayMs, maxDelayMs, backoffMultiplier } =
+    const { initialDelayMs, maxDelayMs, backoffMultiplier, maxRetries } =
       RETRY_STRATEGIES.WEBSOCKET_RECONNECT;
+
+    if (this.reconnectAttempt >= maxRetries) {
+      this.logger.error({
+        message: 'Max reconnect attempts reached — giving up',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.POLYMARKET,
+        metadata: { maxRetries, attempts: this.reconnectAttempt },
+      });
+      return;
+    }
+
     const baseDelay = Math.min(
       initialDelayMs * Math.pow(backoffMultiplier, this.reconnectAttempt),
       maxDelayMs,

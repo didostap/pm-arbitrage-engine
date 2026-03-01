@@ -54,9 +54,9 @@ describe('ContractMatchSyncService', () => {
     service = module.get(ContractMatchSyncService);
   });
 
-  it('should call syncPairsToDatabase from onModuleInit', async () => {
+  it('should call syncPairsToDatabase from onApplicationBootstrap', async () => {
     const spy = vi.spyOn(service, 'syncPairsToDatabase').mockResolvedValue();
-    await service.onModuleInit();
+    await service.onApplicationBootstrap();
     expect(spy).toHaveBeenCalledOnce();
   });
 
@@ -135,13 +135,14 @@ describe('ContractMatchSyncService', () => {
       { polymarketContractId: 'poly-old', kalshiContractId: 'kalshi-old' },
     ]);
 
-    const logSpy = vi.spyOn(service['logger'], 'log');
+    const warnSpy = vi.spyOn(service['logger'], 'warn');
 
     await service.syncPairsToDatabase();
 
-    expect(logSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Inactive contract matches detected',
+        message:
+          'Database contains approved pairs not in current config — may need manual review',
         data: expect.objectContaining({ count: 1 }),
       }),
     );

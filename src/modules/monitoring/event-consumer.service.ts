@@ -16,6 +16,7 @@ import {
   type TradeLogRecord,
 } from './csv-trade-log.service.js';
 import { AuditLogService } from './audit-log.service.js';
+import Decimal from 'decimal.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
 
 /**
@@ -304,14 +305,47 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private summarizeEvent(event: BaseEvent): Record<string, unknown> | string {
-    if (!event || typeof event !== 'object') return 'unknown';
-    // Return a shallow summary to avoid logging huge event payloads
-    const summary: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(event)) {
-      if (key === 'correlationId') continue;
-      summary[key] =
-        typeof value === 'object' && value !== null ? '[object]' : value;
+    try {
+      if (!event || typeof event !== 'object') return 'unknown';
+      const summary: Record<string, unknown> = {};
+      const seen = new WeakSet();
+      for (const [key, value] of Object.entries(event)) {
+        if (key === 'correlationId') continue;
+        summary[key] = this.serializeValue(value, seen, 0);
+      }
+      return summary;
+    } catch (error) {
+      this.logger.warn(
+        { error, eventType: event?.constructor?.name },
+        'Event serialization failed',
+      );
+      return {
+        error: 'serialization_failed',
+        eventType: event?.constructor?.name ?? 'unknown',
+      };
     }
-    return summary;
+  }
+
+  private static readonly MAX_SERIALIZE_DEPTH = 10;
+
+  private serializeValue(
+    value: unknown,
+    seen: WeakSet<object>,
+    depth: number,
+  ): unknown {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'object') return value; // primitives passthrough
+    if (depth > EventConsumerService.MAX_SERIALIZE_DEPTH) return '[MaxDepth]';
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof Decimal) return value.toString();
+    if (Array.isArray(value))
+      return value.map((v) => this.serializeValue(v, seen, depth + 1));
+    const serialized: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      serialized[k] = this.serializeValue(v, seen, depth + 1);
+    }
+    return serialized;
   }
 }

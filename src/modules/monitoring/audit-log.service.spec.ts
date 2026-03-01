@@ -82,6 +82,9 @@ describe('AuditLogService', () => {
     });
 
     it('should produce deterministic hashes for same inputs', async () => {
+      // Freeze time so both service instances compute identical timestamps
+      vi.useFakeTimers({ now: new Date('2026-01-15T12:00:00.000Z') });
+
       const entry = {
         eventType: 'execution.order.filled',
         module: 'execution',
@@ -106,6 +109,8 @@ describe('AuditLogService', () => {
       ).currentHash;
 
       expect(hash1).toBe(hash2);
+
+      vi.useRealTimers();
     });
 
     it('should produce different hashes for different inputs', async () => {
@@ -140,6 +145,9 @@ describe('AuditLogService', () => {
     });
 
     it('should produce deterministic hash regardless of key insertion order', async () => {
+      // Freeze time so both service instances compute identical timestamps
+      vi.useFakeTimers({ now: new Date('2026-01-15T12:00:00.000Z') });
+
       await service.append({
         eventType: 'test',
         module: 'test',
@@ -167,6 +175,8 @@ describe('AuditLogService', () => {
       ).currentHash;
 
       expect(hash1).toBe(hash2);
+
+      vi.useRealTimers();
     });
   });
 

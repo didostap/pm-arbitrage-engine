@@ -19,8 +19,10 @@ export class PlatformHealthService {
   private readonly logger = new Logger(PlatformHealthService.name);
   private readonly STALENESS_THRESHOLD = 60_000; // 60 seconds
   private readonly DEGRADED_LATENCY_THRESHOLD = 2000; // 2 seconds
-  private readonly WEBSOCKET_TIMEOUT_THRESHOLD = 81_000; // 81 seconds (FR-DI-03)
   private readonly DATA_FRESHNESS_THRESHOLD = 30_000; // 30 seconds for recovery validation
+
+  private static readonly CONSECUTIVE_UNHEALTHY_TICKS_THRESHOLD = 2;
+  private static readonly CONSECUTIVE_HEALTHY_TICKS_THRESHOLD = 2;
 
   private lastUpdateTime: Map<PlatformId, number> = new Map();
   private latencySamples: Map<PlatformId, number[]> = new Map();
@@ -29,11 +31,20 @@ export class PlatformHealthService {
     'healthy' | 'degraded' | 'disconnected'
   > = new Map();
 
+  private consecutiveUnhealthyTicks: Map<PlatformId, number> = new Map();
+  private consecutiveHealthyTicks: Map<PlatformId, number> = new Map();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly degradationService: DegradationProtocolService,
-  ) {}
+  ) {
+    // Initialize counters for all known platforms
+    for (const platform of [PlatformId.KALSHI, PlatformId.POLYMARKET]) {
+      this.consecutiveUnhealthyTicks.set(platform, 0);
+      this.consecutiveHealthyTicks.set(platform, 0);
+    }
+  }
 
   /**
    * Published health status every 30 seconds (FR-DI-04).
@@ -49,6 +60,21 @@ export class PlatformHealthService {
       for (const platform of platforms) {
         const previousStatus = this.previousStatus.get(platform) || 'healthy';
         const health = this.calculateHealth(platform);
+
+        // Update consecutive tick counters
+        if (health.status === 'degraded' || health.status === 'disconnected') {
+          this.consecutiveUnhealthyTicks.set(
+            platform,
+            (this.consecutiveUnhealthyTicks.get(platform) ?? 0) + 1,
+          );
+          this.consecutiveHealthyTicks.set(platform, 0);
+        } else {
+          this.consecutiveHealthyTicks.set(
+            platform,
+            (this.consecutiveHealthyTicks.get(platform) ?? 0) + 1,
+          );
+          this.consecutiveUnhealthyTicks.set(platform, 0);
+        }
 
         // Only persist to database on status transitions (reduces ~5,760 writes/day to ~0)
         if (health.status !== previousStatus) {
@@ -94,9 +120,42 @@ export class PlatformHealthService {
             EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
             new PlatformRecoveredEvent(platform, health, previousStatus),
           );
+        } else if (
+          health.status === 'disconnected' &&
+          previousStatus !== 'disconnected'
+        ) {
+          this.eventEmitter.emit(
+            EVENT_NAMES.PLATFORM_HEALTH_DISCONNECTED,
+            new PlatformDisconnectedEvent(platform, health),
+          );
+        }
 
-          // Recovery validation for degradation protocol (Task 4)
-          if (this.degradationService.isDegraded(platform)) {
+        // Consecutive-check hysteresis for degradation protocol
+        try {
+          const unhealthyTicks =
+            this.consecutiveUnhealthyTicks.get(platform) ?? 0;
+          if (
+            unhealthyTicks >=
+              PlatformHealthService.CONSECUTIVE_UNHEALTHY_TICKS_THRESHOLD &&
+            !this.degradationService.isDegraded(platform)
+          ) {
+            const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+            const lastDataTimestamp =
+              lastUpdate > 0 ? new Date(lastUpdate) : undefined;
+            this.degradationService.activateProtocol(
+              platform,
+              'websocket_timeout',
+              lastDataTimestamp,
+            );
+          }
+
+          // Recovery validation with consecutive-check hysteresis
+          const healthyTicks = this.consecutiveHealthyTicks.get(platform) ?? 0;
+          if (
+            healthyTicks >=
+              PlatformHealthService.CONSECUTIVE_HEALTHY_TICKS_THRESHOLD &&
+            this.degradationService.isDegraded(platform)
+          ) {
             const lastUpdate = this.lastUpdateTime.get(platform) || 0;
             const dataAge = Date.now() - lastUpdate;
 
@@ -113,31 +172,14 @@ export class PlatformHealthService {
               });
             }
           }
-        } else if (
-          health.status === 'disconnected' &&
-          previousStatus !== 'disconnected'
-        ) {
-          this.eventEmitter.emit(
-            EVENT_NAMES.PLATFORM_HEALTH_DISCONNECTED,
-            new PlatformDisconnectedEvent(platform, health),
-          );
-        }
-
-        // 81s WebSocket timeout detection (FR-DI-03)
-        // This is ADDITIONAL to the 60s staleness check above
-        const lastUpdate = this.lastUpdateTime.get(platform) || 0;
-        const wsAge = Date.now() - lastUpdate;
-        if (
-          wsAge > this.WEBSOCKET_TIMEOUT_THRESHOLD &&
-          !this.degradationService.isDegraded(platform)
-        ) {
-          const lastDataTimestamp =
-            lastUpdate > 0 ? new Date(lastUpdate) : undefined;
-          this.degradationService.activateProtocol(
+        } catch (error) {
+          this.logger.error({
+            message: 'Degradation protocol error',
+            module: 'data-ingestion',
+            correlationId,
             platform,
-            'websocket_timeout',
-            lastDataTimestamp,
-          );
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
         }
 
         // Update previous status for next check

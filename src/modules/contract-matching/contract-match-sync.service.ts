@@ -1,9 +1,10 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
 import { ContractPairLoaderService } from './contract-pair-loader.service';
+import { ContractPairConfig } from './types/index.js';
 
 @Injectable()
-export class ContractMatchSyncService implements OnModuleInit {
+export class ContractMatchSyncService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ContractMatchSyncService.name);
 
   constructor(
@@ -11,7 +12,7 @@ export class ContractMatchSyncService implements OnModuleInit {
     private readonly pairLoader: ContractPairLoaderService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.syncPairsToDatabase();
   }
 
@@ -105,27 +106,30 @@ export class ContractMatchSyncService implements OnModuleInit {
     }
   }
 
-  private async detectInactivePairs(
-    activePairs: ReturnType<ContractPairLoaderService['getActivePairs']>,
-  ): Promise<void> {
-    const dbPairs = await this.prisma.contractMatch.findMany({
-      select: { polymarketContractId: true, kalshiContractId: true },
+  async detectInactivePairs(activePairs: ContractPairConfig[]): Promise<void> {
+    const activePolyIds = new Set(
+      activePairs.map((p) => p.polymarketContractId),
+    );
+    const activeKalshiIds = new Set(activePairs.map((p) => p.kalshiContractId));
+
+    const allDbPairs = await this.prisma.contractMatch.findMany({
+      where: { operatorApproved: true },
+      select: {
+        polymarketContractId: true,
+        kalshiContractId: true,
+      },
     });
 
-    const configPairKeys = new Set(
-      activePairs.map((p) => `${p.polymarketContractId}:${p.kalshiContractId}`),
-    );
-
-    const inactivePairs = dbPairs.filter(
-      (db) =>
-        !configPairKeys.has(
-          `${db.polymarketContractId}:${db.kalshiContractId}`,
-        ),
+    const inactivePairs = allDbPairs.filter(
+      (dbPair) =>
+        !activePolyIds.has(dbPair.polymarketContractId) ||
+        !activeKalshiIds.has(dbPair.kalshiContractId),
     );
 
     if (inactivePairs.length > 0) {
-      this.logger.log({
-        message: 'Inactive contract matches detected',
+      this.logger.warn({
+        message:
+          'Database contains approved pairs not in current config — may need manual review',
         data: {
           count: inactivePairs.length,
           pairs: inactivePairs.map((p) => ({

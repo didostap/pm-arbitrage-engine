@@ -42,11 +42,13 @@ export class KalshiWebSocketClient {
   private isConnected = false;
   private shouldReconnect = true;
   private commandId = 0;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: KalshiWebSocketConfig) {}
 
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    const connectPromise = new Promise<void>((resolve, reject) => {
       try {
         const wsPath = new URL(this.config.wsUrl).pathname;
         const headers = this.generateAuthHeaders('GET', wsPath);
@@ -68,6 +70,9 @@ export class KalshiWebSocketClient {
             this.sendSubscribe(ticker);
           }
 
+          // Start keepalive ping interval
+          this.startPingInterval();
+
           resolve();
         });
 
@@ -75,8 +80,16 @@ export class KalshiWebSocketClient {
           this.handleMessage(data);
         });
 
+        this.ws.on('pong', () => {
+          if (this.pongTimeout) {
+            clearTimeout(this.pongTimeout);
+            this.pongTimeout = null;
+          }
+        });
+
         this.ws.on('close', (code: number, reason: Buffer) => {
           this.isConnected = false;
+          this.clearPingTimers();
           this.logger.warn({
             message: 'WebSocket disconnected',
             module: 'connector',
@@ -88,6 +101,7 @@ export class KalshiWebSocketClient {
         });
 
         this.ws.on('error', (error: Error) => {
+          this.clearPingTimers();
           this.logger.error({
             message: 'WebSocket error',
             module: 'connector',
@@ -103,10 +117,19 @@ export class KalshiWebSocketClient {
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
+
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('WebSocket connect timeout (10s)'));
+      }, 10_000);
+    });
+
+    return Promise.race([connectPromise, timeoutPromise]);
   }
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.clearPingTimers();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -296,11 +319,56 @@ export class KalshiWebSocketClient {
     }
   }
 
+  private startPingInterval(): void {
+    this.clearPingTimers();
+    this.pingInterval = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      // Clear any existing pong timeout to prevent overlapping timeouts
+      if (this.pongTimeout) {
+        clearTimeout(this.pongTimeout);
+        this.pongTimeout = null;
+      }
+      this.ws.ping();
+      this.pongTimeout = setTimeout(() => {
+        this.logger.warn({
+          message: 'Pong timeout — forcing reconnect',
+          module: 'connector',
+          timestamp: new Date().toISOString(),
+          platformId: PlatformId.KALSHI,
+        });
+        this.ws?.terminate();
+      }, 10_000);
+    }, 30_000);
+  }
+
+  private clearPingTimers(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+  }
+
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
 
-    const { initialDelayMs, maxDelayMs, backoffMultiplier } =
+    const { initialDelayMs, maxDelayMs, backoffMultiplier, maxRetries } =
       RETRY_STRATEGIES.WEBSOCKET_RECONNECT;
+
+    if (this.reconnectAttempt >= maxRetries) {
+      this.logger.error({
+        message: 'Max reconnect attempts reached — giving up',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: { maxRetries, attempts: this.reconnectAttempt },
+      });
+      return;
+    }
+
     const baseDelay = Math.min(
       initialDelayMs * Math.pow(backoffMultiplier, this.reconnectAttempt),
       maxDelayMs,

@@ -3,7 +3,7 @@ import { getCorrelationId } from '../services/correlation-context';
 
 export const loggerConfig: Params = {
   pinoHttp: {
-    level: process.env.NODE_ENV === 'production' ? 'warn' : 'debug',
+    level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
 
     // Auto-inject correlation ID for HTTP-triggered code paths
     // NOTE: customProps only works for pinoHttp middleware (HTTP requests).
