@@ -64,6 +64,16 @@ export class ExecutionQueueService implements IExecutionQueue {
           // - partialFill → commit (money is deployed on one leg)
           // - full failure → release
           if (result.success || result.partialFill) {
+            // Adjust reservation if execution used less capital than reserved (depth-aware sizing)
+            if (
+              result.actualCapitalUsed &&
+              result.actualCapitalUsed.lt(reservation.reservedCapitalUsd)
+            ) {
+              await this.riskManager.adjustReservation(
+                reservation.reservationId,
+                result.actualCapitalUsed,
+              );
+            }
             await this.riskManager.commitReservation(reservation.reservationId);
             return {
               opportunityId,

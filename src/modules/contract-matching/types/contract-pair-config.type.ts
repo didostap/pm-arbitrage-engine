@@ -9,4 +9,5 @@ export interface ContractPairConfig {
   eventDescription: string;
   operatorVerificationTimestamp: Date;
   primaryLeg: 'kalshi' | 'polymarket';
+  matchId?: string;
 }

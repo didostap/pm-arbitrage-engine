@@ -261,4 +261,83 @@ describe('ExecutionQueueService', () => {
       'res-1',
     );
   });
+
+  describe('depth-aware reservation adjustment', () => {
+    it('should call adjustReservation before commitReservation when actualCapitalUsed < reserved', async () => {
+      mockExecutionEngine.execute.mockResolvedValue({
+        success: true,
+        partialFill: false,
+        positionId: 'pos-1',
+        actualCapitalUsed: new FinancialDecimal(150), // Less than reserved 300
+      });
+
+      await service.processOpportunities([
+        makeRankedOpportunity('opp-1', 0.05),
+      ]);
+
+      expect(mockRiskManager.adjustReservation).toHaveBeenCalledWith(
+        'res-1',
+        new FinancialDecimal(150),
+      );
+      expect(mockRiskManager.commitReservation).toHaveBeenCalledWith('res-1');
+
+      // adjustReservation should be called before commitReservation
+      const adjustOrder =
+        mockRiskManager.adjustReservation.mock.invocationCallOrder[0];
+      const commitOrder =
+        mockRiskManager.commitReservation.mock.invocationCallOrder[0];
+      expect(adjustOrder).toBeLessThan(commitOrder!);
+    });
+
+    it('should NOT call adjustReservation when actualCapitalUsed is undefined (full depth)', async () => {
+      mockExecutionEngine.execute.mockResolvedValue({
+        success: true,
+        partialFill: false,
+        positionId: 'pos-1',
+        // No actualCapitalUsed — full depth path
+      });
+
+      await service.processOpportunities([
+        makeRankedOpportunity('opp-1', 0.05),
+      ]);
+
+      expect(mockRiskManager.adjustReservation).not.toHaveBeenCalled();
+      expect(mockRiskManager.commitReservation).toHaveBeenCalledWith('res-1');
+    });
+
+    it('should NOT call adjustReservation when actualCapitalUsed >= reserved', async () => {
+      mockExecutionEngine.execute.mockResolvedValue({
+        success: true,
+        partialFill: false,
+        positionId: 'pos-1',
+        actualCapitalUsed: new FinancialDecimal(300), // Equal to reserved
+      });
+
+      await service.processOpportunities([
+        makeRankedOpportunity('opp-1', 0.05),
+      ]);
+
+      expect(mockRiskManager.adjustReservation).not.toHaveBeenCalled();
+      expect(mockRiskManager.commitReservation).toHaveBeenCalledWith('res-1');
+    });
+
+    it('should release full original amount on failure (capital leak regression)', async () => {
+      // Execution fails (depth cap → then secondary fails)
+      // actualCapitalUsed is undefined on failure path
+      mockExecutionEngine.execute.mockResolvedValue({
+        success: false,
+        partialFill: false,
+        // No actualCapitalUsed — failure path
+      });
+
+      await service.processOpportunities([
+        makeRankedOpportunity('opp-1', 0.05),
+      ]);
+
+      // adjustReservation should NOT be called
+      expect(mockRiskManager.adjustReservation).not.toHaveBeenCalled();
+      // releaseReservation should release full original amount
+      expect(mockRiskManager.releaseReservation).toHaveBeenCalledWith('res-1');
+    });
+  });
 });

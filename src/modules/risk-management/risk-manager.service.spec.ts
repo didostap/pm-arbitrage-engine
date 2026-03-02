@@ -17,6 +17,7 @@ import { EVENT_NAMES } from '../../common/events';
 import { RiskLimitError, RISK_ERROR_CODES } from '../../common/errors';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PlatformId, NormalizedOrderBook } from '../../common/types';
+import type { BudgetReservation } from '../../common/types/risk.type';
 import { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-opportunity.type';
 import { ContractPairConfig } from '../contract-matching/types';
 
@@ -27,6 +28,7 @@ function makePair(overrides?: Partial<ContractPairConfig>): ContractPairConfig {
     eventDescription: 'Test event',
     operatorVerificationTimestamp: new Date(),
     primaryLeg: 'kalshi',
+    matchId: 'match-uuid-1',
     ...overrides,
   };
 }
@@ -1433,6 +1435,95 @@ describe('RiskManagerService', () => {
       ).toBe(true);
       // Trading should still be halted
       expect(service.isTradingHalted()).toBe(true);
+    });
+  });
+
+  describe('adjustReservation', () => {
+    // Directly inject a reservation into the internal Map to avoid
+    // calling reserveBudget (which triggers persistState → Prisma).
+    function seedReservation(
+      id: string,
+      capitalUsd: number,
+    ): BudgetReservation {
+      const reservation: BudgetReservation = {
+        reservationId: id,
+        opportunityId: 'opp-test',
+        reservedPositionSlots: 1,
+        reservedCapitalUsd: new FinancialDecimal(capitalUsd),
+        correlationExposure: new FinancialDecimal(0),
+        createdAt: new Date(),
+      };
+      (service as any).reservations.set(id, reservation);
+      return reservation;
+    }
+
+    it('should reduce reservation capital downward', async () => {
+      seedReservation('res-adj-1', 300);
+      // Stub persistState to avoid Prisma
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+
+      await service.adjustReservation('res-adj-1', new Decimal('150'));
+
+      const map = (service as any).reservations as Map<
+        string,
+        BudgetReservation
+      >;
+      const updated = map.get('res-adj-1')!;
+      expect(new Decimal(updated.reservedCapitalUsd).toNumber()).toBe(150);
+    });
+
+    it('should be a no-op when newCapital >= oldCapital', async () => {
+      seedReservation('res-adj-2', 300);
+      const persistSpy = vi
+        .spyOn(service as any, 'persistState')
+        .mockResolvedValue(undefined);
+
+      await service.adjustReservation('res-adj-2', new Decimal('999999'));
+
+      // Capital should remain unchanged — persistState should NOT be called
+      const map = (service as any).reservations as Map<
+        string,
+        BudgetReservation
+      >;
+      const updated = map.get('res-adj-2')!;
+      expect(new Decimal(updated.reservedCapitalUsd).toNumber()).toBe(300);
+      expect(persistSpy).not.toHaveBeenCalled();
+    });
+
+    it('should throw RiskLimitError when reservation not found', async () => {
+      await expect(
+        service.adjustReservation('nonexistent-id', new Decimal('100')),
+      ).rejects.toThrow('Cannot adjust reservation');
+    });
+
+    it('should persist state after adjustment', async () => {
+      seedReservation('res-adj-3', 300);
+      const persistSpy = vi
+        .spyOn(service as any, 'persistState')
+        .mockResolvedValue(undefined);
+
+      await service.adjustReservation('res-adj-3', new Decimal('50'));
+
+      expect(persistSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should release excess capital back to available pool', async () => {
+      seedReservation('res-adj-4', 300);
+      seedReservation('res-adj-5', 200);
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+
+      // Total reserved = 500. Adjust res-adj-4 down to 100 → total should be 300
+      await service.adjustReservation('res-adj-4', new Decimal('100'));
+
+      const map = (service as any).reservations as Map<
+        string,
+        BudgetReservation
+      >;
+      let total = new Decimal(0);
+      for (const r of map.values()) {
+        total = total.add(new Decimal(r.reservedCapitalUsd));
+      }
+      expect(total.toNumber()).toBe(300);
     });
   });
 });

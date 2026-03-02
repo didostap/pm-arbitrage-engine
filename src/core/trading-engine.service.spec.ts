@@ -296,6 +296,7 @@ describe('TradingEngineService', () => {
           pairConfig: {
             polymarketContractId: 'poly-1',
             kalshiContractId: 'kalshi-1',
+            matchId: 'match-uuid-1',
           },
         },
         netEdge: new FinancialDecimal(0.05),
@@ -322,6 +323,7 @@ describe('TradingEngineService', () => {
           pairConfig: {
             polymarketContractId: 'poly-1',
             kalshiContractId: 'kalshi-1',
+            matchId: 'match-uuid-1',
           },
         },
         netEdge: new FinancialDecimal(0.05),

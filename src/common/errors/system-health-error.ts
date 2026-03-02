@@ -28,4 +28,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   STATE_CORRUPTION: 4004,
   /** Reconciliation discrepancy found — critical */
   RECONCILIATION_DISCREPANCY: 4005,
+  /** Invalid configuration at startup — error */
+  INVALID_CONFIGURATION: 4006,
 } as const;

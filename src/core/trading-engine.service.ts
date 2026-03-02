@@ -177,6 +177,18 @@ export class TradingEngineService {
           });
 
           if (decision.approved) {
+            const { matchId } = opportunity.dislocation.pairConfig;
+            if (!matchId) {
+              this.logger.warn({
+                message:
+                  'Skipping approved opportunity — matchId not populated on pair config',
+                correlationId: getCorrelationId(),
+                data: {
+                  pair: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}`,
+                },
+              });
+              continue;
+            }
             approvedOpportunities.push({
               opportunity,
               netEdge: opportunity.netEdge,
@@ -185,7 +197,7 @@ export class TradingEngineService {
                 recommendedPositionSizeUsd: new FinancialDecimal(
                   decision.maxPositionSizeUsd,
                 ),
-                pairId: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}`,
+                pairId: matchId,
               },
             });
           }
