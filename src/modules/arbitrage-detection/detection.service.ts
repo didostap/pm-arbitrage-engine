@@ -126,15 +126,19 @@ export class DetectionService {
         continue;
       }
 
+      // Buy leg uses best ask (price you pay to buy YES)
       const polyBestAsk = polymarketOrderBook.asks[0]!;
       const kalshiBestAsk = kalshiOrderBook.asks[0]!;
+      // Sell leg uses best bid (price you receive when selling YES)
+      const polyBestBid = polymarketOrderBook.bids[0]!;
+      const kalshiBestBid = kalshiOrderBook.bids[0]!;
 
       pairsEvaluated++;
       const now = new Date();
 
       // AC4: Scenario A — Buy Polymarket, Sell Kalshi
       const polyBuyPrice = new FinancialDecimal(polyBestAsk.price);
-      const kalshiSellPrice = new FinancialDecimal(kalshiBestAsk.price);
+      const kalshiSellPrice = new FinancialDecimal(kalshiBestBid.price);
       const grossEdgeA = FinancialMath.calculateGrossEdge(
         polyBuyPrice,
         kalshiSellPrice,
@@ -162,7 +166,7 @@ export class DetectionService {
 
       // AC4: Scenario B — Buy Kalshi, Sell Polymarket
       const kalshiBuyPrice = new FinancialDecimal(kalshiBestAsk.price);
-      const polySellPrice = new FinancialDecimal(polyBestAsk.price);
+      const polySellPrice = new FinancialDecimal(polyBestBid.price);
       const grossEdgeB = FinancialMath.calculateGrossEdge(
         kalshiBuyPrice,
         polySellPrice,

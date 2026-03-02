@@ -68,9 +68,9 @@ describe('formatOpportunityIdentified', () => {
   it('should produce correct HTML structure', () => {
     const result = formatOpportunityIdentified({
       opportunity: {
-        netEdge: '0.0125',
+        netEdge: 0.0125,
         pairId: 'pair-1',
-        positionSizeUsd: '300',
+        positionSizeUsd: 300,
       },
       timestamp: new Date('2024-01-15T10:30:00Z'),
       correlationId: 'corr-123',

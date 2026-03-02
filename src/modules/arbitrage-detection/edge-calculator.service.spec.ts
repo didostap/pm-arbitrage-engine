@@ -281,7 +281,10 @@ describe('EdgeCalculatorService', () => {
       EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
       expect.objectContaining({
         opportunity: expect.objectContaining({
-          netEdge: expect.any(Decimal),
+          netEdge: expect.any(Number),
+          grossEdge: expect.any(Number),
+          buyPrice: expect.any(Number),
+          sellPrice: expect.any(Number),
         }),
       }),
     );
