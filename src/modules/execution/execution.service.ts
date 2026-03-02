@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import type {
@@ -16,6 +17,10 @@ import {
   ExecutionError,
   EXECUTION_ERROR_CODES,
 } from '../../common/errors/execution-error';
+import {
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from '../../common/errors/system-health-error';
 import {
   OrderFilledEvent,
   ExecutionFailedEvent,
@@ -40,6 +45,8 @@ import type { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-
 @Injectable()
 export class ExecutionService implements IExecutionEngine {
   private readonly logger = new Logger(ExecutionService.name);
+  private readonly minFillRatio: number;
+  private readonly minEdgeThreshold: Decimal;
 
   constructor(
     @Inject(KALSHI_CONNECTOR_TOKEN)
@@ -50,7 +57,47 @@ export class ExecutionService implements IExecutionEngine {
     private readonly orderRepository: OrderRepository,
     private readonly positionRepository: PositionRepository,
     private readonly complianceValidator: ComplianceValidatorService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.minFillRatio = Number(
+      this.configService.get<string>('EXECUTION_MIN_FILL_RATIO', '0.25'),
+    );
+    if (
+      isNaN(this.minFillRatio) ||
+      this.minFillRatio <= 0 ||
+      this.minFillRatio > 1
+    ) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_CONFIGURATION,
+        'Invalid EXECUTION_MIN_FILL_RATIO: must be >0 and ≤1',
+        'error',
+        'execution',
+      );
+    }
+
+    const edgeThresholdRaw = this.configService.get<string>(
+      'DETECTION_MIN_EDGE_THRESHOLD',
+      '0.008',
+    );
+    try {
+      this.minEdgeThreshold = new Decimal(edgeThresholdRaw);
+    } catch {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_CONFIGURATION,
+        `Invalid DETECTION_MIN_EDGE_THRESHOLD: '${edgeThresholdRaw}' is not a valid number`,
+        'error',
+        'execution',
+      );
+    }
+    if (this.minEdgeThreshold.lte(0)) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_CONFIGURATION,
+        'Invalid DETECTION_MIN_EDGE_THRESHOLD: must be >0',
+        'error',
+        'execution',
+      );
+    }
+  }
 
   async execute(
     opportunity: RankedOpportunity,
@@ -152,29 +199,46 @@ export class ExecutionService implements IExecutionEngine {
     const secondaryTargetPrice =
       secondarySide === 'buy' ? dislocation.buyPrice : dislocation.sellPrice;
 
-    const targetSize = new Decimal(reservation.reservedCapitalUsd)
+    // === DEPTH-AWARE SIZING — PRIMARY LEG ===
+    const idealSize = new Decimal(reservation.reservedCapitalUsd)
       .div(targetPrice)
       .floor()
       .toNumber();
 
-    // Step 1: Verify depth on primary platform
-    const primaryDepthOk = await this.verifyDepth(
-      primaryPlatform,
+    // Guard: reject if ideal size rounds to zero (extreme price or tiny reservation)
+    if (idealSize <= 0) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+          `Ideal position size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, targetPrice=${targetPrice.toString()})`,
+          'warning',
+        ),
+      };
+    }
+
+    const primaryAvailableDepth = await this.getAvailableDepth(
       primaryConnector,
       primaryContractId,
       primarySide,
       targetPrice.toNumber(),
-      targetSize,
+      primaryPlatform,
     );
 
-    if (!primaryDepthOk) {
+    const primaryMinFillSize = Math.ceil(idealSize * this.minFillRatio);
+    const targetSize = Math.min(idealSize, primaryAvailableDepth);
+
+    if (targetSize < primaryMinFillSize) {
       this.logger.warn({
-        message: 'Pre-primary depth verification failed',
+        message: 'Depth below minimum fill threshold',
         module: 'execution',
         data: {
           pairId,
+          idealSize,
+          availableDepth: primaryAvailableDepth,
+          minFillSize: primaryMinFillSize,
           platform: primaryPlatform,
-          contractId: primaryContractId,
         },
       });
       const error = new ExecutionError(
@@ -195,6 +259,22 @@ export class ExecutionService implements IExecutionEngine {
         ),
       );
       return { success: false, partialFill: false, error };
+    }
+
+    // Track actual capital used (DO NOT mutate reservation)
+    const primaryCapitalUsed = new Decimal(targetSize).mul(targetPrice);
+
+    if (targetSize < idealSize) {
+      this.logger.log({
+        message: 'Depth-aware size cap applied',
+        module: 'execution',
+        data: {
+          idealSize,
+          cappedSize: targetSize,
+          availableDepth: primaryAvailableDepth,
+          platform: primaryPlatform,
+        },
+      });
     }
 
     // Step 2: Submit primary leg
@@ -246,22 +326,50 @@ export class ExecutionService implements IExecutionEngine {
       isPaper,
     });
 
-    // Step 4: Verify depth on secondary platform
-    const secondarySize = new Decimal(reservation.reservedCapitalUsd)
+    // === DEPTH-AWARE SIZING — SECONDARY LEG ===
+    // Secondary ideal size computed from SECONDARY price (NOT reusing primary's idealSize)
+    const secondaryIdealSize = new Decimal(reservation.reservedCapitalUsd)
       .div(secondaryTargetPrice)
       .floor()
       .toNumber();
 
-    const secondaryDepthOk = await this.verifyDepth(
-      secondaryPlatform,
+    // Guard: reject if secondary ideal size rounds to zero
+    if (secondaryIdealSize <= 0) {
+      return this.handleSingleLeg(
+        pairId,
+        primaryLeg,
+        primaryOrderRecord.orderId,
+        primaryOrder,
+        primarySide,
+        secondarySide,
+        targetPrice,
+        secondaryTargetPrice,
+        targetSize,
+        0,
+        enriched,
+        opportunity,
+        reservation,
+        EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+        `Secondary ideal size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, secondaryTargetPrice=${secondaryTargetPrice.toString()})`,
+        isPaper,
+        mixedMode,
+      );
+    }
+
+    const secondaryAvailableDepth = await this.getAvailableDepth(
       secondaryConnector,
       secondaryContractId,
       secondarySide,
       secondaryTargetPrice.toNumber(),
-      secondarySize,
+      secondaryPlatform,
     );
 
-    if (!secondaryDepthOk) {
+    const secondaryMinFillSize = Math.ceil(
+      secondaryIdealSize * this.minFillRatio,
+    );
+    const secondarySize = Math.min(secondaryIdealSize, secondaryAvailableDepth);
+
+    if (secondarySize < secondaryMinFillSize) {
       // Single-leg exposure — primary filled but secondary depth insufficient
       return this.handleSingleLeg(
         pairId,
@@ -282,6 +390,111 @@ export class ExecutionService implements IExecutionEngine {
         isPaper,
         mixedMode,
       );
+    }
+
+    // === EDGE RE-VALIDATION AFTER DEPTH CAPPING ===
+    const sizeWasReduced =
+      targetSize < idealSize || secondarySize < secondaryIdealSize;
+
+    if (sizeWasReduced) {
+      // Null guard: fee breakdown must be populated by detection pipeline
+      if (!enriched.feeBreakdown?.gasFraction) {
+        this.logger.error({
+          message:
+            'Missing gasFraction in enriched opportunity — rejecting trade conservatively',
+          module: 'execution',
+          data: { pairId },
+        });
+        return this.handleSingleLeg(
+          pairId,
+          primaryLeg,
+          primaryOrderRecord.orderId,
+          primaryOrder,
+          primarySide,
+          secondarySide,
+          targetPrice,
+          secondaryTargetPrice,
+          targetSize,
+          secondarySize,
+          enriched,
+          opportunity,
+          reservation,
+          EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
+          'Fee breakdown missing for edge re-validation',
+          isPaper,
+          mixedMode,
+        );
+      }
+
+      // Use smaller leg for conservative gas amortization
+      const smallerLegSize = Math.min(targetSize, secondarySize);
+      const conservativePositionSizeUsd = new Decimal(smallerLegSize).mul(
+        targetPrice.plus(secondaryTargetPrice),
+      );
+
+      // Recover absolute gas estimate: gasFraction = gasEstimateUsd / detectionPositionSizeUsd
+      const gasEstimateUsd = enriched.feeBreakdown.gasFraction.mul(
+        new Decimal(reservation.reservedCapitalUsd),
+      );
+
+      const newGasFraction = gasEstimateUsd.div(conservativePositionSizeUsd);
+      const adjustedNetEdge = enriched.netEdge
+        .plus(enriched.feeBreakdown.gasFraction) // remove old gas fraction
+        .minus(newGasFraction); // apply new gas fraction
+
+      if (adjustedNetEdge.lt(this.minEdgeThreshold)) {
+        this.logger.warn({
+          message: 'Edge eroded below threshold after depth-aware sizing',
+          module: 'execution',
+          data: {
+            pairId,
+            originalNetEdge: enriched.netEdge.toString(),
+            adjustedNetEdge: adjustedNetEdge.toString(),
+            threshold: this.minEdgeThreshold.toString(),
+            idealSize,
+            secondaryIdealSize,
+            targetSize,
+            secondarySize,
+            smallerLegSize,
+            originalGasFraction: enriched.feeBreakdown.gasFraction.toString(),
+            newGasFraction: newGasFraction.toString(),
+          },
+        });
+
+        // Primary already submitted — this becomes a single-leg situation
+        return this.handleSingleLeg(
+          pairId,
+          primaryLeg,
+          primaryOrderRecord.orderId,
+          primaryOrder,
+          primarySide,
+          secondarySide,
+          targetPrice,
+          secondaryTargetPrice,
+          targetSize,
+          secondarySize,
+          enriched,
+          opportunity,
+          reservation,
+          EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
+          'Edge eroded below threshold after depth-aware sizing',
+          isPaper,
+          mixedMode,
+        );
+      }
+    }
+
+    if (secondarySize < secondaryIdealSize) {
+      this.logger.log({
+        message: 'Depth-aware size cap applied (secondary)',
+        module: 'execution',
+        data: {
+          idealSize: secondaryIdealSize,
+          cappedSize: secondarySize,
+          availableDepth: secondaryAvailableDepth,
+          platform: secondaryPlatform,
+        },
+      });
     }
 
     // Step 5: Submit secondary leg
@@ -464,23 +677,29 @@ export class ExecutionService implements IExecutionEngine {
       },
     });
 
+    // Calculate actual capital used across both legs
+    const secondaryCapitalUsed = new Decimal(secondarySize).mul(
+      secondaryTargetPrice,
+    );
+    const actualCapitalUsed = primaryCapitalUsed.plus(secondaryCapitalUsed);
+
     return {
       success: true,
       partialFill: false,
       positionId: position.positionId,
       primaryOrder,
       secondaryOrder,
+      actualCapitalUsed,
     };
   }
 
-  private async verifyDepth(
-    platformId: PlatformId,
+  private async getAvailableDepth(
     connector: IPlatformConnector,
     contractId: string,
     side: 'buy' | 'sell',
     targetPrice: number,
-    targetSize: number,
-  ): Promise<boolean> {
+    platformId: PlatformId,
+  ): Promise<number> {
     try {
       const book = await connector.getOrderBook(contractId);
       const levels: PriceLevel[] = side === 'buy' ? book.asks : book.bids;
@@ -496,15 +715,14 @@ export class ExecutionService implements IExecutionEngine {
         }
       }
 
-      return availableQty.gte(targetSize);
+      return availableQty.toNumber();
     } catch (error) {
       this.logger.warn({
-        message: 'Depth verification failed',
+        message: 'Depth query failed',
         module: 'execution',
         platform: platformId,
         contractId,
         side,
-        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       this.eventEmitter.emit(
@@ -517,7 +735,7 @@ export class ExecutionService implements IExecutionEngine {
           error instanceof Error ? error.message : String(error),
         ),
       );
-      return false;
+      return 0;
     }
   }
 
@@ -726,6 +944,7 @@ export class ExecutionService implements IExecutionEngine {
       {
         positionId: position.positionId,
         pairId,
+        reasonCode: errorCode,
         pnlScenarios,
         recommendedActions,
       },

@@ -839,6 +839,40 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState();
   }
 
+  async adjustReservation(
+    reservationId: string,
+    newCapitalUsd: Decimal,
+  ): Promise<void> {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) {
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        `Cannot adjust reservation: ${reservationId} not found`,
+        'error',
+        'budget_reservation',
+        0,
+        0,
+      );
+    }
+    const oldCapital = new FinancialDecimal(reservation.reservedCapitalUsd);
+    const newCapital = new FinancialDecimal(newCapitalUsd);
+    if (newCapital.gte(oldCapital)) return; // No-op if new >= old
+
+    reservation.reservedCapitalUsd = newCapital;
+
+    this.logger.log({
+      message: 'Reservation adjusted — excess capital released',
+      data: {
+        reservationId,
+        oldCapitalUsd: oldCapital.toString(),
+        newCapitalUsd: newCapital.toString(),
+        releasedUsd: oldCapital.minus(newCapital).toString(),
+      },
+    });
+
+    await this.persistState();
+  }
+
   async closePosition(
     capitalReturned: unknown,
     pnlDelta: unknown,

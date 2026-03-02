@@ -65,6 +65,14 @@ export interface IRiskManager {
    */
   releaseReservation(reservationId: string): Promise<void>;
   /**
+   * Adjust a reservation's capital downward (depth-aware sizing).
+   * No-op if newCapitalUsd >= current reserved amount.
+   */
+  adjustReservation(
+    reservationId: string,
+    newCapitalUsd: Decimal,
+  ): Promise<void>;
+  /**
    * Close a committed position — return capital to pool, decrement position count.
    * Called when a position transitions to CLOSED.
    * @param capitalReturned - Decimal amount of capital being returned to the pool

@@ -41,6 +41,7 @@ function makePair(overrides?: Partial<ContractPairConfig>): ContractPairConfig {
     eventDescription: 'Will event X happen?',
     operatorVerificationTimestamp: new Date(),
     primaryLeg: 'kalshi',
+    matchId: 'match-uuid-1',
     ...overrides,
   };
 }

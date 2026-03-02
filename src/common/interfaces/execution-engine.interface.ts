@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { BudgetReservation, RankedOpportunity } from '../types/risk.type.js';
 import { ExecutionError } from '../errors/execution-error.js';
 import { OrderResult } from '../types/platform.type.js';
@@ -9,6 +10,7 @@ export interface ExecutionResult {
   primaryOrder?: OrderResult;
   secondaryOrder?: OrderResult;
   error?: ExecutionError;
+  actualCapitalUsed?: Decimal;
 }
 
 export interface IExecutionEngine {

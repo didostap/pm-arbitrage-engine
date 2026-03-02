@@ -49,11 +49,12 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
           existing.kalshiDescription === description &&
           existing.operatorApprovalTimestamp?.getTime() === timestamp?.getTime()
         ) {
+          pair.matchId = existing.matchId;
           unchanged++;
           continue;
         }
 
-        await this.prisma.contractMatch.upsert({
+        const result = await this.prisma.contractMatch.upsert({
           where: {
             polymarketContractId_kalshiContractId: {
               polymarketContractId: pair.polymarketContractId,
@@ -75,6 +76,8 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
             operatorApprovalTimestamp: timestamp,
           },
         });
+
+        pair.matchId = result.matchId;
 
         if (existing) {
           updated++;

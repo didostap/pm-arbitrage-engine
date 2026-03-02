@@ -34,7 +34,7 @@ describe('ContractMatchSyncService', () => {
     prisma = {
       contractMatch: {
         findUnique: vi.fn().mockResolvedValue(null),
-        upsert: vi.fn().mockResolvedValue({}),
+        upsert: vi.fn().mockResolvedValue({ matchId: 'uuid-from-upsert' }),
         findMany: vi.fn().mockResolvedValue([]),
       },
     };
@@ -87,10 +87,41 @@ describe('ContractMatchSyncService', () => {
     );
   });
 
+  it('should populate matchId on pair config after upsert', async () => {
+    const pairs = [makePair()];
+    pairLoader.getActivePairs.mockReturnValue(pairs);
+    prisma.contractMatch.upsert.mockResolvedValue({
+      matchId: 'uuid-new-pair',
+    });
+
+    await service.syncPairsToDatabase();
+
+    expect(pairs[0].matchId).toBe('uuid-new-pair');
+  });
+
+  it('should populate matchId on unchanged pairs from existing record', async () => {
+    const ts = new Date('2026-02-15T10:30:00Z');
+    const pairs = [makePair({ operatorVerificationTimestamp: ts })];
+    pairLoader.getActivePairs.mockReturnValue(pairs);
+    prisma.contractMatch.findUnique.mockResolvedValue({
+      matchId: 'uuid-existing',
+      operatorApproved: true,
+      polymarketDescription: 'Will event A happen?',
+      kalshiDescription: 'Will event A happen?',
+      operatorApprovalTimestamp: ts,
+    });
+
+    await service.syncPairsToDatabase();
+
+    expect(prisma.contractMatch.upsert).not.toHaveBeenCalled();
+    expect(pairs[0].matchId).toBe('uuid-existing');
+  });
+
   it('should upsert existing pairs (updates operator_approved and timestamps)', async () => {
     const pairs = [makePair()];
     pairLoader.getActivePairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockResolvedValue({
+      matchId: 'uuid-existing',
       operatorApproved: false,
       polymarketDescription: 'old',
       kalshiDescription: 'old',
@@ -231,6 +262,7 @@ describe('ContractMatchSyncService', () => {
     // First pair exists (updated), second is new (inserted)
     prisma.contractMatch.findUnique
       .mockResolvedValueOnce({
+        matchId: 'uuid-1',
         operatorApproved: false,
         polymarketDescription: 'old',
         kalshiDescription: 'old',
