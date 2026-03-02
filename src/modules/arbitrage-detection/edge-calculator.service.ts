@@ -219,9 +219,24 @@ export class EdgeCalculatorService implements OnModuleInit {
 
     this.eventEmitter.emit(
       EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
-      new OpportunityIdentifiedEvent(
-        enriched as unknown as Record<string, unknown>,
-      ),
+      new OpportunityIdentifiedEvent({
+        netEdge: netEdge.toNumber(),
+        grossEdge: dislocation.grossEdge.toNumber(),
+        buyPlatformId: dislocation.buyPlatformId,
+        sellPlatformId: dislocation.sellPlatformId,
+        buyPrice: dislocation.buyPrice.toNumber(),
+        sellPrice: dislocation.sellPrice.toNumber(),
+        pairId: dislocation.pairConfig.eventDescription,
+        positionSizeUsd: this.positionSizeUsd.toNumber(),
+        feeBreakdown: {
+          buyFeeCost: feeBreakdown.buyFeeCost.toNumber(),
+          sellFeeCost: feeBreakdown.sellFeeCost.toNumber(),
+          gasFraction: feeBreakdown.gasFraction.toNumber(),
+          totalCosts: feeBreakdown.totalCosts.toNumber(),
+        },
+        liquidityDepth,
+        enrichedAt: enriched.enrichedAt,
+      }),
     );
   }
 

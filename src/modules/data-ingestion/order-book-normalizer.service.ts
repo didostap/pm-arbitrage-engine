@@ -138,6 +138,12 @@ export class OrderBookNormalizerService {
       }
     }
 
+    // 5. Sort bids descending (best bid first), asks ascending (best ask first)
+    // Polymarket CLOB API returns asks descending — must sort to match convention
+    // (WebSocket client already sorts: polymarket-websocket.client.ts:217-219)
+    bids.sort((a, b) => b.price - a.price);
+    asks.sort((a, b) => a.price - b.price);
+
     // Check for crossed market (best bid > best ask)
     const bestBid = bids[0];
     const bestAsk = asks[0];

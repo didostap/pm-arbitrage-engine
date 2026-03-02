@@ -704,5 +704,38 @@ describe('OrderBookNormalizerService', () => {
       expect(normalized?.bids).toHaveLength(1);
       expect(normalized?.asks).toEqual([]);
     });
+
+    it('should sort asks ascending and bids descending (best price at index 0)', () => {
+      const polymarketBook: PolymarketOrderBookMessage = {
+        asset_id: '0x123abc',
+        market: '0xmarket',
+        timestamp: Date.now(),
+        bids: [
+          { price: '0.10', size: '500' },
+          { price: '0.14', size: '300' },
+          { price: '0.12', size: '200' },
+        ],
+        asks: [
+          { price: '0.99', size: '100' },
+          { price: '0.50', size: '400' },
+          { price: '0.17', size: '600' },
+        ],
+        hash: 'abc123',
+      };
+
+      const normalized = service.normalizePolymarket(polymarketBook);
+
+      expect(normalized).not.toBeNull();
+
+      // Asks should be sorted ascending (best/lowest ask first)
+      expect(normalized?.asks[0]!.price).toBe(0.17);
+      expect(normalized?.asks[1]!.price).toBe(0.5);
+      expect(normalized?.asks[2]!.price).toBe(0.99);
+
+      // Bids should be sorted descending (best/highest bid first)
+      expect(normalized?.bids[0]!.price).toBe(0.14);
+      expect(normalized?.bids[1]!.price).toBe(0.12);
+      expect(normalized?.bids[2]!.price).toBe(0.1);
+    });
   });
 });
