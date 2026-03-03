@@ -110,6 +110,9 @@ describe('RiskManagerService', () => {
     riskOverrideLog: {
       create: ReturnType<typeof vi.fn>;
     };
+    openPosition: {
+      findMany: ReturnType<typeof vi.fn>;
+    };
   };
 
   const defaultConfig: Record<string, number> = {
@@ -141,6 +144,9 @@ describe('RiskManagerService', () => {
       },
       riskOverrideLog: {
         create: vi.fn().mockResolvedValue({}),
+      },
+      openPosition: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
 
@@ -873,6 +879,7 @@ describe('RiskManagerService', () => {
       opportunityId: 'opp-1',
       recommendedPositionSizeUsd: new FinancialDecimal(300),
       pairId: 'pair-1',
+      isPaper: false,
       ...overrides,
     });
 
@@ -1448,6 +1455,8 @@ describe('RiskManagerService', () => {
       const reservation: BudgetReservation = {
         reservationId: id,
         opportunityId: 'opp-test',
+        pairId: 'pair-test',
+        isPaper: false,
         reservedPositionSlots: 1,
         reservedCapitalUsd: new FinancialDecimal(capitalUsd),
         correlationExposure: new FinancialDecimal(0),
@@ -1524,6 +1533,218 @@ describe('RiskManagerService', () => {
         total = total.add(new Decimal(r.reservedCapitalUsd));
       }
       expect(total.toNumber()).toBe(300);
+    });
+  });
+
+  describe('paper mode duplicate opportunity prevention', () => {
+    const makePaperRequest = (overrides?: Record<string, unknown>) => ({
+      opportunityId: 'opp-paper-1',
+      recommendedPositionSizeUsd: new FinancialDecimal(300),
+      pairId: 'pair-paper-1',
+      isPaper: true,
+      ...overrides,
+    });
+
+    it('should reject duplicate pair in paper mode', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+
+      await expect(
+        service.reserveBudget(
+          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+        ),
+      ).rejects.toThrow(/paper position already open or reserved for pair/);
+    });
+
+    it('should allow after release in paper mode', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      const reservation = await service.reserveBudget(makePaperRequest());
+
+      await service.releaseReservation(reservation.reservationId);
+
+      const second = await service.reserveBudget(
+        makePaperRequest({ opportunityId: 'opp-paper-2' }),
+      );
+      expect(second).toBeDefined();
+    });
+
+    it('should allow after close in paper mode', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      const reservation = await service.reserveBudget(makePaperRequest());
+      await service.commitReservation(reservation.reservationId);
+      await service.closePosition(
+        new FinancialDecimal(300),
+        new FinancialDecimal(0),
+        'pair-paper-1',
+      );
+
+      const second = await service.reserveBudget(
+        makePaperRequest({ opportunityId: 'opp-paper-2' }),
+      );
+      expect(second).toBeDefined();
+    });
+
+    it('should not apply dedup in live mode', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      const liveRequest = {
+        opportunityId: 'opp-live-1',
+        recommendedPositionSizeUsd: new FinancialDecimal(300),
+        pairId: 'pair-live-1',
+        isPaper: false,
+      };
+
+      await service.reserveBudget(liveRequest);
+      const second = await service.reserveBudget({
+        ...liveRequest,
+        opportunityId: 'opp-live-2',
+      });
+      expect(second).toBeDefined();
+    });
+
+    it('should treat mixed mode as paper (isPaper: true)', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+
+      await expect(
+        service.reserveBudget(
+          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+        ),
+      ).rejects.toThrow(/paper position already open or reserved for pair/);
+    });
+
+    it('should allow different pairs in paper mode', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+
+      const second = await service.reserveBudget(
+        makePaperRequest({
+          opportunityId: 'opp-paper-2',
+          pairId: 'pair-paper-2',
+        }),
+      );
+      expect(second).toBeDefined();
+    });
+
+    it('should restore paper active pairs from DB on startup', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValueOnce([
+        { pairId: 'pair-restored-1' },
+        { pairId: 'pair-restored-2' },
+      ]);
+
+      await (service as any).initializeStateFromDb();
+
+      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      expect(paperSet.has('pair-restored-1')).toBe(true);
+      expect(paperSet.has('pair-restored-2')).toBe(true);
+    });
+
+    it('should block reserveBudget for restored paper pairs from DB', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValueOnce([
+        { pairId: 'pair-restored-1' },
+      ]);
+
+      await (service as any).initializeStateFromDb();
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+
+      await expect(
+        service.reserveBudget(
+          makePaperRequest({
+            pairId: 'pair-restored-1',
+            opportunityId: 'opp-after-restart',
+          }),
+        ),
+      ).rejects.toThrow(/paper position already open or reserved for pair/);
+
+      // Different pair should still succeed
+      const allowed = await service.reserveBudget(
+        makePaperRequest({
+          pairId: 'pair-not-restored',
+          opportunityId: 'opp-new',
+        }),
+      );
+      expect(allowed).toBeDefined();
+    });
+
+    it('should not restore closed paper positions on startup', async () => {
+      // findMany for open paper positions returns empty (all closed)
+      mockPrisma.openPosition.findMany.mockResolvedValueOnce([]);
+
+      await (service as any).initializeStateFromDb();
+
+      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      expect(paperSet.size).toBe(0);
+    });
+
+    it('should warn when closePosition called without pairId while paper pairs tracked', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+
+      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      await service.closePosition(
+        new FinancialDecimal(300),
+        new FinancialDecimal(0),
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'closePosition called without pairId',
+          ),
+        }),
+      );
+
+      // Set entry should NOT be removed
+      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      expect(paperSet.has('pair-paper-1')).toBe(true);
+    });
+
+    it('should clean up Set when closePosition called with pairId', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+      await service.commitReservation(
+        ((service as any).reservations as Map<string, BudgetReservation>)
+          .values()
+          .next().value!.reservationId,
+      );
+
+      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      await service.closePosition(
+        new FinancialDecimal(300),
+        new FinancialDecimal(0),
+        'pair-paper-1',
+      );
+
+      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      expect(paperSet.has('pair-paper-1')).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'closePosition called without pairId',
+          ),
+        }),
+      );
+    });
+
+    it('should log warning when blocking duplicate paper pair', async () => {
+      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await service.reserveBudget(makePaperRequest());
+
+      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      await expect(
+        service.reserveBudget(
+          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+        ),
+      ).rejects.toThrow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Paper mode duplicate opportunity blocked',
+          data: expect.objectContaining({
+            pairId: 'pair-paper-1',
+            opportunityId: 'opp-paper-2',
+          }),
+        }),
+      );
     });
   });
 });

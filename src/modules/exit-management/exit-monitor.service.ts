@@ -440,7 +440,11 @@ export class ExitMonitorService {
       .mul(kalshiFillSize)
       .plus(polymarketEntryPrice.mul(polymarketFillSize));
     const capitalReturned = totalEntryCapital.plus(realizedPnl);
-    await this.riskManager.closePosition(capitalReturned, realizedPnl);
+    await this.riskManager.closePosition(
+      capitalReturned,
+      realizedPnl,
+      position.pairId,
+    );
 
     // Determine which order is kalshi and which is polymarket
     const kalshiCloseOrderId = isPrimaryKalshi

@@ -652,6 +652,7 @@ describe('StartupReconciliationService', () => {
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),
         new Decimal(0),
+        'pair-1',
       );
     });
 

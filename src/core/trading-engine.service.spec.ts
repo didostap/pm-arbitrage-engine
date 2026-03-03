@@ -357,6 +357,137 @@ describe('TradingEngineService', () => {
     });
   });
 
+  describe('isPaper flag in reservation request', () => {
+    const mockOpportunity = {
+      dislocation: {
+        pairConfig: {
+          polymarketContractId: 'poly-1',
+          kalshiContractId: 'kalshi-1',
+          matchId: 'match-uuid-1',
+        },
+      },
+      netEdge: new FinancialDecimal(0.05),
+    };
+
+    const setupSingleOpportunity = () => {
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpportunity],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+    };
+
+    it('should set isPaper true when both connectors are in paper mode', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TradingEngineService,
+          { provide: DataIngestionService, useValue: mockDataIngestionService },
+          { provide: DetectionService, useValue: mockDetectionService },
+          { provide: EdgeCalculatorService, useValue: mockEdgeCalculator },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          { provide: 'IRiskManager', useValue: mockRiskManager },
+          { provide: EXECUTION_QUEUE_TOKEN, useValue: mockExecutionQueue },
+          {
+            provide: KALSHI_CONNECTOR_TOKEN,
+            useValue: createMockPlatformConnector(PlatformId.KALSHI, {
+              getHealth: vi.fn().mockReturnValue({
+                platformId: PlatformId.KALSHI,
+                status: 'healthy',
+                lastHeartbeat: new Date(),
+                latencyMs: 50,
+                mode: 'paper',
+              }),
+            }),
+          },
+          {
+            provide: POLYMARKET_CONNECTOR_TOKEN,
+            useValue: createMockPlatformConnector(PlatformId.POLYMARKET, {
+              getHealth: vi.fn().mockReturnValue({
+                platformId: PlatformId.POLYMARKET,
+                status: 'healthy',
+                lastHeartbeat: new Date(),
+                latencyMs: 50,
+                mode: 'paper',
+              }),
+            }),
+          },
+        ],
+      }).compile();
+
+      const svc = module.get<TradingEngineService>(TradingEngineService);
+      setupSingleOpportunity();
+      await svc.executeCycle();
+
+      const passedOpps = mockExecutionQueue.processOpportunities.mock
+        .calls[0]?.[0] as Array<{ reservationRequest: { isPaper: boolean } }>;
+      expect(passedOpps).toHaveLength(1);
+      expect(passedOpps[0]?.reservationRequest.isPaper).toBe(true);
+    });
+
+    it('should set isPaper false when both connectors are in live mode', async () => {
+      setupSingleOpportunity();
+      await service.executeCycle();
+
+      const passedOpps = mockExecutionQueue.processOpportunities.mock
+        .calls[0]?.[0] as Array<{ reservationRequest: { isPaper: boolean } }>;
+      expect(passedOpps).toHaveLength(1);
+      expect(passedOpps[0]?.reservationRequest.isPaper).toBe(false);
+    });
+
+    it('should set isPaper true in mixed mode (one paper, one live)', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TradingEngineService,
+          { provide: DataIngestionService, useValue: mockDataIngestionService },
+          { provide: DetectionService, useValue: mockDetectionService },
+          { provide: EdgeCalculatorService, useValue: mockEdgeCalculator },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          { provide: 'IRiskManager', useValue: mockRiskManager },
+          { provide: EXECUTION_QUEUE_TOKEN, useValue: mockExecutionQueue },
+          {
+            provide: KALSHI_CONNECTOR_TOKEN,
+            useValue: createMockPlatformConnector(PlatformId.KALSHI, {
+              getHealth: vi.fn().mockReturnValue({
+                platformId: PlatformId.KALSHI,
+                status: 'healthy',
+                lastHeartbeat: new Date(),
+                latencyMs: 50,
+                mode: 'paper',
+              }),
+            }),
+          },
+          {
+            provide: POLYMARKET_CONNECTOR_TOKEN,
+            useValue: createMockPlatformConnector(PlatformId.POLYMARKET, {
+              getHealth: vi.fn().mockReturnValue({
+                platformId: PlatformId.POLYMARKET,
+                status: 'healthy',
+                lastHeartbeat: new Date(),
+                latencyMs: 50,
+                mode: 'live',
+              }),
+            }),
+          },
+        ],
+      }).compile();
+
+      const svc = module.get<TradingEngineService>(TradingEngineService);
+      setupSingleOpportunity();
+      await svc.executeCycle();
+
+      const passedOpps = mockExecutionQueue.processOpportunities.mock
+        .calls[0]?.[0] as Array<{ reservationRequest: { isPaper: boolean } }>;
+      expect(passedOpps).toHaveLength(1);
+      expect(passedOpps[0]?.reservationRequest.isPaper).toBe(true);
+    });
+  });
+
   describe('isCycleInProgress', () => {
     it('should return false when no cycles running', () => {
       expect(service.isCycleInProgress()).toBe(false);

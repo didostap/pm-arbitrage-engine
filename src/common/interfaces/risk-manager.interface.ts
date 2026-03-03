@@ -77,6 +77,11 @@ export interface IRiskManager {
    * Called when a position transitions to CLOSED.
    * @param capitalReturned - Decimal amount of capital being returned to the pool
    * @param pnlDelta - Realized P&L (positive = profit, negative = loss)
+   * @param pairId - Optional pair ID to remove from paper active set
    */
-  closePosition(capitalReturned: unknown, pnlDelta: unknown): Promise<void>;
+  closePosition(
+    capitalReturned: unknown,
+    pnlDelta: unknown,
+    pairId?: string,
+  ): Promise<void>;
 }

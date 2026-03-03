@@ -41,6 +41,9 @@ describe('Core Lifecycle (e2e)', () => {
       riskOverrideLog: {
         create: vi.fn().mockResolvedValue({}),
       },
+      openPosition: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -104,6 +107,9 @@ describe('Core Lifecycle (e2e)', () => {
         findUnique: vi.fn().mockRejectedValue(new Error('Connection failed')),
         findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
         upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      openPosition: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
       },
     };
 
