@@ -491,7 +491,11 @@ export class StartupReconciliationService {
         },
       });
       // Return capital with zero P&L
-      await this.riskManager.closePosition(new Decimal(0), new Decimal(0));
+      await this.riskManager.closePosition(
+        new Decimal(0),
+        new Decimal(0),
+        position.pairId,
+      );
     }
 
     this.logger.log({

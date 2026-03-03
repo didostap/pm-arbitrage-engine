@@ -49,6 +49,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   private dailyLossApproachEmitted = false;
   private lastResetTimestamp: Date | null = null;
   private reservations = new Map<string, BudgetReservation>();
+  private paperActivePairIds = new Set<string>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -249,6 +250,25 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       await this.persistState();
       this.logger.log({
         message: 'Risk state initialized (new singleton row created)',
+      });
+    }
+
+    // Restore paper active pair IDs from open positions
+    const openPaperPositions = await this.prisma.openPosition.findMany({
+      where: {
+        isPaper: true,
+        status: { not: 'CLOSED' },
+      },
+      select: { pairId: true },
+    });
+
+    this.paperActivePairIds = new Set(openPaperPositions.map((p) => p.pairId));
+
+    if (this.paperActivePairIds.size > 0) {
+      this.logger.log({
+        message: `Restored ${this.paperActivePairIds.size} paper active pair(s) from DB`,
+        module: 'risk-management',
+        data: { pairIds: [...this.paperActivePairIds] },
       });
     }
   }
@@ -683,6 +703,27 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
+    // Paper mode dedup: reject if pair already active
+    if (request.isPaper && this.paperActivePairIds.has(request.pairId)) {
+      this.logger.warn({
+        message: 'Paper mode duplicate opportunity blocked',
+        module: 'risk-management',
+        data: {
+          pairId: request.pairId,
+          opportunityId: request.opportunityId,
+          reason: 'paper_position_already_active',
+        },
+      });
+      throw new RiskLimitError(
+        RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
+        `Budget reservation failed: paper position already open or reserved for pair ${request.pairId}`,
+        'warning',
+        'budget_reservation',
+        0,
+        0,
+      );
+    }
+
     const maxPositionSizeUsd = new FinancialDecimal(
       this.config.bankrollUsd,
     ).mul(new FinancialDecimal(this.config.maxPositionPct));
@@ -729,6 +770,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     const reservation: BudgetReservation = {
       reservationId: randomUUID(),
       opportunityId: request.opportunityId,
+      pairId: request.pairId,
+      isPaper: request.isPaper,
       reservedPositionSlots: 1,
       reservedCapitalUsd: reserveAmount,
       correlationExposure: new FinancialDecimal(0),
@@ -736,6 +779,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     };
 
     this.reservations.set(reservation.reservationId, reservation);
+
+    if (request.isPaper) {
+      this.paperActivePairIds.add(request.pairId);
+    }
 
     this.eventEmitter.emit(
       EVENT_NAMES.BUDGET_RESERVED,
@@ -751,7 +798,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       data: {
         reservationId: reservation.reservationId,
         opportunityId: request.opportunityId,
-        reservedCapitalUsd: maxPositionSizeUsd.toString(),
+        reservedCapitalUsd: reservation.reservedCapitalUsd.toString(),
       },
     });
 
@@ -816,6 +863,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
+    if (reservation.isPaper) {
+      this.paperActivePairIds.delete(reservation.pairId);
+    }
+
     this.reservations.delete(reservationId);
 
     this.eventEmitter.emit(
@@ -876,7 +927,19 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   async closePosition(
     capitalReturned: unknown,
     pnlDelta: unknown,
+    pairId?: string,
   ): Promise<void> {
+    if (pairId) {
+      this.paperActivePairIds.delete(pairId);
+    } else if (this.paperActivePairIds.size > 0) {
+      this.logger.warn({
+        message:
+          'closePosition called without pairId while paper pairs are tracked — potential Set leak if closing a paper position',
+        module: 'risk-management',
+        data: { trackedPairCount: this.paperActivePairIds.size },
+      });
+    }
+
     const capital = new FinancialDecimal(capitalReturned as Decimal);
     const pnl = new FinancialDecimal(pnlDelta as Decimal);
 

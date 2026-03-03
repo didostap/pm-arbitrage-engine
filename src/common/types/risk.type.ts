@@ -30,11 +30,14 @@ export interface ReservationRequest {
   opportunityId: string;
   recommendedPositionSizeUsd: Decimal;
   pairId: string;
+  isPaper: boolean;
 }
 
 export interface BudgetReservation {
   reservationId: string;
   opportunityId: string;
+  pairId: string;
+  isPaper: boolean;
   reservedPositionSlots: number;
   reservedCapitalUsd: Decimal;
   correlationExposure: Decimal;

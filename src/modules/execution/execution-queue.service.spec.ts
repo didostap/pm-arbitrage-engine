@@ -26,6 +26,7 @@ function makeRankedOpportunity(
       opportunityId,
       recommendedPositionSizeUsd: new FinancialDecimal(300),
       pairId: `pair-${opportunityId}`,
+      isPaper: false,
     },
   };
 }
@@ -75,17 +76,25 @@ describe('ExecutionQueueService', () => {
     mockRiskManager = createMockRiskManager({
       reserveBudget: vi
         .fn()
-        .mockImplementation((req: { opportunityId: string }) => {
-          reservationCounter++;
-          return Promise.resolve({
-            reservationId: `res-${reservationCounter}`,
-            opportunityId: req.opportunityId,
-            reservedPositionSlots: 1,
-            reservedCapitalUsd: new FinancialDecimal(300),
-            correlationExposure: new FinancialDecimal(0),
-            createdAt: new Date(),
-          });
-        }),
+        .mockImplementation(
+          (req: {
+            opportunityId: string;
+            pairId: string;
+            isPaper: boolean;
+          }) => {
+            reservationCounter++;
+            return Promise.resolve({
+              reservationId: `res-${reservationCounter}`,
+              opportunityId: req.opportunityId,
+              pairId: req.pairId,
+              isPaper: req.isPaper,
+              reservedPositionSlots: 1,
+              reservedCapitalUsd: new FinancialDecimal(300),
+              correlationExposure: new FinancialDecimal(0),
+              createdAt: new Date(),
+            });
+          },
+        ),
     });
 
     mockExecutionEngine = createMockExecutionEngine({
@@ -199,17 +208,21 @@ describe('ExecutionQueueService', () => {
       .mockRejectedValueOnce(
         new RiskLimitError(3005, 'No budget', 'error', 'budget', 0, 0),
       )
-      .mockImplementationOnce((req: { opportunityId: string }) => {
-        reservationCounter++;
-        return Promise.resolve({
-          reservationId: `res-${reservationCounter}`,
-          opportunityId: req.opportunityId,
-          reservedPositionSlots: 1,
-          reservedCapitalUsd: new FinancialDecimal(300),
-          correlationExposure: new FinancialDecimal(0),
-          createdAt: new Date(),
-        });
-      });
+      .mockImplementationOnce(
+        (req: { opportunityId: string; pairId: string; isPaper: boolean }) => {
+          reservationCounter++;
+          return Promise.resolve({
+            reservationId: `res-${reservationCounter}`,
+            opportunityId: req.opportunityId,
+            pairId: req.pairId,
+            isPaper: req.isPaper,
+            reservedPositionSlots: 1,
+            reservedCapitalUsd: new FinancialDecimal(300),
+            correlationExposure: new FinancialDecimal(0),
+            createdAt: new Date(),
+          });
+        },
+      );
 
     const results = await service.processOpportunities([
       makeRankedOpportunity('opp-1', 0.05),
@@ -225,12 +238,14 @@ describe('ExecutionQueueService', () => {
   it('should process opportunities in the order they are given (pre-ranked)', async () => {
     const processOrder: string[] = [];
     mockRiskManager.reserveBudget.mockImplementation(
-      (req: { opportunityId: string }) => {
+      (req: { opportunityId: string; pairId: string; isPaper: boolean }) => {
         processOrder.push(req.opportunityId);
         reservationCounter++;
         return Promise.resolve({
           reservationId: `res-${reservationCounter}`,
           opportunityId: req.opportunityId,
+          pairId: req.pairId,
+          isPaper: req.isPaper,
           reservedPositionSlots: 1,
           reservedCapitalUsd: new FinancialDecimal(300),
           correlationExposure: new FinancialDecimal(0),

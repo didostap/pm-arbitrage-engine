@@ -118,6 +118,7 @@ function makeOpportunity(
       opportunityId: 'opp-1',
       recommendedPositionSizeUsd: new Decimal('100'),
       pairId: 'pair-1',
+      isPaper: false,
     },
   };
 }
@@ -126,6 +127,8 @@ function makeReservation(): BudgetReservation {
   return {
     reservationId: 'res-1',
     opportunityId: 'opp-1',
+    pairId: 'pair-1',
+    isPaper: false,
     reservedPositionSlots: 1,
     reservedCapitalUsd: new Decimal('100'),
     correlationExposure: new Decimal('0'),

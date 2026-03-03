@@ -391,7 +391,11 @@ export class SingleLegResolutionService {
     // Release budget via risk manager
     const entryCapital = entryFillPrice.mul(qty);
     const capitalReturned = entryCapital.plus(realizedPnl);
-    await this.riskManager.closePosition(capitalReturned, realizedPnl);
+    await this.riskManager.closePosition(
+      capitalReturned,
+      realizedPnl,
+      position.pairId,
+    );
 
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_RESOLVED,

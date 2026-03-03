@@ -367,6 +367,7 @@ describe('Composition chain end-to-end property tests', () => {
             updateMany: vi.fn().mockResolvedValue({ count: 1 }),
           },
           riskOverrideLog: { create: vi.fn().mockResolvedValue({}) },
+          openPosition: { findMany: vi.fn().mockResolvedValue([]) },
         };
         const mockConfig = {
           get: vi.fn((key: string, defaultValue?: number) => {
@@ -396,6 +397,7 @@ describe('Composition chain end-to-end property tests', () => {
           opportunityId: 'test-opp',
           recommendedPositionSizeUsd: recommendedSize,
           pairId: 'test-pair',
+          isPaper: false,
         });
 
         // Oracle

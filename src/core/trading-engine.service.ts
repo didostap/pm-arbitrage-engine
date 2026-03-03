@@ -198,6 +198,9 @@ export class TradingEngineService {
                   decision.maxPositionSizeUsd,
                 ),
                 pairId: matchId,
+                isPaper:
+                  this.kalshiConnector.getHealth().mode === 'paper' ||
+                  this.polymarketConnector.getHealth().mode === 'paper',
               },
             });
           }
