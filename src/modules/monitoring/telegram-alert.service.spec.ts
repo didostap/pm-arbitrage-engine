@@ -29,6 +29,7 @@ function makeConfigService(
     TELEGRAM_MAX_RETRIES: 3,
     TELEGRAM_BUFFER_MAX_SIZE: 100,
     TELEGRAM_CIRCUIT_BREAK_MS: 60000,
+    TELEGRAM_BATCH_WINDOW_MS: '3000',
   };
   const config = { ...defaults, ...overrides };
   return {
@@ -470,10 +471,12 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch OPPORTUNITY_IDENTIFIED via formatter', async () => {
-      await service.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
+      service.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
         opportunity: { netEdge: '0.01', pairId: 'p-1', positionSizeUsd: '100' },
         ...baseEvent,
       } as never);
+
+      await vi.advanceTimersByTimeAsync(3000);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const body = JSON.parse(
@@ -483,7 +486,7 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch ORDER_FILLED via formatter', async () => {
-      await service.sendEventAlert(EVENT_NAMES.ORDER_FILLED, {
+      service.sendEventAlert(EVENT_NAMES.ORDER_FILLED, {
         orderId: 'ord-1',
         platform: 'KALSHI',
         side: 'BUY',
@@ -495,6 +498,8 @@ describe('TelegramAlertService', () => {
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const body = JSON.parse(
         (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
@@ -503,13 +508,15 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch EXECUTION_FAILED via formatter', async () => {
-      await service.sendEventAlert(EVENT_NAMES.EXECUTION_FAILED, {
+      service.sendEventAlert(EVENT_NAMES.EXECUTION_FAILED, {
         reasonCode: 2001,
         reason: 'Depth issue',
         opportunityId: 'opp-1',
         context: {},
         ...baseEvent,
       } as never);
+
+      await vi.advanceTimersByTimeAsync(3000);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const body = JSON.parse(
@@ -518,8 +525,8 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('Execution Failed');
     });
 
-    it('should dispatch SINGLE_LEG_EXPOSURE via formatter', async () => {
-      await service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_EXPOSURE, {
+    it('should dispatch SINGLE_LEG_EXPOSURE via formatter', () => {
+      service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_EXPOSURE, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         expectedEdge: 0.012,
@@ -556,7 +563,7 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch SINGLE_LEG_RESOLVED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_RESOLVED, {
+      service.sendEventAlert(EVENT_NAMES.SINGLE_LEG_RESOLVED, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         resolutionType: 'retried',
@@ -573,11 +580,13 @@ describe('TelegramAlertService', () => {
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should dispatch EXIT_TRIGGERED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.EXIT_TRIGGERED, {
+      service.sendEventAlert(EVENT_NAMES.EXIT_TRIGGERED, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         exitType: 'take_profit',
@@ -589,11 +598,13 @@ describe('TelegramAlertService', () => {
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should dispatch LIMIT_APPROACHED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.LIMIT_APPROACHED, {
+      service.sendEventAlert(EVENT_NAMES.LIMIT_APPROACHED, {
         limitType: 'daily_loss',
         currentValue: 400,
         threshold: 500,
@@ -601,11 +612,13 @@ describe('TelegramAlertService', () => {
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should dispatch LIMIT_BREACHED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.LIMIT_BREACHED, {
+    it('should dispatch LIMIT_BREACHED', () => {
+      service.sendEventAlert(EVENT_NAMES.LIMIT_BREACHED, {
         limitType: 'daily_loss',
         currentValue: 550,
         threshold: 500,
@@ -616,29 +629,33 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch PLATFORM_HEALTH_DEGRADED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_DEGRADED, {
+      service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_DEGRADED, {
         platformId: 'KALSHI',
         health: { status: 'degraded', latencyMs: 2500 },
         previousStatus: 'healthy',
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should dispatch PLATFORM_HEALTH_RECOVERED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_RECOVERED, {
+      service.sendEventAlert(EVENT_NAMES.PLATFORM_HEALTH_RECOVERED, {
         platformId: 'KALSHI',
         health: { status: 'healthy', latencyMs: 100 },
         previousStatus: 'degraded',
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should dispatch SYSTEM_TRADING_HALTED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_HALTED, {
+    it('should dispatch SYSTEM_TRADING_HALTED', () => {
+      service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_HALTED, {
         reason: 'DAILY_LOSS_LIMIT',
         details: {},
         haltTimestamp: new Date(),
@@ -650,18 +667,20 @@ describe('TelegramAlertService', () => {
     });
 
     it('should dispatch SYSTEM_TRADING_RESUMED', async () => {
-      await service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_RESUMED, {
+      service.sendEventAlert(EVENT_NAMES.SYSTEM_TRADING_RESUMED, {
         removedReason: 'DAILY_LOSS_LIMIT',
         remainingReasons: [],
         resumeTimestamp: new Date(),
         ...baseEvent,
       } as never);
 
+      await vi.advanceTimersByTimeAsync(3000);
+
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should dispatch RECONCILIATION_DISCREPANCY', async () => {
-      await service.sendEventAlert(EVENT_NAMES.RECONCILIATION_DISCREPANCY, {
+    it('should dispatch RECONCILIATION_DISCREPANCY', () => {
+      service.sendEventAlert(EVENT_NAMES.RECONCILIATION_DISCREPANCY, {
         positionId: 'pos-1',
         pairId: 'pair-1',
         discrepancyType: 'order_status_mismatch',
@@ -674,8 +693,8 @@ describe('TelegramAlertService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should dispatch SYSTEM_HEALTH_CRITICAL', async () => {
-      await service.sendEventAlert(EVENT_NAMES.SYSTEM_HEALTH_CRITICAL, {
+    it('should dispatch SYSTEM_HEALTH_CRITICAL', () => {
+      service.sendEventAlert(EVENT_NAMES.SYSTEM_HEALTH_CRITICAL, {
         component: 'database',
         diagnosticInfo: 'Pool exhausted',
         recommendedActions: ['Restart'],
@@ -687,9 +706,11 @@ describe('TelegramAlertService', () => {
     });
 
     it('should send generic alert for unknown events without formatter', async () => {
-      await service.sendEventAlert('some.unknown.event', {
+      service.sendEventAlert('some.unknown.event', {
         ...baseEvent,
       } as never);
+
+      await vi.advanceTimersByTimeAsync(3000);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const body = JSON.parse(
@@ -698,7 +719,7 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('some.unknown.event');
     });
 
-    it('should never throw from sendEventAlert (try-catch wrapping)', async () => {
+    it('should never throw from sendEventAlert (try-catch wrapping)', () => {
       // Make the formatter throw by passing a malformed event
       const badEvent = {
         timestamp: new Date(),
@@ -706,30 +727,30 @@ describe('TelegramAlertService', () => {
       };
 
       // This should NOT throw even with incomplete event data
-      await expect(
+      expect(() =>
         service.sendEventAlert(
           EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
           badEvent as never,
         ),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
 
-      await expect(
+      expect(() =>
         service.sendEventAlert(EVENT_NAMES.ORDER_FILLED, badEvent as never),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
 
-      await expect(
+      expect(() =>
         service.sendEventAlert(
           EVENT_NAMES.SINGLE_LEG_EXPOSURE,
           badEvent as never,
         ),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
     });
 
-    it('should send fallback alert when formatter throws', async () => {
+    it('should send fallback alert when formatter throws', () => {
       // Pass event that will cause formatter to throw due to missing fields
       const badEvent = { timestamp: new Date(), correlationId: 'bad-corr' };
 
-      await service.sendEventAlert(
+      service.sendEventAlert(
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         badEvent as never,
       );
@@ -742,13 +763,13 @@ describe('TelegramAlertService', () => {
       expect(body.text).toContain('Alert format error');
     });
 
-    it('should not process events when disabled', async () => {
+    it('should not process events when disabled', () => {
       const svc = new TelegramAlertService(
         makeConfigService({ TELEGRAM_BOT_TOKEN: '' }) as ConfigService,
       );
       svc.onModuleInit();
 
-      await svc.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
+      svc.sendEventAlert(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, {
         opportunity: {},
         timestamp: new Date(),
       } as never);
@@ -805,6 +826,164 @@ describe('TelegramAlertService', () => {
 
       // Buffer should still have the message since all retries failed
       expect(service.getBufferSize()).toBe(1);
+    });
+  });
+
+  describe('message batching (Story 6.5.5d)', () => {
+    let batchService: TelegramAlertService;
+
+    beforeEach(() => {
+      batchService = new TelegramAlertService(
+        makeConfigService({
+          TELEGRAM_BATCH_WINDOW_MS: '3000',
+        }) as ConfigService,
+      );
+      batchService.onModuleInit();
+      mockFetch.mockResolvedValue(makeTelegramResponse(true));
+    });
+
+    it('should send single message as-is after batch window expires', async () => {
+      batchService['addToBatch'](
+        'detection.opportunity.identified',
+        'Single message',
+        'info',
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text).toBe('Single message');
+    });
+
+    it('should consolidate multiple messages for same event type', async () => {
+      batchService['addToBatch'](
+        'detection.opportunity.identified',
+        'Message 1',
+        'info',
+      );
+      batchService['addToBatch'](
+        'detection.opportunity.identified',
+        'Message 2',
+        'info',
+      );
+      batchService['addToBatch'](
+        'detection.opportunity.identified',
+        'Message 3',
+        'info',
+      );
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text).toContain('3x detection.opportunity.identified');
+      expect(body.text).toContain('1/3:');
+      expect(body.text).toContain('Message 1');
+    });
+
+    it('should send critical messages immediately (bypass batching)', () => {
+      batchService['addToBatch'](
+        'execution.single_leg.exposure',
+        'Critical alert!',
+        'critical',
+      );
+
+      // Should be sent immediately without waiting for timer
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should batch different event types separately', async () => {
+      batchService['addToBatch']('event.type.a', 'Msg A1', 'info');
+      batchService['addToBatch']('event.type.a', 'Msg A2', 'info');
+      batchService['addToBatch']('event.type.b', 'Msg B1', 'info');
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should escalate severity within a batch', async () => {
+      // Spy on enqueueAndSend to capture severity
+      const enqueueSpy = vi.spyOn(
+        batchService as never,
+        'enqueueAndSend' as never,
+      );
+
+      batchService['addToBatch']('event.type.a', 'Info msg', 'info');
+      batchService['addToBatch']('event.type.a', 'Warning msg', 'warning');
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // The consolidated send should use the highest severity (warning)
+      expect(enqueueSpy).toHaveBeenCalledWith(
+        expect.stringContaining('2x event.type.a'),
+        'warning',
+      );
+    });
+
+    it('should respect 4096 character limit in consolidated messages', async () => {
+      const longMsg = 'A'.repeat(2000);
+      for (let i = 0; i < 10; i++) {
+        batchService['addToBatch']('event.type.a', longMsg, 'info');
+      }
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text.length).toBeLessThanOrEqual(4096);
+    });
+
+    it('should perform HTML-safe truncation', () => {
+      const result = batchService['truncateHtmlSafe'](
+        '<b>some long text that gets cut off mid-t',
+        30,
+      );
+      // Should not contain unclosed <b> tag fragment
+      expect(result).not.toMatch(/<[^>]*$/);
+      expect(result).toContain('…');
+    });
+
+    it('should cap at 10 messages per batch with overflow note', async () => {
+      for (let i = 0; i < 15; i++) {
+        batchService['addToBatch']('event.type.a', `Msg ${i}`, 'info');
+      }
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text).toContain('15x event.type.a');
+      expect(body.text).toContain('...and 5 more');
+    });
+
+    it('should flush all pending batches on module destroy', async () => {
+      batchService['addToBatch']('event.type.a', 'Pending msg 1', 'info');
+      batchService['addToBatch']('event.type.b', 'Pending msg 2', 'warning');
+
+      // Don't advance timers — call destroy directly
+      await batchService.onModuleDestroy();
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not send before batch window expires', async () => {
+      batchService['addToBatch']('event.type.a', 'Test msg', 'info');
+
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 });

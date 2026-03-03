@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitterModule, EventEmitter2 } from '@nestjs/event-emitter';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventConsumerService } from './event-consumer.service.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
@@ -34,7 +35,7 @@ describe('EventConsumerService', () => {
 
   beforeEach(async () => {
     mockTelegramService = {
-      sendEventAlert: vi.fn().mockResolvedValue(undefined),
+      sendEventAlert: vi.fn(),
     };
 
     module = await Test.createTestingModule({
@@ -169,13 +170,10 @@ describe('EventConsumerService', () => {
   });
 
   describe('severity routing (AC #2)', () => {
-    it('should route critical events to Telegram + structured log', async () => {
+    it('should route critical events to Telegram + structured log', () => {
       const errorSpy = vi.spyOn(Logger.prototype, 'error');
 
-      await service.handleEvent(
-        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
-        makeBaseEvent(),
-      );
+      service.handleEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE, makeBaseEvent());
 
       expect(errorSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -190,10 +188,10 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should route warning events to Telegram + structured log', async () => {
+    it('should route warning events to Telegram + structured log', () => {
       const warnSpy = vi.spyOn(Logger.prototype, 'warn');
 
-      await service.handleEvent(EVENT_NAMES.EXECUTION_FAILED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.EXECUTION_FAILED, makeBaseEvent());
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -208,10 +206,10 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should route eligible info events to Telegram + structured log', async () => {
+    it('should route eligible info events to Telegram + structured log', () => {
       const logSpy = vi.spyOn(Logger.prototype, 'log');
 
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
 
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -226,23 +224,23 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should route non-eligible info events to log only (no Telegram)', async () => {
-      await service.handleEvent(EVENT_NAMES.ORDERBOOK_UPDATED, makeBaseEvent());
+    it('should route non-eligible info events to log only (no Telegram)', () => {
+      service.handleEvent(EVENT_NAMES.ORDERBOOK_UPDATED, makeBaseEvent());
 
       expect(mockTelegramService.sendEventAlert).not.toHaveBeenCalled();
     });
 
-    it('should not send budget events to Telegram', async () => {
-      await service.handleEvent(EVENT_NAMES.BUDGET_RESERVED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.BUDGET_COMMITTED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.BUDGET_RELEASED, makeBaseEvent());
+    it('should not send budget events to Telegram', () => {
+      service.handleEvent(EVENT_NAMES.BUDGET_RESERVED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.BUDGET_COMMITTED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.BUDGET_RELEASED, makeBaseEvent());
 
       expect(mockTelegramService.sendEventAlert).not.toHaveBeenCalled();
     });
 
-    it('should send new critical events to Telegram even without formatter', async () => {
+    it('should send new critical events to Telegram even without formatter', () => {
       // A future critical event like time.drift.halt has no formatter yet
-      await service.handleEvent(EVENT_NAMES.TIME_DRIFT_HALT, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.TIME_DRIFT_HALT, makeBaseEvent());
 
       expect(mockTelegramService.sendEventAlert).toHaveBeenCalledWith(
         EVENT_NAMES.TIME_DRIFT_HALT,
@@ -250,11 +248,8 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should send new warning events to Telegram even without formatter', async () => {
-      await service.handleEvent(
-        EVENT_NAMES.TIME_DRIFT_CRITICAL,
-        makeBaseEvent(),
-      );
+    it('should send new warning events to Telegram even without formatter', () => {
+      service.handleEvent(EVENT_NAMES.TIME_DRIFT_CRITICAL, makeBaseEvent());
 
       expect(mockTelegramService.sendEventAlert).toHaveBeenCalledWith(
         EVENT_NAMES.TIME_DRIFT_CRITICAL,
@@ -264,49 +259,45 @@ describe('EventConsumerService', () => {
   });
 
   describe('error isolation (AC #5)', () => {
-    it('should catch and log handler errors without propagating', async () => {
-      mockTelegramService.sendEventAlert.mockRejectedValueOnce(
-        new Error('Telegram exploded'),
-      );
+    it('should catch and log handler errors without propagating', () => {
+      mockTelegramService.sendEventAlert.mockImplementationOnce(() => {
+        throw new Error('Telegram exploded');
+      });
 
       // Should NOT throw
-      await expect(
+      expect(() =>
         service.handleEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE, makeBaseEvent()),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
     });
 
-    it('should increment errorsCount when handler fails', async () => {
-      mockTelegramService.sendEventAlert.mockRejectedValueOnce(
-        new Error('fail'),
-      );
+    it('should increment errorsCount when handler fails', () => {
+      mockTelegramService.sendEventAlert.mockImplementationOnce(() => {
+        throw new Error('fail');
+      });
 
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       expect(service.getMetrics().errorsCount).toBe(1);
     });
 
-    it('should continue processing after handler error', async () => {
-      mockTelegramService.sendEventAlert.mockRejectedValueOnce(
-        new Error('fail'),
-      );
-      mockTelegramService.sendEventAlert.mockResolvedValueOnce(undefined);
+    it('should continue processing after handler error', () => {
+      mockTelegramService.sendEventAlert.mockImplementationOnce(() => {
+        throw new Error('fail');
+      });
 
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       expect(service.getMetrics().totalEventsProcessed).toBe(2);
     });
 
-    it('should log error with event context', async () => {
+    it('should log error with event context', () => {
       const errorSpy = vi.spyOn(Logger.prototype, 'error');
-      mockTelegramService.sendEventAlert.mockRejectedValueOnce(
-        new Error('Telegram exploded'),
-      );
+      mockTelegramService.sendEventAlert.mockImplementationOnce(() => {
+        throw new Error('Telegram exploded');
+      });
 
-      await service.handleEvent(
-        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
-        makeBaseEvent(),
-      );
+      service.handleEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE, makeBaseEvent());
 
       expect(errorSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -320,10 +311,10 @@ describe('EventConsumerService', () => {
   });
 
   describe('metrics (AC #7)', () => {
-    it('should increment counters for each event', async () => {
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+    it('should increment counters for each event', () => {
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       const metrics = service.getMetrics();
       expect(metrics.totalEventsProcessed).toBe(3);
@@ -331,10 +322,10 @@ describe('EventConsumerService', () => {
       expect(metrics.eventCounts[EVENT_NAMES.LIMIT_BREACHED]).toBe(1);
     });
 
-    it('should increment severity counters correctly', async () => {
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()); // info
-      await service.handleEvent(EVENT_NAMES.EXECUTION_FAILED, makeBaseEvent()); // warning
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent()); // critical
+    it('should increment severity counters correctly', () => {
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()); // info
+      service.handleEvent(EVENT_NAMES.EXECUTION_FAILED, makeBaseEvent()); // warning
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent()); // critical
 
       const metrics = service.getMetrics();
       expect(metrics.severityCounts.info).toBe(1);
@@ -342,16 +333,16 @@ describe('EventConsumerService', () => {
       expect(metrics.severityCounts.critical).toBe(1);
     });
 
-    it('should update lastEventTimestamp', async () => {
+    it('should update lastEventTimestamp', () => {
       expect(service.getMetrics().lastEventTimestamp).toBeNull();
 
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
 
       expect(service.getMetrics().lastEventTimestamp).toBeInstanceOf(Date);
     });
 
-    it('should return shallow copies to prevent external mutation', async () => {
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+    it('should return shallow copies to prevent external mutation', () => {
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
 
       const metrics1 = service.getMetrics();
       metrics1.eventCounts['injected'] = 999;
@@ -362,9 +353,9 @@ describe('EventConsumerService', () => {
       expect(metrics2.severityCounts.critical).toBe(0);
     });
 
-    it('should reset all counters on resetMetrics()', async () => {
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
-      await service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+    it('should reset all counters on resetMetrics()', () => {
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       service.resetMetrics();
 
@@ -382,13 +373,13 @@ describe('EventConsumerService', () => {
   });
 
   describe('structured logging', () => {
-    it('should include correlationId in log entries', async () => {
+    it('should include correlationId in log entries', () => {
       const logSpy = vi.spyOn(Logger.prototype, 'log');
       const event = makeBaseEvent({
         correlationId: 'corr-abc',
       } as Partial<BaseEvent>);
 
-      await service.handleEvent(EVENT_NAMES.ORDER_FILLED, event);
+      service.handleEvent(EVENT_NAMES.ORDER_FILLED, event);
 
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -410,17 +401,13 @@ describe('EventConsumerService', () => {
   });
 
   describe('re-entrancy guard', () => {
-    it('should skip Telegram delegation for re-entrant calls', async () => {
+    it('should skip Telegram delegation for re-entrant calls', () => {
       // Simulate re-entrancy: Telegram handler triggers another event during sendEventAlert
-      mockTelegramService.sendEventAlert.mockImplementationOnce(
-        // eslint-disable-next-line @typescript-eslint/no-misused-promises
-        () => service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent()),
+      mockTelegramService.sendEventAlert.mockImplementationOnce(() =>
+        service.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent()),
       );
 
-      await service.handleEvent(
-        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
-        makeBaseEvent(),
-      );
+      service.handleEvent(EVENT_NAMES.SINGLE_LEG_EXPOSURE, makeBaseEvent());
 
       const metrics = service.getMetrics();
       // Both events should be counted (metrics/logging still work)
@@ -464,7 +451,7 @@ describe('EventConsumerService', () => {
       await csvModule.close();
     });
 
-    it('should delegate ORDER_FILLED events to CsvTradeLogService', async () => {
+    it('should delegate ORDER_FILLED events to CsvTradeLogService', () => {
       const event = {
         ...makeBaseEvent(),
         platform: 'KALSHI',
@@ -477,7 +464,7 @@ describe('EventConsumerService', () => {
         isPaper: false,
       };
 
-      await csvService.handleEvent(EVENT_NAMES.ORDER_FILLED, event as never);
+      csvService.handleEvent(EVENT_NAMES.ORDER_FILLED, event as never);
 
       expect(mockCsvTradeLog.logTrade).toHaveBeenCalledTimes(1);
       expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
@@ -490,7 +477,7 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should delegate EXIT_TRIGGERED events to CsvTradeLogService', async () => {
+    it('should delegate EXIT_TRIGGERED events to CsvTradeLogService', () => {
       const event = {
         ...makeBaseEvent(),
         positionId: 'pos-456',
@@ -502,7 +489,7 @@ describe('EventConsumerService', () => {
         isPaper: true,
       };
 
-      await csvService.handleEvent(EVENT_NAMES.EXIT_TRIGGERED, event as never);
+      csvService.handleEvent(EVENT_NAMES.EXIT_TRIGGERED, event as never);
 
       expect(mockCsvTradeLog.logTrade).toHaveBeenCalledTimes(1);
       expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
@@ -514,8 +501,8 @@ describe('EventConsumerService', () => {
       );
     });
 
-    it('should NOT delegate non-trade events to CsvTradeLogService', async () => {
-      await csvService.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
+    it('should NOT delegate non-trade events to CsvTradeLogService', () => {
+      csvService.handleEvent(EVENT_NAMES.LIMIT_BREACHED, makeBaseEvent());
 
       expect(mockCsvTradeLog.logTrade).not.toHaveBeenCalled();
     });
@@ -554,7 +541,7 @@ describe('EventConsumerService', () => {
     });
 
     it('should call audit log append for events', async () => {
-      await auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
+      auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent());
 
       // Wait for fire-and-forget to settle
       await new Promise((r) => setTimeout(r, 10));
@@ -594,7 +581,7 @@ describe('EventConsumerService', () => {
     });
 
     it('should NOT audit monitoring.audit.* events (circular prevention)', async () => {
-      await auditService.handleEvent(
+      auditService.handleEvent(
         'monitoring.audit.write_failed',
         makeBaseEvent(),
       );
@@ -604,22 +591,315 @@ describe('EventConsumerService', () => {
       expect(mockAuditLogService.append).not.toHaveBeenCalled();
     });
 
-    it('should not block event routing on audit failure', async () => {
+    it('should not block event routing on audit failure', () => {
       mockAuditLogService.append.mockRejectedValue(new Error('DB down'));
 
       // Should NOT throw
-      await expect(
+      expect(() =>
         auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
     });
   });
 
   describe('audit log not injected', () => {
-    it('should work when AuditLogService is not injected', async () => {
+    it('should work when AuditLogService is not injected', () => {
       // The default `service` from beforeEach does not inject AuditLogService
-      await expect(
+      expect(() =>
         service.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
-      ).resolves.toBeUndefined();
+      ).not.toThrow();
+    });
+  });
+
+  describe('paper mode notification dedup (Story 6.5.5d)', () => {
+    let paperModule: TestingModule;
+    let paperService: EventConsumerService;
+    let mockAuditLog: { append: ReturnType<typeof vi.fn> };
+
+    function makePaperConfigService(
+      kalshiMode = 'paper',
+      polymarketMode = 'live',
+    ): Partial<ConfigService> {
+      return {
+        get: vi.fn((key: string, defaultValue?: string) => {
+          if (key === 'PLATFORM_MODE_KALSHI') return kalshiMode;
+          if (key === 'PLATFORM_MODE_POLYMARKET') return polymarketMode;
+          return defaultValue;
+        }),
+      };
+    }
+
+    function makeOpportunityEvent(
+      pairId: string | number | undefined,
+    ): BaseEvent {
+      const opp: Record<string, unknown> = {
+        netEdge: 0.01,
+        grossEdge: 0.02,
+        buyPlatformId: 'kalshi',
+        sellPlatformId: 'polymarket',
+      };
+      if (pairId !== undefined) opp['pairId'] = pairId;
+      return {
+        ...makeBaseEvent(),
+        opportunity: opp,
+      } as unknown as BaseEvent;
+    }
+
+    function makeExitEvent(pairId: string): BaseEvent {
+      return {
+        ...makeBaseEvent(),
+        pairId,
+        positionId: 'pos-1',
+        exitType: 'take_profit',
+      } as unknown as BaseEvent;
+    }
+
+    function makeSingleLegResolvedEvent(pairId: string): BaseEvent {
+      return {
+        ...makeBaseEvent(),
+        pairId,
+        positionId: 'pos-1',
+        resolutionType: 'retried',
+      } as unknown as BaseEvent;
+    }
+
+    beforeEach(async () => {
+      mockAuditLog = {
+        append: vi.fn().mockResolvedValue(undefined),
+      };
+
+      paperModule = await Test.createTestingModule({
+        imports: [
+          EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
+        ],
+        providers: [
+          EventConsumerService,
+          { provide: TelegramAlertService, useValue: mockTelegramService },
+          {
+            provide: ConfigService,
+            useValue: makePaperConfigService(),
+          },
+          { provide: AuditLogService, useValue: mockAuditLog },
+        ],
+      }).compile();
+
+      await paperModule.init();
+      paperService = paperModule.get(EventConsumerService);
+    });
+
+    afterEach(async () => {
+      await paperModule.close();
+    });
+
+    it('should suppress repeat Telegram notification for same pair in paper mode', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('should allow different pairs in paper mode', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-B'),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(2);
+    });
+
+    it('should allow re-notification after EXIT_TRIGGERED clears pair', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.EXIT_TRIGGERED,
+        makeExitEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+
+      // 3 calls: opportunity(1) + exit_triggered + opportunity(2 after clear)
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(3);
+      // Verify the re-notification happened for OPPORTUNITY_IDENTIFIED (called twice)
+      const oppCalls = mockTelegramService.sendEventAlert.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+      expect(oppCalls).toHaveLength(2);
+    });
+
+    it('should allow re-notification after SINGLE_LEG_RESOLVED clears pair', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.SINGLE_LEG_RESOLVED,
+        makeSingleLegResolvedEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+
+      // 3 calls: opportunity(1) + single_leg_resolved + opportunity(2 after clear)
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(3);
+      const oppCalls = mockTelegramService.sendEventAlert.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+      expect(oppCalls).toHaveLength(2);
+    });
+
+    it('should NOT suppress in live mode (zero behavioral change)', async () => {
+      const liveModule = await Test.createTestingModule({
+        imports: [
+          EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
+        ],
+        providers: [
+          EventConsumerService,
+          { provide: TelegramAlertService, useValue: mockTelegramService },
+          {
+            provide: ConfigService,
+            useValue: makePaperConfigService('live', 'live'),
+          },
+        ],
+      }).compile();
+
+      await liveModule.init();
+      const liveService = liveModule.get(EventConsumerService);
+
+      liveService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      liveService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(2);
+
+      await liveModule.close();
+    });
+
+    it('should handle missing pairId gracefully (no crash, sends Telegram)', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent(undefined),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle non-string pairId gracefully (sends Telegram)', () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent(123 as unknown as string),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('should record suppression in audit trail', async () => {
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-A'),
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Find the suppression audit call (not the regular event audit calls)
+      const suppressionCall = mockAuditLog.append.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as Record<string, unknown>).eventType ===
+          'monitoring.telegram.suppressed',
+      );
+      expect(suppressionCall).toBeDefined();
+      expect(suppressionCall![0]).toMatchObject({
+        eventType: 'monitoring.telegram.suppressed',
+        module: 'monitoring',
+        details: { reason: 'paper_mode_dedup', pairId: 'pair-A' },
+      });
+    });
+
+    it('should log paper mode status at startup', async () => {
+      const logSpy = vi.spyOn(Logger.prototype, 'log');
+
+      const startupModule = await Test.createTestingModule({
+        imports: [
+          EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
+        ],
+        providers: [
+          EventConsumerService,
+          { provide: TelegramAlertService, useValue: mockTelegramService },
+          {
+            provide: ConfigService,
+            useValue: makePaperConfigService(),
+          },
+        ],
+      }).compile();
+
+      await startupModule.init();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'Paper mode notification dedup: ENABLED',
+          ) as string,
+          module: 'monitoring',
+        }),
+      );
+
+      await startupModule.close();
+    });
+
+    it('should evict notified set on overflow (1000 pairs)', () => {
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+
+      // Fill to capacity by sending 1000 unique pairs
+      for (let i = 0; i < 1000; i++) {
+        paperService.handleEvent(
+          EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+          makeOpportunityEvent(`pair-${i}`),
+        );
+      }
+      mockTelegramService.sendEventAlert.mockClear();
+
+      // The 1001st should trigger overflow clear + send Telegram
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-overflow'),
+      );
+
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Notified pairs set overflow, cleared',
+        }),
+      );
+
+      // After clear, previously-seen pairs should send Telegram again
+      mockTelegramService.sendEventAlert.mockClear();
+      paperService.handleEvent(
+        EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+        makeOpportunityEvent('pair-0'),
+      );
+      expect(mockTelegramService.sendEventAlert).toHaveBeenCalledTimes(1);
     });
   });
 
