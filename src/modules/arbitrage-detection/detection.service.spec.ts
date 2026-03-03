@@ -194,14 +194,13 @@ describe('DetectionService', () => {
   it('should identify dislocation in Scenario A (buy Polymarket, sell Kalshi)', async () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
-    // Buy Poly at ask=0.55, Sell Kalshi at bid=0.40 (executable sell price)
-    // grossEdge = |0.55 - (1 - 0.40)| = |0.55 - 0.60| = 0.05
-    // buy 0.55 < implied sell 0.60 → arb exists
+    // Buy Poly at ask=0.40, Sell Kalshi at bid=0.55 (executable sell price)
+    // grossEdge = 0.55 - 0.40 = 0.15 (positive → arb exists)
     polymarketConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.38, 0.4),
     );
     kalshiConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.KALSHI, 'k', 0.4, 0.42),
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.55, 0.57),
     );
 
     const result = await service.detectDislocations();
@@ -212,7 +211,7 @@ describe('DetectionService', () => {
     expect(scenarioA).toBeDefined();
     expect(scenarioA!.buyPlatformId).toBe(PlatformId.POLYMARKET);
     expect(scenarioA!.sellPlatformId).toBe(PlatformId.KALSHI);
-    expect(scenarioA!.grossEdge.toNumber()).toBeCloseTo(0.05, 10);
+    expect(scenarioA!.grossEdge.toNumber()).toBeCloseTo(0.15, 10);
   });
 
   // 5.9: Identifies dislocation in Scenario B (buy Kalshi, sell Polymarket)
@@ -220,8 +219,7 @@ describe('DetectionService', () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
     // Buy Kalshi at ask=0.40, Sell Poly at bid=0.53 (executable sell price)
-    // grossEdge = |0.40 - (1 - 0.53)| = |0.40 - 0.47| = 0.07
-    // buy 0.40 < implied sell 0.47 → arb exists
+    // grossEdge = 0.53 - 0.40 = 0.13 (positive → arb exists)
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.38, 0.4),
     );
@@ -237,22 +235,22 @@ describe('DetectionService', () => {
     expect(scenarioB).toBeDefined();
     expect(scenarioB!.buyPlatformId).toBe(PlatformId.KALSHI);
     expect(scenarioB!.sellPlatformId).toBe(PlatformId.POLYMARKET);
-    expect(scenarioB!.grossEdge.toNumber()).toBeCloseTo(0.07, 10);
+    expect(scenarioB!.grossEdge.toNumber()).toBeCloseTo(0.13, 10);
   });
 
   // 5.10: Produces dislocation for both directions when both have positive gross edge
   it('should produce dislocations for both directions when both have positive gross edge', async () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
-    // Scenario: both directions have arb
-    // Poly ask: 0.30, Kalshi ask: 0.30
-    // Scenario A: buy=0.30 vs implied sell=1-0.30=0.70 → grossEdge=|0.30-0.70|=0.40, buy<implied → arb
-    // Scenario B: buy=0.30 vs implied sell=1-0.30=0.70 → grossEdge=|0.30-0.70|=0.40, buy<implied → arb
+    // Scenario: both directions have arb (wide bid-ask spreads on both platforms)
+    // Poly bid=0.55, ask=0.40 — Kalshi bid=0.55, ask=0.40
+    // Scenario A: buy Poly ask=0.40, sell Kalshi bid=0.55 → grossEdge = 0.55-0.40 = 0.15 → arb
+    // Scenario B: buy Kalshi ask=0.40, sell Poly bid=0.55 → grossEdge = 0.55-0.40 = 0.15 → arb
     polymarketConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.28, 0.3),
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.55, 0.4),
     );
     kalshiConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.KALSHI, 'k', 0.28, 0.3),
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.55, 0.4),
     );
 
     const result = await service.detectDislocations();
@@ -273,7 +271,7 @@ describe('DetectionService', () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
     // Both bid=0.50, ask=0.50 → buy at ask=0.50, sell at bid=0.50
-    // grossEdge = |0.50 - (1-0.50)| = |0.50 - 0.50| = 0
+    // grossEdge = 0.50 - 0.50 = 0 (no arb)
     polymarketConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.5),
     );
@@ -286,18 +284,18 @@ describe('DetectionService', () => {
     expect(result.dislocations.length).toBe(0);
   });
 
-  // 5.12: No dislocation when fees would eliminate edge (negative direction)
-  it('should produce no dislocation when buy price > implied sell price', async () => {
+  // 5.12: No dislocation when sellBid < buyAsk in both directions (negative grossEdge)
+  it('should produce no dislocation when sell price < buy price in both directions', async () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
-    // Poly ask: 0.65, Kalshi ask: 0.60
-    // Scenario A: buy=0.65 vs implied sell=1-0.60=0.40 → grossEdge=|0.65-0.40|=0.25, but buy>implied → no arb
-    // Scenario B: buy=0.60 vs implied sell=1-0.65=0.35 → grossEdge=|0.60-0.35|=0.25, but buy>implied → no arb
+    // Poly bid=0.58, ask=0.65; Kalshi bid=0.55, ask=0.62
+    // Scenario A: buy Poly ask=0.65, sell Kalshi bid=0.55 → grossEdge = 0.55-0.65 = -0.10 → no arb
+    // Scenario B: buy Kalshi ask=0.62, sell Poly bid=0.58 → grossEdge = 0.58-0.62 = -0.04 → no arb
     polymarketConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.63, 0.65),
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.58, 0.65),
     );
     kalshiConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.KALSHI, 'k', 0.58, 0.6),
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.55, 0.62),
     );
 
     const result = await service.detectDislocations();
@@ -322,12 +320,12 @@ describe('DetectionService', () => {
     ];
     contractPairLoader.getActivePairs.mockReturnValue(pairs);
 
-    // First pair: good data with arb
+    // First pair: good data with arb (Scenario B: buy Kalshi@0.42, sell Poly@0.50 → edge=0.08)
     kalshiConnector.getOrderBook
       .mockResolvedValueOnce(makeOrderBook(PlatformId.KALSHI, 'k1', 0.4, 0.42))
       // Second pair: fetch fails
       .mockRejectedValueOnce(new Error('fail'))
-      // Third pair: good data, no arb
+      // Third pair: good data, no arb (both sides: sell bid < buy ask)
       .mockResolvedValueOnce(makeOrderBook(PlatformId.KALSHI, 'k3', 0.48, 0.5));
 
     polymarketConnector.getOrderBook
@@ -361,13 +359,13 @@ describe('DetectionService', () => {
   it('should use FinancialMath.calculateGrossEdge for price comparison', async () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
-    // Buy Poly at ask=0.55, Sell Kalshi at bid=0.40
-    // grossEdge = |0.55 - (1-0.40)| = |0.55 - 0.60| = 0.05
+    // Buy Poly at ask=0.40, Sell Kalshi at bid=0.55
+    // grossEdge = 0.55 - 0.40 = 0.15 (positive → arb)
     polymarketConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.38, 0.4),
     );
     kalshiConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.KALSHI, 'k', 0.4, 0.42),
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.55, 0.57),
     );
 
     const result = await service.detectDislocations();
@@ -377,10 +375,10 @@ describe('DetectionService', () => {
     );
     expect(dislocation).toBeDefined();
 
-    // Verify FinancialMath was used (precision check) — sell uses bid (0.40)
-    const expectedEdge = new FinancialDecimal(0.55)
-      .minus(new FinancialDecimal(1).minus(new FinancialDecimal(0.4)))
-      .abs();
+    // Verify FinancialMath was used (precision check) — sell uses bid (0.55)
+    const expectedEdge = new FinancialDecimal(0.55).minus(
+      new FinancialDecimal(0.4),
+    );
     expect(dislocation!.grossEdge.toNumber()).toBe(expectedEdge.toNumber());
   });
 
@@ -438,14 +436,14 @@ describe('DetectionService', () => {
   it('should use best bid for sell leg in Scenario A (buy Polymarket, sell Kalshi)', async () => {
     contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
 
-    // Wide spread: Kalshi bid=0.35, Kalshi ask=0.42
-    // Sell Kalshi → receive bid (0.35), NOT ask (0.42)
-    // grossEdge = |0.55 - (1 - 0.35)| = |0.55 - 0.65| = 0.10
+    // Wide spread: Kalshi bid=0.55, Kalshi ask=0.62
+    // Sell Kalshi → receive bid (0.55), NOT ask (0.62)
+    // grossEdge = 0.55 - 0.35 = 0.20
     polymarketConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.33, 0.35),
     );
     kalshiConnector.getOrderBook.mockResolvedValue(
-      makeOrderBook(PlatformId.KALSHI, 'k', 0.35, 0.42),
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.55, 0.62),
     );
 
     const result = await service.detectDislocations();
@@ -454,10 +452,10 @@ describe('DetectionService', () => {
       (d) => d.buyPlatformId === PlatformId.POLYMARKET,
     );
     expect(scenarioA).toBeDefined();
-    // sellPrice must be the bid (0.35), not the ask (0.42)
-    expect(scenarioA!.sellPrice.toNumber()).toBe(0.35);
-    // grossEdge = |0.55 - (1 - 0.35)| = 0.10
-    expect(scenarioA!.grossEdge.toNumber()).toBeCloseTo(0.1, 10);
+    // sellPrice must be the bid (0.55), not the ask (0.62)
+    expect(scenarioA!.sellPrice.toNumber()).toBe(0.55);
+    // grossEdge = 0.55 - 0.35 = 0.20
+    expect(scenarioA!.grossEdge.toNumber()).toBeCloseTo(0.2, 10);
   });
 
   it('should use best bid for sell leg in Scenario B (buy Kalshi, sell Polymarket)', async () => {
@@ -465,7 +463,7 @@ describe('DetectionService', () => {
 
     // Wide spread: Poly bid=0.48, Poly ask=0.55
     // Sell Polymarket → receive bid (0.48), NOT ask (0.55)
-    // grossEdge = |0.40 - (1 - 0.48)| = |0.40 - 0.52| = 0.12
+    // grossEdge = 0.48 - 0.40 = 0.08
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.38, 0.4),
     );
@@ -481,8 +479,47 @@ describe('DetectionService', () => {
     expect(scenarioB).toBeDefined();
     // sellPrice must be the bid (0.48), not the ask (0.55)
     expect(scenarioB!.sellPrice.toNumber()).toBe(0.48);
-    // grossEdge = |0.40 - (1 - 0.48)| = 0.12
-    expect(scenarioB!.grossEdge.toNumber()).toBeCloseTo(0.12, 10);
+    // grossEdge = 0.48 - 0.40 = 0.08
+    expect(scenarioB!.grossEdge.toNumber()).toBeCloseTo(0.08, 10);
+  });
+
+  // REGRESSION: Rejects pair when both platforms agree unlikely (false positive under old formula)
+  it('should reject pair when both platforms agree event is unlikely', async () => {
+    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+
+    // Both platforms price event as unlikely with overlapping spreads
+    // Scenario A: buy Poly@0.04, sell Kalshi@0.01 → grossEdge = 0.01-0.04 = -0.03 → no arb
+    // Scenario B: buy Kalshi@0.03, sell Poly@0.02 → grossEdge = 0.02-0.03 = -0.01 → no arb
+    // Old formula: |0.04 - (1-0.01)| = 0.95 → FALSE POSITIVE
+    polymarketConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.02, 0.04),
+    );
+    kalshiConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.01, 0.03),
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.dislocations.length).toBe(0);
+  });
+
+  // REGRESSION: Rejects pair when both platforms agree likely (false positive under old formula)
+  it('should reject pair when both platforms agree event is likely', async () => {
+    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+
+    // Both platforms price event as likely: Poly ask=0.92, Kalshi bid=0.88
+    // Scenario A: buy Poly@0.92, sell Kalshi@0.88 → grossEdge = 0.88-0.92 = -0.04 → no arb
+    // Old formula would have produced positive edge via complement math
+    polymarketConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.9, 0.92),
+    );
+    kalshiConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.88, 0.9),
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.dislocations.length).toBe(0);
   });
 
   // L1: Skip pair when asks are empty (bids present)

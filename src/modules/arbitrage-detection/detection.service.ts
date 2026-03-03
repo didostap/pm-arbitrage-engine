@@ -145,23 +145,19 @@ export class DetectionService {
       );
 
       if (grossEdgeA.greaterThan(0)) {
-        // Verify direction: buy price < implied sell price means actual arb
-        const impliedSellPrice = new FinancialDecimal(1).minus(kalshiSellPrice);
-        if (polyBuyPrice.lessThan(impliedSellPrice)) {
-          dislocations.push(
-            this.buildDislocation(
-              pair,
-              PlatformId.POLYMARKET,
-              PlatformId.KALSHI,
-              polyBuyPrice,
-              kalshiSellPrice,
-              grossEdgeA,
-              polymarketOrderBook,
-              kalshiOrderBook,
-              now,
-            ),
-          );
-        }
+        dislocations.push(
+          this.buildDislocation(
+            pair,
+            PlatformId.POLYMARKET,
+            PlatformId.KALSHI,
+            polyBuyPrice,
+            kalshiSellPrice,
+            grossEdgeA,
+            polymarketOrderBook,
+            kalshiOrderBook,
+            now,
+          ),
+        );
       }
 
       // AC4: Scenario B — Buy Kalshi, Sell Polymarket
@@ -173,22 +169,19 @@ export class DetectionService {
       );
 
       if (grossEdgeB.greaterThan(0)) {
-        const impliedSellPrice = new FinancialDecimal(1).minus(polySellPrice);
-        if (kalshiBuyPrice.lessThan(impliedSellPrice)) {
-          dislocations.push(
-            this.buildDislocation(
-              pair,
-              PlatformId.KALSHI,
-              PlatformId.POLYMARKET,
-              kalshiBuyPrice,
-              polySellPrice,
-              grossEdgeB,
-              kalshiOrderBook,
-              polymarketOrderBook,
-              now,
-            ),
-          );
-        }
+        dislocations.push(
+          this.buildDislocation(
+            pair,
+            PlatformId.KALSHI,
+            PlatformId.POLYMARKET,
+            kalshiBuyPrice,
+            polySellPrice,
+            grossEdgeB,
+            kalshiOrderBook,
+            polymarketOrderBook,
+            now,
+          ),
+        );
       }
     }
 

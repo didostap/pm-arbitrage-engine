@@ -63,20 +63,20 @@ function makeDislocation(overrides?: Partial<RawDislocation>): RawDislocation {
     pairConfig: makePair(),
     buyPlatformId: PlatformId.POLYMARKET,
     sellPlatformId: PlatformId.KALSHI,
-    buyPrice: new FinancialDecimal(0.52),
-    sellPrice: new FinancialDecimal(0.45),
-    grossEdge: new FinancialDecimal(0.03),
+    buyPrice: new FinancialDecimal(0.45),
+    sellPrice: new FinancialDecimal(0.52),
+    grossEdge: new FinancialDecimal(0.07),
     buyOrderBook: makeOrderBook(
       PlatformId.POLYMARKET,
       'poly-contract-1',
-      0.51,
-      0.52,
+      0.44,
+      0.45,
     ),
     sellOrderBook: makeOrderBook(
       PlatformId.KALSHI,
       'kalshi-contract-1',
-      0.44,
-      0.45,
+      0.52,
+      0.53,
     ),
     detectedAt: new Date(),
     ...overrides,
@@ -148,13 +148,12 @@ describe('EdgeCalculatorService', () => {
     );
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.52),
-      sellPrice: new FinancialDecimal(0.45),
       grossEdge: new FinancialDecimal(0.03),
     });
 
     const result = service.processDislocations([dislocation]);
 
+    // netEdge = 0.03 - 0.45*0.02 - 0.52*0.02 - 0.13/50 = 0.008
     expect(result.opportunities).toHaveLength(1);
     expect(result.opportunities[0]?.netEdge.toNumber()).toBeCloseTo(0.008, 6);
   });
@@ -172,8 +171,6 @@ describe('EdgeCalculatorService', () => {
     );
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.52),
-      sellPrice: new FinancialDecimal(0.45),
       grossEdge: new FinancialDecimal(0.03),
     });
 
@@ -217,8 +214,9 @@ describe('EdgeCalculatorService', () => {
     const dislocation = makeDislocation();
     const result = service.processDislocations([dislocation]);
 
+    // netEdge = 0.07 - 0.45*0.02 - 0.52*0.02 - 0.125/50 = 0.07 - 0.009 - 0.0104 - 0.0025 = 0.0481
     expect(result.opportunities).toHaveLength(1);
-    expect(result.opportunities[0]?.netEdge.toNumber()).toBeCloseTo(0.0081, 4);
+    expect(result.opportunities[0]?.netEdge.toNumber()).toBeCloseTo(0.0481, 4);
   });
 
   // ========================================================================
@@ -227,12 +225,14 @@ describe('EdgeCalculatorService', () => {
   it('applies 1.5x threshold multiplier when platform is degraded', () => {
     degradationService.getEdgeThresholdMultiplier.mockReturnValue(1.5);
 
-    // With default config: gas=0.30, positionSize=300
-    // Net edge = 0.03 - (0.52*0.02) - (0.45*0.02) - (0.30/300)
-    //          = 0.03 - 0.0104 - 0.009 - 0.001 = 0.0096
+    // With low grossEdge override: gas=0.30, positionSize=300
+    // Net edge = 0.03 - (0.45*0.02) - (0.52*0.02) - (0.30/300)
+    //          = 0.03 - 0.009 - 0.0104 - 0.001 = 0.0096
     // Effective threshold = 0.008 * 1.5 = 0.012
     // 0.0096 < 0.012 → filtered
-    const dislocation = makeDislocation();
+    const dislocation = makeDislocation({
+      grossEdge: new FinancialDecimal(0.03),
+    });
     const result = service.processDislocations([dislocation]);
 
     expect(result.filtered).toHaveLength(1);
@@ -243,7 +243,7 @@ describe('EdgeCalculatorService', () => {
   // Emits OpportunityFilteredEvent for filtered dislocations
   // ========================================================================
   it('emits OpportunityFilteredEvent for filtered dislocations', () => {
-    // Force below threshold
+    // Force below threshold with low grossEdge
     configService.get.mockImplementation(
       (key: string, defaultValue: number) => {
         if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0.135;
@@ -252,7 +252,9 @@ describe('EdgeCalculatorService', () => {
       },
     );
 
-    const dislocation = makeDislocation();
+    const dislocation = makeDislocation({
+      grossEdge: new FinancialDecimal(0.03),
+    });
     service.processDislocations([dislocation]);
 
     expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -270,8 +272,8 @@ describe('EdgeCalculatorService', () => {
   it('emits OpportunityIdentifiedEvent for passing dislocations', () => {
     // Use large spread scenario to guarantee passing
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -296,8 +298,8 @@ describe('EdgeCalculatorService', () => {
   // ========================================================================
   it('enriched opportunity includes fee breakdown and liquidity depth', () => {
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -324,8 +326,8 @@ describe('EdgeCalculatorService', () => {
   // ========================================================================
   it('processes multiple dislocations and returns correct summary counts', () => {
     const passing = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
       pairConfig: makePair({ eventDescription: 'Passing pair' }),
     });
@@ -364,8 +366,8 @@ describe('EdgeCalculatorService', () => {
     const dislocation = makeDislocation({
       buyPlatformId: PlatformId.POLYMARKET,
       sellPlatformId: PlatformId.KALSHI,
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -388,8 +390,8 @@ describe('EdgeCalculatorService', () => {
     );
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -414,8 +416,8 @@ describe('EdgeCalculatorService', () => {
     );
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -438,15 +440,14 @@ describe('EdgeCalculatorService', () => {
     );
 
     // gasFraction = 0.30/10 = 0.03 — much larger impact on small position
+    // netEdge = 0.03 - 0.45*0.02 - 0.52*0.02 - 0.03 = 0.03 - 0.009 - 0.0104 - 0.03 = -0.0194
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.52),
-      sellPrice: new FinancialDecimal(0.45),
       grossEdge: new FinancialDecimal(0.03),
     });
 
     const result = service.processDislocations([dislocation]);
 
-    // Net edge will be negative due to high gas fraction
+    // Net edge negative due to high gas fraction → filtered
     expect(result.filtered).toHaveLength(1);
   });
 
@@ -473,8 +474,8 @@ describe('EdgeCalculatorService', () => {
     degradationService.getEdgeThresholdMultiplier.mockReturnValue(1.0);
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -494,8 +495,8 @@ describe('EdgeCalculatorService', () => {
       pairConfig: makePair({ eventDescription: 'Failing pair' }),
     });
     const passingDislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
       pairConfig: makePair({ eventDescription: 'Passing pair' }),
     });
@@ -561,8 +562,8 @@ describe('EdgeCalculatorService', () => {
     const dislocation = makeDislocation({
       buyPlatformId: PlatformId.POLYMARKET,
       sellPlatformId: PlatformId.KALSHI,
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 
@@ -597,8 +598,8 @@ describe('EdgeCalculatorService', () => {
     );
 
     const dislocation = makeDislocation({
-      buyPrice: new FinancialDecimal(0.7),
-      sellPrice: new FinancialDecimal(0.2),
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
       grossEdge: new FinancialDecimal(0.1),
     });
 

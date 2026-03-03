@@ -66,16 +66,14 @@ describe('FinancialMath.calculateGrossEdge property tests', () => {
   });
 
   it(
-    'complementary pricing symmetry: grossEdge(buy, sell) === grossEdge(1 - sell, 1 - buy)',
+    'antisymmetry: grossEdge(a, b) === -grossEdge(b, a)',
     { timeout: 30000 },
     () => {
       fc.assert(
         fc.property(priceArb, priceArb, (buyPrice, sellPrice) => {
           const result1 = FinancialMath.calculateGrossEdge(buyPrice, sellPrice);
-          const compBuy = new FinancialDecimal(1).minus(sellPrice);
-          const compSell = new FinancialDecimal(1).minus(buyPrice);
-          const result2 = FinancialMath.calculateGrossEdge(compBuy, compSell);
-          expect(result1.toFixed(18)).toBe(result2.toFixed(18));
+          const result2 = FinancialMath.calculateGrossEdge(sellPrice, buyPrice);
+          expect(result1.toFixed(18)).toBe(result2.neg().toFixed(18));
         }),
         { numRuns: 1000 },
       );
@@ -90,15 +88,36 @@ describe('FinancialMath.calculateGrossEdge property tests', () => {
     expect(result.toNumber()).toBe(0);
   });
 
-  it('result <= 1 (bounded by price range)', { timeout: 30000 }, () => {
+  it('result in [-1, 1] (bounded by price range)', { timeout: 30000 }, () => {
     fc.assert(
       fc.property(priceArb, priceArb, (buyPrice, sellPrice) => {
         const result = FinancialMath.calculateGrossEdge(buyPrice, sellPrice);
+        expect(result.gte(new FinancialDecimal(-1))).toBe(true);
         expect(result.lte(new FinancialDecimal(1))).toBe(true);
       }),
       { numRuns: 1000 },
     );
   });
+
+  it(
+    'grossEdge > 0 iff sellPrice > buyPrice (sign encodes trade direction)',
+    { timeout: 30000 },
+    () => {
+      fc.assert(
+        fc.property(priceArb, priceArb, (buyPrice, sellPrice) => {
+          const result = FinancialMath.calculateGrossEdge(buyPrice, sellPrice);
+          if (sellPrice.gt(buyPrice)) {
+            expect(result.gt(0)).toBe(true);
+          } else if (sellPrice.lt(buyPrice)) {
+            expect(result.lt(0)).toBe(true);
+          } else {
+            expect(result.isZero()).toBe(true);
+          }
+        }),
+        { numRuns: 1000 },
+      );
+    },
+  );
 });
 
 // ── Task 3: calculateNetEdge properties ──
