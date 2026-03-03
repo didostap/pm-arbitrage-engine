@@ -1,6 +1,6 @@
 # Edge Calculation Test Scenarios — Hand-Verified with decimal.js (precision=20)
 # Formula:
-#   grossEdge = |buyPrice - (1 - sellPrice)|
+#   grossEdge = sellPrice - buyPrice
 #   buyFeeCost = buyPrice * (buyFeePercent / 100)
 #   sellFeeCost = sellPrice * (sellFeePercent / 100)
 #   gasFraction = gasEstimateUsd / positionSizeUsd
@@ -9,19 +9,22 @@
 # Prices: decimal probabilities 0.00-1.00. Fees: 0-100 scale (2.0 = 2%).
 # Column names are platform-agnostic (buy/sell). Platform details in notes column.
 scenario_name,buy_price,sell_price,buy_fee_pct,sell_fee_pct,gas_estimate_usd,position_size_usd,expected_gross_edge,expected_net_edge,expected_passes_filter,notes
-exact_threshold_boundary,0.52,0.45,2.0,2.0,0.13,50,0.03,0.008,true,Net edge=0.80% exactly — passes filter. Buy YES@0.52 sell YES@0.45.
-just_below_threshold,0.52,0.45,2.0,2.0,0.135,50,0.03,0.0079,false,Net edge=0.79% — filtered out. Same prices as #1 but slightly higher gas.
-just_above_threshold,0.52,0.45,2.0,2.0,0.125,50,0.03,0.0081,true,Net edge=0.81% — passes filter. Same prices as #1 but slightly lower gas.
-zero_edge,0.50,0.50,2.0,2.0,0.10,100,0,-0.021,false,Identical prices after complement. gross=0. Fees and gas make net negative.
-negative_edge,0.60,0.41,2.0,2.0,0.10,100,0.01,-0.0112,false,Fees alone exceed gross edge. buyFee=0.012 > gross=0.01.
-high_fee_platform,0.55,0.35,3.0,1.0,0.10,100,0.1,0.079,true,Buy-side platform charges 3% taker fee. Still profitable due to large spread.
-low_fee_platform,0.60,0.38,0.1,0.1,0.01,100,0.02,0.01892,true,Both platforms charge only 0.1%. Minimal fee erosion.
-asymmetric_fees,0.65,0.25,3.0,0.5,0.10,100,0.1,0.07825,true,Buy-side 3% vs sell-side 0.5%. Highly asymmetric fee structures.
-max_gas_impact,0.55,0.35,2.0,1.5,0.50,50,0.1,0.07375,true,Gas=$0.50 on $50 position — gasFrac=0.01 (1%). Significant gas erosion.
-negligible_gas,0.55,0.35,2.0,1.5,0.01,100,0.1,0.08365,true,Gas=$0.01 — gasFrac=0.0001. Gas barely impacts edge.
-large_spread,0.70,0.20,2.0,1.5,0.10,100,0.1,0.082,true,10% gross edge. Even with fees still >8% net. Very profitable.
-complementary_pricing,0.58,0.34,2.0,1.5,0.10,100,0.08,0.0623,true,Polymarket YES@0.58 + Kalshi NO implied from YES@0.34. Classic cross-platform arb.
-inverse_complementary,0.40,0.52,1.5,2.0,0.10,100,0.08,0.0626,true,Kalshi YES@0.40 + Polymarket NO implied from YES@0.52. Reverse direction arb.
-boundary_prices,0.95,0.02,2.0,1.5,0.10,100,0.03,0.0097,true,Prices near 0.00 and 1.00. Tests extreme probability boundaries.
-realistic_scenario,0.62,0.32,2.0,1.5,0.08,100,0.06,0.042,true,Realistic Polymarket/Kalshi pair — election market. Buy Poly YES@0.62 sell Kalshi YES@0.32.
-tiny_position_gas_amplified,0.55,0.35,2.0,1.5,0.50,25,0.1,0.06375,true,$25 position with $0.50 gas. gasFrac=0.02 (2%). Shows gas impact on small positions.
+exact_threshold_boundary,0.52,0.45,2.0,2.0,0.13,50,-0.07,-0.092,false,sellPrice < buyPrice → guaranteed loss. grossEdge negative. No arb.
+just_below_threshold,0.52,0.45,2.0,2.0,0.135,50,-0.07,-0.0921,false,Same losing trade with slightly higher gas. No arb.
+just_above_threshold,0.52,0.45,2.0,2.0,0.125,50,-0.07,-0.0919,false,Same losing trade with slightly lower gas. No arb.
+zero_edge,0.50,0.50,2.0,2.0,0.10,100,0,-0.021,false,Identical prices. gross=0. Fees and gas make net negative.
+negative_edge,0.60,0.41,2.0,2.0,0.10,100,-0.19,-0.2112,false,sellPrice far below buyPrice. Deeply negative edge.
+high_fee_platform,0.55,0.35,3.0,1.0,0.10,100,-0.2,-0.221,false,Buy-side 3% fee irrelevant — trade is already a loss (sell < buy).
+low_fee_platform,0.60,0.38,0.1,0.1,0.01,100,-0.22,-0.22108,false,Even 0.1% fees cannot save a losing trade.
+asymmetric_fees,0.65,0.25,3.0,0.5,0.10,100,-0.4,-0.42175,false,Highly asymmetric fees but trade is deeply negative.
+max_gas_impact,0.55,0.35,2.0,1.5,0.50,50,-0.2,-0.22625,false,Gas=$0.50 on $50 position. Losing trade regardless.
+negligible_gas,0.55,0.35,2.0,1.5,0.01,100,-0.2,-0.21635,false,Gas=$0.01 — negligible. Trade still loses (sell < buy).
+large_spread,0.70,0.20,2.0,1.5,0.10,100,-0.5,-0.518,false,50% gross loss. Selling at 0.20 while buying at 0.70.
+complementary_pricing,0.58,0.34,2.0,1.5,0.10,100,-0.24,-0.2577,false,Was old-formula arb. Now correctly identified as loss.
+inverse_complementary,0.40,0.52,1.5,2.0,0.10,100,0.12,0.1026,true,Valid arb: sell 0.52 > buy 0.40. Profitable after fees and gas.
+boundary_prices,0.95,0.02,2.0,1.5,0.10,100,-0.93,-0.9503,false,Near-boundary prices. Massive loss — selling at 0.02 while buying at 0.95.
+realistic_scenario,0.62,0.32,2.0,1.5,0.08,100,-0.3,-0.318,false,Was old-formula arb. Correctly a loss: sell 0.32 < buy 0.62.
+tiny_position_gas_amplified,0.55,0.35,2.0,1.5,0.50,25,-0.2,-0.23625,false,$25 position with $0.50 gas. Losing trade amplified by gas.
+both_low_false_positive,0.16,0.01,2.0,2.0,0.10,100,-0.15,-0.1544,false,REGRESSION: Both platforms price unlikely. Old formula gave 0.83 edge. Actually -0.15 loss.
+both_high_false_positive,0.92,0.88,2.0,2.0,0.10,100,-0.04,-0.077,false,REGRESSION: Both platforms price likely. Old formula gave 0.04 edge. Actually -0.04 loss.
+valid_arb_sell_gt_buy,0.40,0.55,2.0,1.5,0.10,100,0.15,0.13275,true,Valid arb: sell 0.55 > buy 0.40. Passes threshold comfortably.

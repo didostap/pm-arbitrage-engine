@@ -18,7 +18,7 @@ export const FinancialDecimal = Decimal.clone({
 export class FinancialMath {
   /**
    * Calculate gross edge between buy and sell prices.
-   * Formula: |buyPrice - (1 - sellPrice)|
+   * Formula: sellPrice - buyPrice (signed — positive means profitable arb)
    *
    * @param buyPrice - YES price on the buy-side platform (0-1 decimal probability)
    * @param sellPrice - YES price on the sell-side platform (0-1 decimal probability)
@@ -27,7 +27,9 @@ export class FinancialMath {
     FinancialMath.validateDecimalInput(buyPrice, 'buyPrice');
     FinancialMath.validateDecimalInput(sellPrice, 'sellPrice');
 
-    return buyPrice.minus(new FinancialDecimal(1).minus(sellPrice)).abs();
+    // Cross-platform arb: buy YES at ask on platform A, sell YES at bid on platform B.
+    // Profit per contract = sellBid - buyAsk. Negative means no arb.
+    return sellPrice.minus(buyPrice);
   }
 
   /**
