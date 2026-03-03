@@ -6,6 +6,7 @@ import {
   Optional,
   Inject,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -78,11 +79,16 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   private errorsCount = 0;
   private processingDepth = 0;
 
+  private readonly isPaperMode: boolean;
+  private readonly notifiedOpportunityPairs = new Set<string>();
+  private readonly MAX_NOTIFIED_PAIRS = 1000;
+
   private onAnyListener:
     | ((eventName: string | string[], event: unknown) => void)
     | null = null;
 
   constructor(
+    @Optional() private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
     private readonly telegramAlertService: TelegramAlertService,
     @Optional()
@@ -91,7 +97,20 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(AuditLogService)
     private readonly auditLogService?: AuditLogService,
-  ) {}
+  ) {
+    const kalshiMode =
+      this.configService?.get<string>('PLATFORM_MODE_KALSHI', 'live') ?? 'live';
+    const polymarketMode =
+      this.configService?.get<string>('PLATFORM_MODE_POLYMARKET', 'live') ??
+      'live';
+    this.isPaperMode = kalshiMode === 'paper' || polymarketMode === 'paper';
+
+    this.logger.log({
+      message: `Paper mode notification dedup: ${this.isPaperMode ? 'ENABLED' : 'disabled'}`,
+      module: 'monitoring',
+      data: { kalshiMode, polymarketMode },
+    });
+  }
 
   onModuleInit(): void {
     this.onAnyListener = (
@@ -100,7 +119,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     ): void => {
       const name =
         typeof eventName === 'string' ? eventName : eventName.join('.');
-      void this.handleEvent(name, event as BaseEvent);
+      this.handleEvent(name, event as BaseEvent);
     };
 
     this.eventEmitter.onAny(this.onAnyListener);
@@ -119,7 +138,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** @internal Called by onAny listener. Public only for unit test access. */
-  async handleEvent(eventName: string, event: BaseEvent): Promise<void> {
+  handleEvent(eventName: string, event: BaseEvent): void {
     try {
       const severity = this.classifyEventSeverity(eventName);
 
@@ -153,10 +172,58 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       // Telegram delegation: hybrid approach
       // Critical/Warning → ALWAYS send (generic alert if no formatter)
       // Info → only if in eligible set
-      const shouldSendTelegram =
+      let shouldSendTelegram =
         severity === 'critical' ||
         severity === 'warning' ||
         TELEGRAM_ELIGIBLE_INFO_EVENTS.has(eventName);
+
+      // Paper mode notification dedup — prevent repeated Telegram for same pair
+      if (shouldSendTelegram && this.isPaperMode) {
+        if (eventName === EVENT_NAMES.OPPORTUNITY_IDENTIFIED) {
+          const pairId = this.extractPairIdFromEvent(eventName, event);
+          if (pairId && this.notifiedOpportunityPairs.has(pairId)) {
+            shouldSendTelegram = false;
+            this.logger.debug({
+              message:
+                'Paper mode: suppressing duplicate Telegram for already-notified pair',
+              module: 'monitoring',
+              data: { pairId, eventName },
+            });
+            if (this.auditLogService) {
+              void this.auditLogService
+                .append({
+                  eventType: 'monitoring.telegram.suppressed',
+                  module: 'monitoring',
+                  correlationId: event?.correlationId,
+                  details: { reason: 'paper_mode_dedup', pairId },
+                })
+                .catch(() => {});
+            }
+          } else if (pairId) {
+            if (this.notifiedOpportunityPairs.size >= this.MAX_NOTIFIED_PAIRS) {
+              this.notifiedOpportunityPairs.clear();
+              this.logger.warn({
+                message: 'Notified pairs set overflow, cleared',
+                module: 'monitoring',
+                data: { maxSize: this.MAX_NOTIFIED_PAIRS },
+              });
+            }
+            this.notifiedOpportunityPairs.add(pairId);
+          }
+        }
+      }
+
+      // Clear pair from notified set when position closes
+      if (
+        this.isPaperMode &&
+        (eventName === EVENT_NAMES.EXIT_TRIGGERED ||
+          eventName === EVENT_NAMES.SINGLE_LEG_RESOLVED)
+      ) {
+        const pairId = this.extractPairIdFromEvent(eventName, event);
+        if (pairId) {
+          this.notifiedOpportunityPairs.delete(pairId);
+        }
+      }
 
       if (shouldSendTelegram) {
         // Re-entrancy guard: prevent recursive Telegram delegation
@@ -164,7 +231,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
         if (this.processingDepth > 0) return;
         this.processingDepth++;
         try {
-          await this.telegramAlertService.sendEventAlert(eventName, event);
+          this.telegramAlertService.sendEventAlert(eventName, event);
         } finally {
           this.processingDepth--;
         }
@@ -226,6 +293,33 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
     this.severityCounts = { critical: 0, warning: 0, info: 0 };
     this.lastEventTimestamp = null;
     this.errorsCount = 0;
+  }
+
+  /** Extract pairId from event payload using type-safe validation. */
+  private extractPairIdFromEvent(
+    eventName: string,
+    event: BaseEvent,
+  ): string | null {
+    const e = event as unknown as Record<string, unknown>;
+
+    if (eventName === EVENT_NAMES.OPPORTUNITY_IDENTIFIED) {
+      const opp = e['opportunity'];
+      if (typeof opp === 'object' && opp !== null && 'pairId' in opp) {
+        const pairId = (opp as Record<string, unknown>)['pairId'];
+        return typeof pairId === 'string' ? pairId : null;
+      }
+      return null;
+    }
+
+    if (
+      eventName === EVENT_NAMES.EXIT_TRIGGERED ||
+      eventName === EVENT_NAMES.SINGLE_LEG_RESOLVED
+    ) {
+      const pairId = e['pairId'];
+      return typeof pairId === 'string' ? pairId : null;
+    }
+
+    return null;
   }
 
   /** Safely coerce unknown event field to string. */
