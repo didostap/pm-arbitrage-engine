@@ -1,5 +1,10 @@
 import Decimal from 'decimal.js';
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
 import { Configuration, MarketApi } from 'kalshi-typescript';
@@ -58,7 +63,9 @@ interface KalshiOrdersApi {
 }
 
 @Injectable()
-export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
+export class KalshiConnector
+  implements IPlatformConnector, OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(KalshiConnector.name);
   private readonly marketApi: MarketApi;
   private readonly ordersApi: KalshiOrdersApi;
@@ -104,15 +111,51 @@ export class KalshiConnector implements IPlatformConnector, OnModuleDestroy {
       config as ConstructorParameters<typeof OrdersApi>[0],
     ) as unknown as KalshiOrdersApi;
 
+    // Kalshi WS endpoint: .../trade-api/ws/v2 (not .../trade-api/v2/ws)
+    const wsUrl = baseUrl
+      .replace('https://', 'wss://')
+      .replace('/trade-api/v2', '/trade-api/ws/v2');
+
     this.wsClient = new KalshiWebSocketClient({
       apiKeyId,
       privateKeyPem,
-      wsUrl: `${baseUrl.replace('https://', 'wss://')}/trade-api/v2/ws`,
+      wsUrl,
     });
 
     // Kalshi BASIC tier: 20 read/s, 10 write/s
     // Bucket sized for burst headroom: 8 pairs + order polls per cycle, 24 gives ~2x margin
     this.rateLimiter = new RateLimiter(24, 10, 1, this.logger);
+  }
+
+  async onModuleInit(): Promise<void> {
+    const apiKeyId = this.configService.get<string>('KALSHI_API_KEY_ID', '');
+    if (!apiKeyId) {
+      this.logger.warn({
+        message:
+          'KALSHI_API_KEY_ID not configured; Kalshi connector will not connect',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+      });
+      return;
+    }
+
+    try {
+      await this.connect();
+    } catch (error) {
+      // Log but don't crash — getHealth() will report degraded/disconnected
+      // and the WebSocket client will attempt reconnection automatically
+      this.logger.error({
+        message:
+          'Kalshi initial connection failed; will retry via WebSocket reconnect',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   async connect(): Promise<void> {
