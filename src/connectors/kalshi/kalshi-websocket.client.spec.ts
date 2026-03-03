@@ -20,7 +20,7 @@ describe('KalshiWebSocketClient', () => {
     client = new KalshiWebSocketClient({
       apiKeyId: 'test-key-id',
       privateKeyPem: 'test-pem-content',
-      wsUrl: 'wss://demo-api.kalshi.co/trade-api/v2/ws',
+      wsUrl: 'wss://demo-api.kalshi.co/trade-api/ws/v2',
     });
   });
 
@@ -199,7 +199,7 @@ describe('KalshiWebSocketClient', () => {
       kalshiClient = new KalshiWebSocketClient({
         apiKeyId: 'test-key-id',
         privateKeyPem: '',
-        wsUrl: 'wss://demo-api.kalshi.co/trade-api/v2/ws',
+        wsUrl: 'wss://demo-api.kalshi.co/trade-api/ws/v2',
       });
     });
 

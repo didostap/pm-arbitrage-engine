@@ -58,9 +58,20 @@ export class ExitMonitorService {
       return;
     }
 
+    // Derive paper/mixed mode from connector health (same pattern as SingleLegResolutionService)
+    const kalshiHealth = this.kalshiConnector.getHealth();
+    const polymarketHealth = this.polymarketConnector.getHealth();
+    const isPaper =
+      kalshiHealth.mode === 'paper' || polymarketHealth.mode === 'paper';
+    const mixedMode =
+      (kalshiHealth.mode === 'paper') !== (polymarketHealth.mode === 'paper');
+
     let positions;
     try {
-      positions = await this.positionRepository.findByStatusWithOrders('OPEN');
+      positions = await this.positionRepository.findByStatusWithOrders(
+        'OPEN',
+        isPaper,
+      );
     } catch (error) {
       this.logger.error({
         message: 'Failed to query open positions for exit evaluation',
@@ -75,11 +86,22 @@ export class ExitMonitorService {
       return;
     }
 
+    this.logger.log({
+      message: `Evaluating ${positions.length} positions for exit`,
+      data: { count: positions.length, isPaper, mixedMode },
+    });
+
     let anySucceeded = false;
 
     for (const position of positions) {
       try {
-        await this.evaluatePosition(position);
+        await this.evaluatePosition(
+          position,
+          isPaper,
+          mixedMode,
+          kalshiHealth,
+          polymarketHealth,
+        );
         anySucceeded = true;
       } catch (error) {
         this.logger.error({
@@ -110,10 +132,12 @@ export class ExitMonitorService {
     position: Awaited<
       ReturnType<PositionRepository['findByStatusWithOrders']>
     >[0],
+    isPaper: boolean,
+    mixedMode: boolean,
+    kalshiHealth: ReturnType<IPlatformConnector['getHealth']>,
+    polymarketHealth: ReturnType<IPlatformConnector['getHealth']>,
   ): Promise<void> {
-    // Check connector health — skip if either platform is disconnected
-    const kalshiHealth = this.kalshiConnector.getHealth();
-    const polymarketHealth = this.polymarketConnector.getHealth();
+    // Check connector health — skip if either platform disconnected since cycle start
 
     if (
       kalshiHealth.status === 'disconnected' ||
@@ -219,6 +243,8 @@ export class ExitMonitorService {
         evalResult,
         kalshiClosePrice,
         polymarketClosePrice,
+        isPaper,
+        mixedMode,
       );
     }
   }
@@ -230,6 +256,8 @@ export class ExitMonitorService {
     evalResult: ThresholdEvalResult,
     kalshiClosePrice: Decimal,
     polymarketClosePrice: Decimal,
+    isPaper: boolean,
+    mixedMode: boolean,
   ): Promise<void> {
     const kalshiOrder = position.kalshiOrder!;
     const polymarketOrder = position.polymarketOrder!;
@@ -329,6 +357,7 @@ export class ExitMonitorService {
       status: primaryResult.status === 'filled' ? 'FILLED' : 'PARTIAL',
       fillPrice: primaryResult.filledPrice,
       fillSize: primaryResult.filledQuantity,
+      isPaper,
     });
 
     // Submit secondary leg exit
@@ -350,6 +379,8 @@ export class ExitMonitorService {
         error,
         secondaryClosePrice,
         secondaryFillSize,
+        isPaper,
+        mixedMode,
       );
       return;
     }
@@ -365,6 +396,8 @@ export class ExitMonitorService {
         new Error(`Order status: ${secondaryResult.status}`),
         secondaryClosePrice,
         secondaryFillSize,
+        isPaper,
+        mixedMode,
       );
       return;
     }
@@ -380,6 +413,7 @@ export class ExitMonitorService {
       status: secondaryResult.status === 'filled' ? 'FILLED' : 'PARTIAL',
       fillPrice: secondaryResult.filledPrice,
       fillSize: secondaryResult.filledQuantity,
+      isPaper,
     });
 
     // Both legs filled — calculate realized P&L
@@ -457,8 +491,6 @@ export class ExitMonitorService {
     // Emit exit event
     this.eventEmitter.emit(
       EVENT_NAMES.EXIT_TRIGGERED,
-      // Exit monitor only processes live positions (isPaper=false filter from Story 5.5.2).
-      // Hardcoding false/false — update if paper position exit handling is added.
       new ExitTriggeredEvent(
         position.positionId,
         position.pairId,
@@ -469,8 +501,8 @@ export class ExitMonitorService {
         kalshiCloseOrderId,
         polymarketCloseOrderId,
         undefined,
-        false,
-        false,
+        isPaper,
+        mixedMode,
       ),
     );
 
@@ -482,6 +514,8 @@ export class ExitMonitorService {
         realizedPnl: realizedPnl.toFixed(8),
         kalshiCloseOrderId,
         polymarketCloseOrderId,
+        isPaper,
+        mixedMode,
       },
     });
   }
@@ -495,6 +529,8 @@ export class ExitMonitorService {
     error: unknown,
     failedAttemptedPrice: Decimal,
     failedAttemptedSize: Decimal,
+    isPaper: boolean,
+    mixedMode: boolean,
   ): Promise<void> {
     await this.positionRepository.updateStatus(
       position.positionId,
@@ -563,10 +599,9 @@ export class ExitMonitorService {
           'Retry failed exit leg via POST /api/positions/:id/retry-leg',
           'Close remaining leg via POST /api/positions/:id/close-leg',
         ],
-        // Exit monitor only processes live positions (isPaper=false filter from Story 5.5.2).
         undefined,
-        false,
-        false,
+        isPaper,
+        mixedMode,
       ),
     );
 
@@ -578,6 +613,8 @@ export class ExitMonitorService {
         filledPlatform: filledPlatformId,
         failedPlatform: failedPlatformId,
         error: error instanceof Error ? error.message : String(error),
+        isPaper,
+        mixedMode,
       },
     });
   }

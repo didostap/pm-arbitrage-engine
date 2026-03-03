@@ -292,6 +292,13 @@ describe('Data Ingestion (e2e)', () => {
         eightyTwoSecondsAgo,
       );
 
+      // Reset consecutive counters so this test is self-contained
+      // (doesn't rely on accumulated ticks from prior tests)
+      healthService['consecutiveUnhealthyTicks'].set(PlatformId.KALSHI, 0);
+      healthService['consecutiveHealthyTicks'].set(PlatformId.KALSHI, 0);
+
+      // Threshold is 2 consecutive unhealthy ticks — call publishHealth twice
+      await healthService.publishHealth();
       await healthService.publishHealth();
 
       // Protocol should be activated
