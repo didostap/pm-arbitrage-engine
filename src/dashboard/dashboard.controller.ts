@@ -1,15 +1,22 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { AuthTokenGuard } from '../common/guards/auth-token.guard';
+import {
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from '../common/errors/system-health-error';
 import { DashboardService } from './dashboard.service';
 import {
   OverviewResponseDto,
   HealthListResponseDto,
+  PositionDetailResponseDto,
   PositionListResponseDto,
   AlertListResponseDto,
 } from './dto';
@@ -47,12 +54,65 @@ export class DashboardController {
     enum: ['live', 'paper', 'all'],
     description: 'Filter by trading mode (default: all)',
   })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page (default: 50, max: 200)',
+  })
   async getPositions(
     @Query('mode') mode?: 'live' | 'paper' | 'all',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ): Promise<PositionListResponseDto> {
     const filterMode = mode === 'all' ? undefined : mode;
-    const data = await this.dashboardService.getPositions(filterMode);
-    return { data, count: data.length, timestamp: new Date().toISOString() };
+    const pageNum = Math.max(1, page ? parseInt(page, 10) : 1);
+    const limitNum = Math.min(
+      Math.max(1, limit ? parseInt(limit, 10) : 50),
+      200,
+    );
+    const result = await this.dashboardService.getPositions(
+      filterMode,
+      pageNum,
+      limitNum,
+    );
+    return {
+      data: result.data,
+      count: result.count,
+      page: pageNum,
+      limit: limitNum,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('positions/:id')
+  @ApiOperation({ summary: 'Single position detail with enriched P&L data' })
+  @ApiParam({ name: 'id', description: 'Position ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Position found and enriched',
+    type: PositionDetailResponseDto,
+  })
+  @ApiResponse({ status: 404, description: 'Position not found' })
+  async getPositionById(
+    @Param('id') id: string,
+  ): Promise<PositionDetailResponseDto> {
+    const data = await this.dashboardService.getPositionById(id);
+    if (!data) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.NOT_FOUND,
+        `Position ${id} not found`,
+        'warning',
+        'DashboardController',
+      );
+    }
+    return { data, timestamp: new Date().toISOString() };
   }
 
   @Get('alerts')

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../common/prisma.service';
+import { PositionEnrichmentService } from './position-enrichment.service';
+import type { EnrichmentResult } from './position-enrichment.service';
 import Decimal from 'decimal.js';
 
 function createMockPrisma() {
@@ -12,6 +14,7 @@ function createMockPrisma() {
     openPosition: {
       count: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       aggregate: vi.fn(),
     },
     order: {
@@ -32,43 +35,56 @@ function createMockConfigService() {
   } as unknown as ConfigService;
 }
 
+function createMockEnrichmentService() {
+  return {
+    enrich: vi.fn(),
+  } as unknown as PositionEnrichmentService;
+}
+
+const mockEnrichedResult: EnrichmentResult = {
+  status: 'enriched',
+  data: {
+    currentPrices: { kalshi: '0.60', polymarket: '0.40' },
+    currentEdge: '0.08000000',
+    unrealizedPnl: '8.00000000',
+    exitProximity: { stopLoss: '0.25000000', takeProfit: '0.80000000' },
+    resolutionDate: '2026-04-01T00:00:00.000Z',
+    timeToResolution: '27d 12h',
+  },
+};
+
 describe('DashboardService', () => {
   let service: DashboardService;
   let prisma: ReturnType<typeof createMockPrisma>;
   let configService: ReturnType<typeof createMockConfigService>;
+  let enrichmentService: ReturnType<typeof createMockEnrichmentService>;
 
   beforeEach(() => {
     prisma = createMockPrisma();
     configService = createMockConfigService();
-    service = new DashboardService(prisma, configService);
+    enrichmentService = createMockEnrichmentService();
+    service = new DashboardService(prisma, configService, enrichmentService);
   });
 
   describe('getOverview', () => {
     it('should return composite overview with all metrics', async () => {
-      // Mock health logs
       (
         prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
       ).mockResolvedValue([
         { platform: 'KALSHI', status: 'healthy' },
         { platform: 'POLYMARKET', status: 'healthy' },
       ]);
-
-      // Mock open position count (first call: open positions, second call: single-leg alerts)
       (prisma.openPosition.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(5)
         .mockResolvedValueOnce(0);
-
-      // Mock trailing 7d P&L (sum of closed position edges)
       (
         prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
       ).mockResolvedValue({
         _sum: { expectedEdge: new Decimal('125.50') },
       });
-
-      // Mock execution quality: total orders and filled orders
       (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(100) // total orders
-        .mockResolvedValueOnce(95); // filled orders
+        .mockResolvedValueOnce(100)
+        .mockResolvedValueOnce(95);
 
       const result = await service.getOverview();
 
@@ -76,7 +92,7 @@ describe('DashboardService', () => {
       expect(result.trailingPnl7d).toBe('125.5');
       expect(result.executionQualityRatio).toBe(0.95);
       expect(result.openPositionCount).toBe(5);
-      expect(result.activeAlertCount).toBe(0); // no single-leg positions
+      expect(result.activeAlertCount).toBe(0);
     });
 
     it('should return degraded health when any platform is degraded', async () => {
@@ -91,15 +107,12 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0);
       (
         prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: null },
-      });
+      ).mockResolvedValue({ _sum: { expectedEdge: null } });
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
 
       const result = await service.getOverview();
-
       expect(result.systemHealth).toBe('degraded');
     });
 
@@ -115,15 +128,12 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0);
       (
         prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: null },
-      });
+      ).mockResolvedValue({ _sum: { expectedEdge: null } });
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
 
       const result = await service.getOverview();
-
       expect(result.systemHealth).toBe('critical');
     });
 
@@ -136,18 +146,15 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0);
       (
         prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: null },
-      });
+      ).mockResolvedValue({ _sum: { expectedEdge: null } });
       (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0) // total
-        .mockResolvedValueOnce(0); // filled
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
 
       const result = await service.getOverview();
-
       expect(result.executionQualityRatio).toBe(0);
       expect(result.trailingPnl7d).toBe('0');
-      expect(result.systemHealth).toBe('critical'); // no health logs = critical
+      expect(result.systemHealth).toBe('critical');
     });
 
     it('should use decimal.js for P&L calculation', async () => {
@@ -167,8 +174,6 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(10);
 
       const result = await service.getOverview();
-
-      // Must be "0.1" not "0.1000000000000000055511151231257827021181583404541015625"
       expect(result.trailingPnl7d).toBe('0.1');
     });
   });
@@ -193,7 +198,6 @@ describe('DashboardService', () => {
       ]);
 
       const result = await service.getHealth();
-
       expect(result).toHaveLength(2);
       expect(result[0]!.platformId).toBe('kalshi');
       expect(result[0]!.status).toBe('healthy');
@@ -203,39 +207,66 @@ describe('DashboardService', () => {
   });
 
   describe('getPositions', () => {
-    it('should return open positions with decimal strings', async () => {
+    it('should return enriched positions with pagination', async () => {
+      const mockPosition = {
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'OPEN',
+        expectedEdge: new Decimal('0.012'),
+        entryPrices: { kalshi: '0.55', polymarket: '0.45' },
+        sizes: { kalshi: '100', polymarket: '100' },
+        isPaper: false,
+        pair: {
+          kalshiContractId: 'k-contract',
+          polymarketContractId: 'p-contract',
+          kalshiDescription: 'Kalshi Yes',
+          polymarketDescription: 'Poly Yes',
+          resolutionDate: new Date('2026-04-01'),
+        },
+        kalshiOrder: {
+          fillPrice: new Decimal('0.55'),
+          fillSize: new Decimal('100'),
+          side: 'buy',
+        },
+        polymarketOrder: {
+          fillPrice: new Decimal('0.45'),
+          fillSize: new Decimal('100'),
+          side: 'sell',
+        },
+      };
+
       (
         prisma.openPosition.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        {
-          positionId: 'pos-1',
-          pairId: 'pair-1',
-          status: 'OPEN',
-          expectedEdge: new Decimal('0.012'),
-          entryPrices: { kalshi: '0.55', polymarket: '0.45' },
-          sizes: { kalshi: '100', polymarket: '100' },
-          isPaper: false,
-          pair: {
-            kalshiContractId: 'k-contract',
-            polymarketContractId: 'p-contract',
-            kalshiDescription: 'Kalshi Yes',
-            polymarketDescription: 'Poly Yes',
-          },
-        },
-      ]);
+      ).mockResolvedValue([mockPosition]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        1,
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
 
       const result = await service.getPositions();
 
-      expect(result).toHaveLength(1);
-      expect(result[0]!.id).toBe('pos-1');
-      expect(result[0]!.initialEdge).toBe('0.012');
-      expect(result[0]!.isPaper).toBe(false);
+      expect(result.data).toHaveLength(1);
+      expect(result.count).toBe(1);
+      expect(result.data[0]!.id).toBe('pos-1');
+      expect(result.data[0]!.initialEdge).toBe('0.012');
+      expect(result.data[0]!.currentEdge).toBe('0.08000000');
+      expect(result.data[0]!.unrealizedPnl).toBe('8.00000000');
+      expect(result.data[0]!.exitProximity).toEqual({
+        stopLoss: '0.25000000',
+        takeProfit: '0.80000000',
+      });
+      expect(result.data[0]!.resolutionDate).toBe('2026-04-01T00:00:00.000Z');
     });
 
     it('should filter by mode when specified', async () => {
       (
         prisma.openPosition.findMany as ReturnType<typeof vi.fn>
       ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        0,
+      );
 
       await service.getPositions('paper');
 
@@ -246,6 +277,150 @@ describe('DashboardService', () => {
           where: expect.objectContaining({ isPaper: true }),
         }),
       );
+    });
+
+    it('should include orders in query for enrichment', async () => {
+      (
+        prisma.openPosition.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        0,
+      );
+
+      await service.getPositions();
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        }),
+      );
+    });
+
+    it('should apply pagination with skip and take', async () => {
+      (
+        prisma.openPosition.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        0,
+      );
+
+      await service.getPositions(undefined, 3, 10);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
+    });
+
+    it('should clamp limit to max 200', async () => {
+      (
+        prisma.openPosition.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        0,
+      );
+
+      await service.getPositions(undefined, 1, 500);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(prisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 200 }),
+      );
+    });
+
+    it('should handle partial enrichment gracefully', async () => {
+      const mockPosition = {
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'OPEN',
+        expectedEdge: new Decimal('0.012'),
+        entryPrices: { kalshi: '0.55', polymarket: '0.45' },
+        isPaper: false,
+        pair: {
+          kalshiContractId: 'k-contract',
+          polymarketContractId: 'p-contract',
+          kalshiDescription: 'Kalshi Yes',
+          resolutionDate: null,
+        },
+        kalshiOrder: null,
+        polymarketOrder: null,
+      };
+      (
+        prisma.openPosition.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([mockPosition]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>).mockResolvedValue(
+        1,
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: 'failed',
+        data: {
+          currentPrices: { kalshi: null, polymarket: null },
+          currentEdge: null,
+          unrealizedPnl: null,
+          exitProximity: null,
+          resolutionDate: null,
+          timeToResolution: null,
+        },
+        errors: ['Missing order fill data'],
+      });
+
+      const result = await service.getPositions();
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]!.currentEdge).toBeNull();
+      expect(result.data[0]!.unrealizedPnl).toBeNull();
+    });
+  });
+
+  describe('getPositionById', () => {
+    it('should return enriched position by ID', async () => {
+      const mockPosition = {
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'OPEN',
+        expectedEdge: new Decimal('0.012'),
+        entryPrices: { kalshi: '0.55', polymarket: '0.45' },
+        isPaper: false,
+        pair: {
+          kalshiContractId: 'k-contract',
+          polymarketContractId: 'p-contract',
+          kalshiDescription: 'Kalshi Yes',
+          resolutionDate: new Date('2026-04-01'),
+        },
+        kalshiOrder: {
+          fillPrice: new Decimal('0.55'),
+          fillSize: new Decimal('100'),
+          side: 'buy',
+        },
+        polymarketOrder: {
+          fillPrice: new Decimal('0.45'),
+          fillSize: new Decimal('100'),
+          side: 'sell',
+        },
+      };
+
+      (
+        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(mockPosition);
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+
+      const result = await service.getPositionById('pos-1');
+
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe('pos-1');
+      expect(result!.currentEdge).toBe('0.08000000');
+    });
+
+    it('should return null when position not found', async () => {
+      (
+        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(null);
+
+      const result = await service.getPositionById('nonexistent');
+      expect(result).toBeNull();
     });
   });
 
@@ -267,7 +442,6 @@ describe('DashboardService', () => {
       ]);
 
       const result = await service.getAlerts();
-
       expect(result).toHaveLength(1);
       expect(result[0]!.type).toBe('single_leg_exposure');
       expect(result[0]!.severity).toBe('critical');

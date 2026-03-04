@@ -14,6 +14,7 @@ import type { DashboardOverviewDto } from './dto/dashboard-overview.dto';
 import type { PlatformHealthDto } from './dto/platform-health.dto';
 import type { PositionSummaryDto } from './dto/position-summary.dto';
 import type { AlertSummaryDto } from './dto/alert-summary.dto';
+import { PositionEnrichmentService } from './position-enrichment.service';
 
 @Injectable()
 export class DashboardService {
@@ -22,6 +23,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly enrichmentService: PositionEnrichmentService,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -127,8 +129,14 @@ export class DashboardService {
 
   async getPositions(
     mode?: 'live' | 'paper' | 'all',
-  ): Promise<PositionSummaryDto[]> {
+    page: number = 1,
+    limit: number = 50,
+  ): Promise<{ data: PositionSummaryDto[]; count: number }> {
     try {
+      const clampedLimit = Math.min(Math.max(1, limit), 200);
+      const clampedPage = Math.max(1, page);
+      const skip = (clampedPage - 1) * clampedLimit;
+
       const where: Record<string, unknown> = {
         status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
       };
@@ -136,36 +144,70 @@ export class DashboardService {
       if (mode === 'live') where['isPaper'] = false;
       else if (mode === 'paper') where['isPaper'] = true;
 
-      const positions = await this.prisma.openPosition.findMany({
-        where,
-        include: { pair: true },
-        orderBy: { updatedAt: 'desc' },
-      });
+      const [positions, count] = await Promise.all([
+        this.prisma.openPosition.findMany({
+          where,
+          include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+          orderBy: { updatedAt: 'desc' },
+          skip,
+          take: clampedLimit,
+        }),
+        this.prisma.openPosition.count({ where }),
+      ]);
 
-      return positions.map((pos) => ({
-        id: pos.positionId,
-        pairName:
-          (pos.pair as { kalshiDescription?: string })?.kalshiDescription ??
-          (pos.pair as { polymarketDescription?: string })
-            ?.polymarketDescription ??
-          pos.pairId,
-        platforms: {
-          kalshi:
-            (pos.pair as { kalshiContractId?: string })?.kalshiContractId ??
-            'kalshi',
-          polymarket:
-            (pos.pair as { polymarketContractId?: string })
-              ?.polymarketContractId ?? 'polymarket',
-        },
-        entryPrices: pos.entryPrices as Record<string, string>,
-        currentPrices: null,
-        initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
-        currentEdge: null,
-        unrealizedPnl: null,
-        exitProximity: null,
-        isPaper: pos.isPaper,
-        status: pos.status,
-      }));
+      // Enrich in batches to avoid overwhelming connectors with concurrent RPC calls
+      const BATCH_SIZE = 10;
+      const dtos: PositionSummaryDto[] = [];
+
+      for (let i = 0; i < positions.length; i += BATCH_SIZE) {
+        const batch = positions.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (pos) => {
+            const enrichment = await this.enrichmentService.enrich(pos);
+
+            if (
+              enrichment.status === 'failed' ||
+              enrichment.status === 'partial'
+            ) {
+              this.logger.warn({
+                message: `Position enrichment ${enrichment.status}`,
+                data: {
+                  positionId: pos.positionId,
+                  errors: enrichment.errors,
+                },
+              });
+            }
+
+            return {
+              id: pos.positionId,
+              pairName:
+                pos.pair.kalshiDescription ??
+                pos.pair.polymarketDescription ??
+                pos.pairId,
+              platforms: {
+                kalshi: pos.pair.kalshiContractId,
+                polymarket: pos.pair.polymarketContractId,
+              },
+              entryPrices: pos.entryPrices as {
+                kalshi: string;
+                polymarket: string;
+              },
+              currentPrices: enrichment.data.currentPrices,
+              initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
+              currentEdge: enrichment.data.currentEdge,
+              unrealizedPnl: enrichment.data.unrealizedPnl,
+              exitProximity: enrichment.data.exitProximity,
+              resolutionDate: enrichment.data.resolutionDate,
+              timeToResolution: enrichment.data.timeToResolution,
+              isPaper: pos.isPaper,
+              status: pos.status,
+            };
+          }),
+        );
+        dtos.push(...batchResults);
+      }
+
+      return { data: dtos, count };
     } catch (error) {
       this.logger.error({
         message: 'Failed to fetch positions',
@@ -176,6 +218,57 @@ export class DashboardService {
       throw new SystemHealthError(
         SYSTEM_HEALTH_ERROR_CODES.DATABASE_FAILURE,
         'Failed to fetch positions',
+        'warning',
+        'DashboardService',
+      );
+    }
+  }
+
+  async getPositionById(
+    positionId: string,
+  ): Promise<PositionSummaryDto | null> {
+    try {
+      const pos = await this.prisma.openPosition.findUnique({
+        where: { positionId },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+      });
+
+      if (!pos) return null;
+
+      const enrichment = await this.enrichmentService.enrich(pos);
+
+      return {
+        id: pos.positionId,
+        pairName:
+          pos.pair.kalshiDescription ??
+          pos.pair.polymarketDescription ??
+          pos.pairId,
+        platforms: {
+          kalshi: pos.pair.kalshiContractId,
+          polymarket: pos.pair.polymarketContractId,
+        },
+        entryPrices: pos.entryPrices as { kalshi: string; polymarket: string },
+        currentPrices: enrichment.data.currentPrices,
+        initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
+        currentEdge: enrichment.data.currentEdge,
+        unrealizedPnl: enrichment.data.unrealizedPnl,
+        exitProximity: enrichment.data.exitProximity,
+        resolutionDate: enrichment.data.resolutionDate,
+        timeToResolution: enrichment.data.timeToResolution,
+        isPaper: pos.isPaper,
+        status: pos.status,
+      };
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to fetch position by ID',
+        data: {
+          positionId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.DATABASE_FAILURE,
+        'Failed to fetch position',
         'warning',
         'DashboardService',
       );

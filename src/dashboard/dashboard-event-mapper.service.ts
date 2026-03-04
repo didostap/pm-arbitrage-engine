@@ -130,10 +130,8 @@ export class DashboardEventMapperService {
       event: WS_EVENTS.POSITION_UPDATE,
       data: {
         positionId: event.positionId,
-        pairName: event.pairId,
         status: 'closed',
-        currentEdge: event.finalEdge,
-        unrealizedPnl: event.realizedPnl,
+        timestamp: new Date().toISOString(),
       },
       timestamp: new Date().toISOString(),
     };

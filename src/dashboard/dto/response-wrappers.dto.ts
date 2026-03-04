@@ -23,12 +23,26 @@ export class HealthListResponseDto {
   timestamp!: string;
 }
 
+export class PositionDetailResponseDto {
+  @ApiProperty({ type: PositionSummaryDto })
+  data!: PositionSummaryDto;
+
+  @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
+  timestamp!: string;
+}
+
 export class PositionListResponseDto {
   @ApiProperty({ type: [PositionSummaryDto] })
   data!: PositionSummaryDto[];
 
-  @ApiProperty({ description: 'Number of items' })
+  @ApiProperty({ description: 'Total number of matching positions' })
   count!: number;
+
+  @ApiProperty({ description: 'Current page number' })
+  page!: number;
+
+  @ApiProperty({ description: 'Items per page' })
+  limit!: number;
 
   @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
   timestamp!: string;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 import { PlatformId } from '../common/types/platform.type';
 import type { PlatformHealth } from '../common/types/platform.type';
@@ -190,7 +190,7 @@ describe('DashboardEventMapperService', () => {
   });
 
   describe('mapPositionUpdateEvent', () => {
-    it('should map ExitTriggeredEvent to position update', () => {
+    it('should map ExitTriggeredEvent to lightweight position update', () => {
       const event = new ExitTriggeredEvent(
         'pos-1',
         'pair-1',
@@ -207,6 +207,11 @@ describe('DashboardEventMapperService', () => {
       expect(result.event).toBe(WS_EVENTS.POSITION_UPDATE);
       expect(result.data.positionId).toBe('pos-1');
       expect(result.data.status).toBe('closed');
+      expect(result.data.timestamp).toBeDefined();
+      // Verify lightweight — no P&L or price fields
+      expect(result.data).not.toHaveProperty('currentEdge');
+      expect(result.data).not.toHaveProperty('unrealizedPnl');
+      expect(result.data).not.toHaveProperty('pairName');
     });
   });
 });

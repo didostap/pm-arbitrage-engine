@@ -52,7 +52,7 @@ describe('normalizeKalshiLevels', () => {
     expect(result.asks).toEqual([{ price: 0.5, quantity: 20 }]);
   });
 
-  it('should preserve bid input order (no re-sorting)', () => {
+  it('should sort bids descending (best bid first)', () => {
     const result = normalizeKalshiLevels(
       [
         [40, 10],
@@ -62,8 +62,8 @@ describe('normalizeKalshiLevels', () => {
       [],
     );
     expect(result.bids).toEqual([
-      { price: 0.4, quantity: 10 },
       { price: 0.6, quantity: 5 },
+      { price: 0.4, quantity: 10 },
       { price: 0.2, quantity: 3 },
     ]);
   });

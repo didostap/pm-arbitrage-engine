@@ -5,3 +5,5 @@ export type {
   IExecutionEngine,
   ExecutionResult,
 } from './execution-engine.interface.js';
+export type { IPriceFeedService } from './price-feed-service.interface.js';
+export { PRICE_FEED_SERVICE_TOKEN } from './price-feed-service.interface.js';

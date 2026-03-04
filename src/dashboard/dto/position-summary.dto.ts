@@ -1,5 +1,65 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export class PlatformPairDto {
+  @ApiProperty({
+    description: 'Kalshi contract ID',
+    example: 'kalshi-contract-1',
+  })
+  kalshi!: string;
+
+  @ApiProperty({
+    description: 'Polymarket contract ID',
+    example: 'polymarket-contract-1',
+  })
+  polymarket!: string;
+}
+
+export class EntryPricesDto {
+  @ApiProperty({
+    description: 'Kalshi entry price (decimal string)',
+    example: '0.55',
+  })
+  kalshi!: string;
+
+  @ApiProperty({
+    description: 'Polymarket entry price (decimal string)',
+    example: '0.45',
+  })
+  polymarket!: string;
+}
+
+export class CurrentPricesDto {
+  @ApiPropertyOptional({
+    description: 'Kalshi close price (decimal string, null if unavailable)',
+    example: '0.60',
+    type: String,
+    nullable: true,
+  })
+  kalshi!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Polymarket close price (decimal string, null if unavailable)',
+    example: '0.40',
+    type: String,
+    nullable: true,
+  })
+  polymarket!: string | null;
+}
+
+export class ExitProximityDto {
+  @ApiProperty({
+    description: 'Stop-loss proximity (decimal string, 0-1 range)',
+    example: '0.25000000',
+  })
+  stopLoss!: string;
+
+  @ApiProperty({
+    description: 'Take-profit proximity (decimal string, 0-1 range)',
+    example: '0.80000000',
+  })
+  takeProfit!: string;
+}
+
 export class PositionSummaryDto {
   @ApiProperty({ description: 'Position ID' })
   id!: string;
@@ -7,23 +67,22 @@ export class PositionSummaryDto {
   @ApiProperty({ description: 'Contract pair name', example: 'BTC-100K-YES' })
   pairName!: string;
 
-  @ApiProperty({
-    description: 'Platforms involved',
-    example: { kalshi: 'kalshi', polymarket: 'polymarket' },
-  })
-  platforms!: { kalshi: string; polymarket: string };
+  @ApiProperty({ description: 'Platforms involved', type: PlatformPairDto })
+  platforms!: PlatformPairDto;
 
   @ApiProperty({
     description: 'Entry prices per platform (decimal strings)',
-    example: { kalshi: '0.55', polymarket: '0.45' },
+    type: EntryPricesDto,
   })
-  entryPrices!: Record<string, string>;
+  entryPrices!: EntryPricesDto;
 
   @ApiPropertyOptional({
     description:
       'Current prices per platform (decimal strings, null if unavailable)',
+    type: CurrentPricesDto,
+    nullable: true,
   })
-  currentPrices!: Record<string, string> | null;
+  currentPrices!: CurrentPricesDto | null;
 
   @ApiProperty({
     description: 'Initial edge at entry (decimal string)',
@@ -33,16 +92,40 @@ export class PositionSummaryDto {
 
   @ApiPropertyOptional({
     description: 'Current edge (decimal string, null if unavailable)',
+    type: String,
+    nullable: true,
   })
   currentEdge!: string | null;
 
   @ApiPropertyOptional({
     description: 'Unrealized P&L in USD (decimal string, null if unavailable)',
+    type: String,
+    nullable: true,
   })
   unrealizedPnl!: string | null;
 
-  @ApiPropertyOptional({ description: 'Proximity to exit threshold (0-1)' })
-  exitProximity!: number | null;
+  @ApiPropertyOptional({
+    description:
+      'Exit proximity: stop-loss and take-profit as decimal strings (0-1 range)',
+    type: ExitProximityDto,
+    nullable: true,
+  })
+  exitProximity!: ExitProximityDto | null;
+
+  @ApiPropertyOptional({
+    description: 'Resolution date (ISO 8601, null if unknown)',
+    type: String,
+    nullable: true,
+  })
+  resolutionDate!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Time to resolution (human-readable, e.g., "2d 5h", null if unknown)',
+    type: String,
+    nullable: true,
+  })
+  timeToResolution!: string | null;
 
   @ApiProperty({ description: 'Whether this is a paper trading position' })
   isPaper!: boolean;

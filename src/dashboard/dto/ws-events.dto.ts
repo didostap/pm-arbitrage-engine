@@ -30,12 +30,11 @@ export interface WsAlertNewPayload {
   timestamp: string;
 }
 
+/** Lightweight payload — frontend refetches enriched data via REST on receiving this */
 export interface WsPositionUpdatePayload {
   positionId: string;
-  pairName: string;
   status: string;
-  currentEdge: string | null;
-  unrealizedPnl: string | null;
+  timestamp: string;
 }
 
 export interface WsMatchPendingPayload {

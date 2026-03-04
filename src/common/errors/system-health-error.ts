@@ -30,4 +30,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   RECONCILIATION_DISCREPANCY: 4005,
   /** Invalid configuration at startup — error */
   INVALID_CONFIGURATION: 4006,
+  /** Resource not found — warning */
+  NOT_FOUND: 4007,
 } as const;

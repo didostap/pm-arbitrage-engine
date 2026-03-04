@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
+import { SystemHealthError } from '../common/errors/system-health-error';
 
 describe('DashboardController', () => {
   let controller: DashboardController;
@@ -11,6 +12,7 @@ describe('DashboardController', () => {
       getOverview: vi.fn(),
       getHealth: vi.fn(),
       getPositions: vi.fn(),
+      getPositionById: vi.fn(),
       getAlerts: vi.fn(),
     } as unknown as DashboardService;
     controller = new DashboardController(service);
@@ -30,7 +32,6 @@ describe('DashboardController', () => {
       );
 
       const result = await controller.getOverview();
-
       expect(result.data).toEqual(overview);
       expect(result.timestamp).toBeDefined();
     });
@@ -51,7 +52,6 @@ describe('DashboardController', () => {
       (service.getHealth as ReturnType<typeof vi.fn>).mockResolvedValue(health);
 
       const result = await controller.getHealth();
-
       expect(result.data).toEqual(health);
       expect(result.count).toBe(1);
       expect(result.timestamp).toBeDefined();
@@ -59,24 +59,71 @@ describe('DashboardController', () => {
   });
 
   describe('GET /dashboard/positions', () => {
-    it('should return positions with default mode=all', async () => {
-      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    it('should return positions with default mode=all and pagination', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
 
       const result = await controller.getPositions();
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(service.getPositions).toHaveBeenCalledWith(undefined);
+      expect(service.getPositions).toHaveBeenCalledWith(undefined, 1, 50);
       expect(result.data).toEqual([]);
       expect(result.count).toBe(0);
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(50);
     });
 
-    it('should pass mode filter when specified', async () => {
-      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    it('should pass mode filter and pagination when specified', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
 
-      await controller.getPositions('paper');
+      await controller.getPositions('paper', '2', '25');
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(service.getPositions).toHaveBeenCalledWith('paper');
+      expect(service.getPositions).toHaveBeenCalledWith('paper', 2, 25);
+    });
+
+    it('should convert mode=all to undefined', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
+
+      await controller.getPositions('all');
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.getPositions).toHaveBeenCalledWith(undefined, 1, 50);
+    });
+  });
+
+  describe('GET /dashboard/positions/:id', () => {
+    it('should return single enriched position', async () => {
+      const position = {
+        id: 'pos-1',
+        pairName: 'BTC-100K',
+        currentEdge: '0.08',
+      };
+      (service.getPositionById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        position,
+      );
+
+      const result = await controller.getPositionById('pos-1');
+      expect(result.data).toEqual(position);
+      expect(result.timestamp).toBeDefined();
+    });
+
+    it('should throw 404 when position not found', async () => {
+      (service.getPositionById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        null,
+      );
+
+      await expect(controller.getPositionById('nonexistent')).rejects.toThrow(
+        SystemHealthError,
+      );
     });
   });
 
@@ -95,7 +142,6 @@ describe('DashboardController', () => {
       (service.getAlerts as ReturnType<typeof vi.fn>).mockResolvedValue(alerts);
 
       const result = await controller.getAlerts();
-
       expect(result.data).toEqual(alerts);
       expect(result.count).toBe(1);
     });
