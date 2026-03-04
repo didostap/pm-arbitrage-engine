@@ -69,7 +69,15 @@ export interface OrderStatusResult {
 export interface FeeSchedule {
   platformId: PlatformId;
   makerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
-  takerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee)
+  takerFeePercent: number; // Percentage: 0-100 scale (e.g., 2.0 = 2% fee). For dynamic-fee platforms, this is the worst-case upper bound.
   description: string;
   gasEstimateUsd?: number; // Dynamic gas estimate in USD (Polymarket only)
+  /**
+   * Optional dynamic fee callback for price-dependent taker fees (e.g. Kalshi).
+   * @param price - Internal decimal probability (0.00-1.00). Converted from Decimal via toNumber();
+   *   expect standard IEEE 754 double-precision semantics.
+   * @returns Fee rate as a decimal fraction (rate per unit price, NOT a percentage).
+   *   Consumers multiply by price to get fee cost: `feeCost = price × takerFeeForPrice(price)`.
+   */
+  takerFeeForPrice?: (price: number) => number;
 }

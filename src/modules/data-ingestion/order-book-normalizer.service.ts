@@ -89,6 +89,7 @@ export class OrderBookNormalizerService {
   /**
    * Normalizes Polymarket order book to unified format.
    * Polymarket prices are already decimal (0.00-1.00), just parse and validate.
+   * Book is for the requested token (contract pairs use the Yes token → YES outcome).
    *
    * @param polymarketBook - Raw order book from Polymarket CLOB API
    * @returns Normalized order book or null if invalid prices detected

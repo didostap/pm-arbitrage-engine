@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
+import { FinancialMath } from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -372,8 +373,11 @@ export class SingleLegResolutionService {
     const closeFillPrice = new Decimal(closeOrderResult.filledPrice);
     const qty = new Decimal(filledOrder.fillSize.toString());
     const feeSchedule = connector.getFeeSchedule();
-    const takerFeeDecimal = new Decimal(feeSchedule.takerFeePercent).div(100);
-    const closeFee = closeFillPrice.mul(qty).mul(takerFeeDecimal);
+    const takerFeeRate = FinancialMath.calculateTakerFeeRate(
+      closeFillPrice,
+      feeSchedule,
+    );
+    const closeFee = closeFillPrice.mul(qty).mul(takerFeeRate);
 
     let rawPnl: Decimal;
     if (filledSide === 'buy') {
@@ -557,18 +561,14 @@ export class SingleLegResolutionService {
 
     const kalshiFee = this.kalshiConnector.getFeeSchedule();
     const polymarketFee = this.polymarketConnector.getFeeSchedule();
-    const filledTakerFeeDecimal = new Decimal(
-      filledPlatform === PlatformId.KALSHI
-        ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent,
-    )
+    const filledFeeSchedule =
+      filledPlatform === PlatformId.KALSHI ? kalshiFee : polymarketFee;
+    const failedFeeSchedule =
+      failedPlatform === PlatformId.KALSHI ? kalshiFee : polymarketFee;
+    const filledTakerFeeDecimal = new Decimal(filledFeeSchedule.takerFeePercent)
       .div(100)
       .toNumber();
-    const failedTakerFeeDecimal = new Decimal(
-      failedPlatform === PlatformId.KALSHI
-        ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent,
-    )
+    const failedTakerFeeDecimal = new Decimal(failedFeeSchedule.takerFeePercent)
       .div(100)
       .toNumber();
 
@@ -582,6 +582,8 @@ export class SingleLegResolutionService {
       secondarySide: failedSide,
       takerFeeDecimal: filledTakerFeeDecimal,
       secondaryTakerFeeDecimal: failedTakerFeeDecimal,
+      takerFeeForPrice: filledFeeSchedule.takerFeeForPrice,
+      secondaryTakerFeeForPrice: failedFeeSchedule.takerFeeForPrice,
     });
 
     const recommendedActions = buildRecommendedActions(

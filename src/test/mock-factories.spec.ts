@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, vi } from 'vitest';
-import { PlatformId } from '../common/types/platform.type.js';
+import { PlatformId, type FeeSchedule } from '../common/types/platform.type.js';
 import {
   createMockPlatformConnector,
   createMockRiskManager,
@@ -63,16 +63,23 @@ describe('Mock Factories', () => {
       expect(health.platformId).toBe(PlatformId.KALSHI);
     });
 
-    it('should have Kalshi fees (0% taker) by default', () => {
+    it('should have Kalshi fees (1.75% worst-case taker) with dynamic callback', () => {
       const mock = createMockPlatformConnector(PlatformId.KALSHI);
-      const fees = mock.getFeeSchedule();
-      expect(fees.takerFeePercent).toBe(0);
+      const fees = mock.getFeeSchedule() as FeeSchedule;
+      expect(fees.takerFeePercent).toBe(1.75);
+      expect(fees.takerFeeForPrice).toBeDefined();
+      // At P=0.50: rate = 0.07 × 0.50 = 0.035
+      expect(fees.takerFeeForPrice!(0.5)).toBeCloseTo(0.035, 10);
+      // Boundary: returns 0 at extremes
+      expect(fees.takerFeeForPrice!(0)).toBe(0);
+      expect(fees.takerFeeForPrice!(1)).toBe(0);
     });
 
-    it('should have Polymarket fees (2% taker) when specified', () => {
+    it('should have Polymarket fees (2% taker) without dynamic callback', () => {
       const mock = createMockPlatformConnector(PlatformId.POLYMARKET);
       const fees = mock.getFeeSchedule();
       expect(fees.takerFeePercent).toBe(2);
+      expect(fees.takerFeeForPrice).toBeUndefined();
     });
   });
 

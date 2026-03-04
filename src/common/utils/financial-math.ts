@@ -35,8 +35,10 @@ export class FinancialMath {
   /**
    * Calculate net edge after fees and gas.
    * Formula:
-   *   buyFeeCost = buyPrice * (buyFeeSchedule.takerFeePercent / 100)
-   *   sellFeeCost = sellPrice * (sellFeeSchedule.takerFeePercent / 100)
+   *   buyFeeRate = calculateTakerFeeRate(buyPrice, buyFeeSchedule)
+   *   buyFeeCost = buyPrice * buyFeeRate
+   *   sellFeeRate = calculateTakerFeeRate(sellPrice, sellFeeSchedule)
+   *   sellFeeCost = sellPrice * sellFeeRate
    *   gasFraction = gasEstimateUsd / positionSizeUsd
    *   netEdge = grossEdge - buyFeeCost - sellFeeCost - gasFraction
    *
@@ -77,12 +79,16 @@ export class FinancialMath {
       );
     }
 
-    const buyFeeCost = buyPrice.mul(
-      new FinancialDecimal(buyFeeSchedule.takerFeePercent).div(100),
+    const buyFeeRate = FinancialMath.calculateTakerFeeRate(
+      buyPrice,
+      buyFeeSchedule,
     );
-    const sellFeeCost = sellPrice.mul(
-      new FinancialDecimal(sellFeeSchedule.takerFeePercent).div(100),
+    const sellFeeRate = FinancialMath.calculateTakerFeeRate(
+      sellPrice,
+      sellFeeSchedule,
     );
+    const buyFeeCost = buyPrice.mul(buyFeeRate);
+    const sellFeeCost = sellPrice.mul(sellFeeRate);
     const gasFraction = gasEstimateUsd.div(positionSizeUsd);
 
     return grossEdge.minus(buyFeeCost).minus(sellFeeCost).minus(gasFraction);
@@ -99,6 +105,22 @@ export class FinancialMath {
     FinancialMath.validateDecimalInput(threshold, 'threshold');
 
     return netEdge.gte(threshold);
+  }
+
+  /**
+   * Returns the taker fee rate as a decimal fraction for the given price and fee schedule.
+   * Uses the dynamic `takerFeeForPrice` callback when present, falls back to `takerFeePercent / 100`.
+   */
+  static calculateTakerFeeRate(
+    price: Decimal,
+    feeSchedule: FeeSchedule,
+  ): Decimal {
+    if (feeSchedule.takerFeeForPrice) {
+      return new FinancialDecimal(
+        feeSchedule.takerFeeForPrice(price.toNumber()),
+      );
+    }
+    return new FinancialDecimal(feeSchedule.takerFeePercent).div(100);
   }
 
   private static validateDecimalInput(value: Decimal, name: string): void {
