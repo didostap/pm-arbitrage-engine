@@ -32,4 +32,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   INVALID_CONFIGURATION: 4006,
   /** Resource not found — warning */
   NOT_FOUND: 4007,
+  /** Match already approved — conflict */
+  MATCH_ALREADY_APPROVED: 4008,
 } as const;

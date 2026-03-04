@@ -7,4 +7,6 @@ export * from './detection.events';
 export * from './risk.events';
 export * from './execution.events';
 export * from './monitoring.events';
+export * from './match-approved.event';
+export * from './match-rejected.event';
 export * from './event-catalog';

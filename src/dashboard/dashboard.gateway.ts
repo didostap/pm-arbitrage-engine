@@ -19,6 +19,8 @@ import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
 } from '../common/events/risk.events';
+import type { MatchApprovedEvent } from '../common/events/match-approved.event';
+import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { EVENT_NAMES } from '../common/events/event-catalog';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
@@ -107,6 +109,18 @@ export class DashboardGateway
   @OnEvent(EVENT_NAMES.EXIT_TRIGGERED)
   handleExitTriggered(event: ExitTriggeredEvent): void {
     const envelope = this.mapper.mapPositionUpdate(event);
+    this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.MATCH_APPROVED)
+  handleMatchApproved(event: MatchApprovedEvent): void {
+    const envelope = this.mapper.mapMatchApprovedEvent(event);
+    this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.MATCH_REJECTED)
+  handleMatchRejected(event: MatchRejectedEvent): void {
+    const envelope = this.mapper.mapMatchRejectedEvent(event);
     this.broadcast(envelope);
   }
 

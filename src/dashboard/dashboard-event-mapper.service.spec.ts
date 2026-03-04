@@ -10,6 +10,8 @@ import {
   LimitApproachedEvent,
 } from '../common/events/risk.events';
 import { ExitTriggeredEvent } from '../common/events/execution.events';
+import { MatchApprovedEvent } from '../common/events/match-approved.event';
+import { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { WS_EVENTS } from './dto';
 
 describe('DashboardEventMapperService', () => {
@@ -212,6 +214,44 @@ describe('DashboardEventMapperService', () => {
       expect(result.data).not.toHaveProperty('currentEdge');
       expect(result.data).not.toHaveProperty('unrealizedPnl');
       expect(result.data).not.toHaveProperty('pairName');
+    });
+  });
+
+  describe('mapMatchApprovedEvent', () => {
+    it('should map MatchApprovedEvent to WsMatchPendingPayload with status approved', () => {
+      const event = new MatchApprovedEvent(
+        'match-1',
+        'poly-123',
+        'kalshi-456',
+        'Looks correct',
+      );
+
+      const result = mapper.mapMatchApprovedEvent(event);
+
+      expect(result.event).toBe(WS_EVENTS.MATCH_PENDING);
+      expect(result.data.matchId).toBe('match-1');
+      expect(result.data.status).toBe('approved');
+      expect(result.data.confidenceScore).toBeNull();
+      expect(result.timestamp).toBeDefined();
+    });
+  });
+
+  describe('mapMatchRejectedEvent', () => {
+    it('should map MatchRejectedEvent to WsMatchPendingPayload with status rejected', () => {
+      const event = new MatchRejectedEvent(
+        'match-2',
+        'poly-789',
+        'kalshi-012',
+        'Not matching criteria',
+      );
+
+      const result = mapper.mapMatchRejectedEvent(event);
+
+      expect(result.event).toBe(WS_EVENTS.MATCH_PENDING);
+      expect(result.data.matchId).toBe('match-2');
+      expect(result.data.status).toBe('rejected');
+      expect(result.data.confidenceScore).toBeNull();
+      expect(result.timestamp).toBeDefined();
     });
   });
 });

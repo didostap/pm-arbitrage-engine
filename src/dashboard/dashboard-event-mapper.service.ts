@@ -8,12 +8,15 @@ import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
 } from '../common/events/risk.events';
+import type { MatchApprovedEvent } from '../common/events/match-approved.event';
+import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import type {
   WsEventEnvelope,
   WsHealthChangePayload,
   WsExecutionCompletePayload,
   WsAlertNewPayload,
   WsPositionUpdatePayload,
+  WsMatchPendingPayload,
 } from './dto';
 import { WS_EVENTS } from './dto';
 
@@ -132,6 +135,34 @@ export class DashboardEventMapperService {
         positionId: event.positionId,
         status: 'closed',
         timestamp: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapMatchApprovedEvent(
+    event: MatchApprovedEvent,
+  ): WsEventEnvelope<WsMatchPendingPayload> {
+    return {
+      event: WS_EVENTS.MATCH_PENDING,
+      data: {
+        matchId: event.matchId,
+        status: 'approved',
+        confidenceScore: null,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapMatchRejectedEvent(
+    event: MatchRejectedEvent,
+  ): WsEventEnvelope<WsMatchPendingPayload> {
+    return {
+      event: WS_EVENTS.MATCH_PENDING,
+      data: {
+        matchId: event.matchId,
+        status: 'rejected',
+        confidenceScore: null,
       },
       timestamp: new Date().toISOString(),
     };

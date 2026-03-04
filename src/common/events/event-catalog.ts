@@ -139,6 +139,12 @@ export const EVENT_NAMES = {
   AUDIT_LOG_FAILED: 'monitoring.audit.write_failed',
   /** Emitted when hash chain integrity check fails */
   AUDIT_CHAIN_BROKEN: 'monitoring.audit.chain_broken',
+
+  // [Story 7.3] Contract Match Approval Events
+  /** Emitted when operator approves a contract match */
+  MATCH_APPROVED: 'contract.match.approved',
+  /** Emitted when operator rejects a contract match */
+  MATCH_REJECTED: 'contract.match.rejected',
 } as const;
 
 /**
