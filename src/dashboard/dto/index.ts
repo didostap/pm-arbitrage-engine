@@ -5,3 +5,4 @@ export * from './alert-summary.dto';
 export * from './response-wrappers.dto';
 export * from './ws-events.dto';
 export * from './match-approval.dto';
+export * from './performance.dto';
