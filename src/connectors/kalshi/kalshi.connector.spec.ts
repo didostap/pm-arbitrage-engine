@@ -108,11 +108,36 @@ describe('KalshiConnector', () => {
   });
 
   describe('getFeeSchedule', () => {
-    it('should return Kalshi fee schedule', () => {
+    it('should return Kalshi fee schedule with worst-case takerFeePercent', () => {
       const fees = connector.getFeeSchedule();
       expect(fees.platformId).toBe(PlatformId.KALSHI);
       expect(fees.makerFeePercent).toBe(0);
-      expect(fees.takerFeePercent).toBe(0);
+      expect(fees.takerFeePercent).toBe(1.75);
+      expect(fees.takerFeeForPrice).toBeDefined();
+    });
+
+    it('should provide takerFeeForPrice callback implementing 0.07 × (1-P) rate formula', () => {
+      const fees = connector.getFeeSchedule();
+      const fn = fees.takerFeeForPrice!;
+
+      // At P=0.50: rate = 0.07 × 0.50 = 0.035
+      expect(fn(0.5)).toBeCloseTo(0.035, 10);
+      // At P=0.25: rate = 0.07 × 0.75 = 0.0525
+      expect(fn(0.25)).toBeCloseTo(0.0525, 10);
+      // At P=0.75: rate = 0.07 × 0.25 = 0.0175
+      expect(fn(0.75)).toBeCloseTo(0.0175, 10);
+      // At P=0.01: rate = 0.07 × 0.99 = 0.0693
+      expect(fn(0.01)).toBeCloseTo(0.0693, 10);
+      // At P=0.99: rate = 0.07 × 0.01 = 0.0007
+      expect(fn(0.99)).toBeCloseTo(0.0007, 10);
+    });
+
+    it('should return 0 fee rate at price boundaries', () => {
+      const fees = connector.getFeeSchedule();
+      const fn = fees.takerFeeForPrice!;
+
+      expect(fn(0)).toBe(0);
+      expect(fn(1)).toBe(0);
     });
   });
 

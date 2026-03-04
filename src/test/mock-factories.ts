@@ -26,8 +26,16 @@ export const createMockPlatformConnector = (
   getFeeSchedule: vi.fn().mockReturnValue({
     platformId,
     makerFeePercent: 0,
-    takerFeePercent: platformId === PlatformId.KALSHI ? 0 : 2,
+    takerFeePercent: platformId === PlatformId.KALSHI ? 1.75 : 2,
     description: `${platformId} fees`,
+    ...(platformId === PlatformId.KALSHI
+      ? {
+          takerFeeForPrice: (price: number): number => {
+            if (price <= 0 || price >= 1) return 0;
+            return 0.07 * (1 - price);
+          },
+        }
+      : {}),
   }),
   onOrderBookUpdate: vi.fn(),
   ...overrides,

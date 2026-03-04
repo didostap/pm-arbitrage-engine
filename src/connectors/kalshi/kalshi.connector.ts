@@ -480,8 +480,13 @@ export class KalshiConnector
     return {
       platformId: PlatformId.KALSHI,
       makerFeePercent: 0,
-      takerFeePercent: 0,
-      description: 'Kalshi charges no trading fees for standard contracts',
+      takerFeePercent: 1.75,
+      description:
+        'Kalshi dynamic taker fee: 0.07 × P × (1-P) per contract. takerFeePercent is worst-case at P=0.50.',
+      takerFeeForPrice: (price: number): number => {
+        if (price <= 0 || price >= 1) return 0;
+        return new Decimal(0.07).mul(new Decimal(1).minus(price)).toNumber();
+      },
     };
   }
 

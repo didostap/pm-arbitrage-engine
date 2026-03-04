@@ -3,6 +3,7 @@ import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 
+import { FinancialMath } from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -217,10 +218,14 @@ export class ExitMonitorService {
       polymarketSide: position.polymarketSide,
       kalshiSize: new Decimal(kalshiOrder.fillSize.toString()),
       polymarketSize: new Decimal(polymarketOrder.fillSize.toString()),
-      kalshiFeeDecimal: new Decimal(kalshiFeeSchedule.takerFeePercent).div(100),
-      polymarketFeeDecimal: new Decimal(
-        polymarketFeeSchedule.takerFeePercent,
-      ).div(100),
+      kalshiFeeDecimal: FinancialMath.calculateTakerFeeRate(
+        kalshiClosePrice,
+        kalshiFeeSchedule,
+      ),
+      polymarketFeeDecimal: FinancialMath.calculateTakerFeeRate(
+        polymarketClosePrice,
+        polymarketFeeSchedule,
+      ),
       resolutionDate: position.pair.resolutionDate,
       now: new Date(),
     };
@@ -456,10 +461,17 @@ export class ExitMonitorService {
     const polymarketFee = this.polymarketConnector.getFeeSchedule();
     const kalshiExitFee = kalshiCloseFilledPrice
       .mul(kalshiFillSize)
-      .mul(new Decimal(kalshiFee.takerFeePercent).div(100));
+      .mul(
+        FinancialMath.calculateTakerFeeRate(kalshiCloseFilledPrice, kalshiFee),
+      );
     const polymarketExitFee = polymarketCloseFilledPrice
       .mul(polymarketFillSize)
-      .mul(new Decimal(polymarketFee.takerFeePercent).div(100));
+      .mul(
+        FinancialMath.calculateTakerFeeRate(
+          polymarketCloseFilledPrice,
+          polymarketFee,
+        ),
+      );
 
     const realizedPnl = kalshiPnl
       .plus(polymarketPnl)

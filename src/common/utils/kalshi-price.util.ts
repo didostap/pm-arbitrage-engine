@@ -7,9 +7,9 @@ export interface KalshiNormalizedLevels {
 }
 
 /**
- * Converts raw Kalshi order book levels from cents to decimal probability.
- * YES levels map directly (cents / 100), NO levels invert (1 - cents / 100).
- * Asks are sorted ascending by price; bids preserve input order.
+ * Converts raw Kalshi order book levels to a unified YES-outcome book (decimal 0–1).
+ * YES levels map directly (cents / 100); NO levels become YES asks via (1 - cents/100).
+ * Bids are sorted descending (best bid first), asks ascending (best ask first).
  *
  * All arithmetic uses decimal.js internally; results are converted to number
  * at the interface boundary (.toNumber()) to keep NormalizedOrderBookLevel stable.
@@ -30,6 +30,7 @@ export function normalizeKalshiLevels(
     quantity: qty,
   }));
 
+  bids.sort((a, b) => new Decimal(b.price).minus(a.price).toNumber());
   asks.sort((a, b) => new Decimal(a.price).minus(b.price).toNumber());
 
   return { bids, asks };

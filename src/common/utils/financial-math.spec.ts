@@ -187,4 +187,101 @@ describe('FinancialMath', () => {
       ).toThrowError(/netEdge must not be NaN/);
     });
   });
+
+  describe('calculateTakerFeeRate', () => {
+    it('should use takerFeeForPrice callback when present (dynamic fee)', () => {
+      const schedule = makeFeeSchedule(1.75);
+      schedule.takerFeeForPrice = (price: number) => 0.07 * (1 - price);
+
+      const rate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.50'),
+        schedule,
+      );
+      // 0.07 × (1 - 0.50) = 0.035
+      expect(rate.toNumber()).toBeCloseTo(0.035, 10);
+    });
+
+    it('should fall back to takerFeePercent / 100 when callback absent', () => {
+      const schedule = makeFeeSchedule(2.0);
+
+      const rate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.50'),
+        schedule,
+      );
+      // 2.0 / 100 = 0.02
+      expect(rate.toNumber()).toBe(0.02);
+    });
+
+    it('should return 0 at price boundaries with dynamic fee', () => {
+      const schedule = makeFeeSchedule(1.75);
+      schedule.takerFeeForPrice = (price: number) => {
+        if (price <= 0 || price >= 1) return 0;
+        return 0.07 * (1 - price);
+      };
+
+      expect(
+        FinancialMath.calculateTakerFeeRate(
+          new Decimal('0'),
+          schedule,
+        ).toNumber(),
+      ).toBe(0);
+      expect(
+        FinancialMath.calculateTakerFeeRate(
+          new Decimal('1'),
+          schedule,
+        ).toNumber(),
+      ).toBe(0);
+    });
+
+    it('should compute correct rate at midpoint (P=0.50)', () => {
+      const schedule = makeFeeSchedule(1.75);
+      schedule.takerFeeForPrice = (price: number) => {
+        if (price <= 0 || price >= 1) return 0;
+        return 0.07 * (1 - price);
+      };
+
+      const rate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.50'),
+        schedule,
+      );
+      // 0.07 × 0.50 = 0.035; fee per contract = 0.035 × 0.50 = 0.0175 = 1.75%
+      expect(rate.toNumber()).toBeCloseTo(0.035, 10);
+    });
+
+    it('should handle both-sides dynamic scenario', () => {
+      const kalshiSchedule = makeFeeSchedule(1.75);
+      kalshiSchedule.takerFeeForPrice = (price: number) => {
+        if (price <= 0 || price >= 1) return 0;
+        return 0.07 * (1 - price);
+      };
+      const polySchedule = makeFeeSchedule(2.0); // flat, no callback
+
+      const kalshiRate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.45'),
+        kalshiSchedule,
+      );
+      const polyRate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.52'),
+        polySchedule,
+      );
+
+      // Kalshi: 0.07 × (1-0.45) = 0.07 × 0.55 = 0.0385
+      expect(kalshiRate.toNumber()).toBeCloseTo(0.0385, 10);
+      // Polymarket: flat 2.0 / 100 = 0.02
+      expect(polyRate.toNumber()).toBe(0.02);
+    });
+
+    it('should handle IEEE 754 roundtrip without significant precision loss', () => {
+      const schedule = makeFeeSchedule(1.75);
+      schedule.takerFeeForPrice = (price: number) => 0.07 * (1 - price);
+
+      // 0.1 is not exactly representable in IEEE 754; verify precision is acceptable
+      const rate = FinancialMath.calculateTakerFeeRate(
+        new Decimal('0.1'),
+        schedule,
+      );
+      // 0.07 × (1-0.1) = 0.063 — verify within 1e-15 tolerance
+      expect(rate.toNumber()).toBeCloseTo(0.063, 14);
+    });
+  });
 });

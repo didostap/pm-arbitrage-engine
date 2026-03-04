@@ -873,17 +873,17 @@ export class ExecutionService implements IExecutionEngine {
     const kalshiFee = this.kalshiConnector.getFeeSchedule();
     const polymarketFee = this.polymarketConnector.getFeeSchedule();
 
+    const primaryFeeSchedule =
+      primaryPlatform === PlatformId.KALSHI ? kalshiFee : polymarketFee;
+    const secondaryFeeSchedule =
+      secondaryPlatform === PlatformId.KALSHI ? kalshiFee : polymarketFee;
     const primaryTakerFeeDecimal = new Decimal(
-      primaryPlatform === PlatformId.KALSHI
-        ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent,
+      primaryFeeSchedule.takerFeePercent,
     )
       .div(100)
       .toNumber();
     const secondaryTakerFeeDecimal = new Decimal(
-      secondaryPlatform === PlatformId.KALSHI
-        ? kalshiFee.takerFeePercent
-        : polymarketFee.takerFeePercent,
+      secondaryFeeSchedule.takerFeePercent,
     )
       .div(100)
       .toNumber();
@@ -898,6 +898,8 @@ export class ExecutionService implements IExecutionEngine {
       secondarySide,
       takerFeeDecimal: primaryTakerFeeDecimal,
       secondaryTakerFeeDecimal,
+      takerFeeForPrice: primaryFeeSchedule.takerFeeForPrice,
+      secondaryTakerFeeForPrice: secondaryFeeSchedule.takerFeeForPrice,
     });
 
     const recommendedActions = buildRecommendedActions(

@@ -245,12 +245,16 @@ export class EdgeCalculatorService implements OnModuleInit {
     buyFeeSchedule: FeeSchedule,
     sellFeeSchedule: FeeSchedule,
   ): FeeBreakdown {
-    const buyFeeCost = dislocation.buyPrice.mul(
-      new FinancialDecimal(buyFeeSchedule.takerFeePercent).div(100),
+    const buyFeeRate = FinancialMath.calculateTakerFeeRate(
+      dislocation.buyPrice,
+      buyFeeSchedule,
     );
-    const sellFeeCost = dislocation.sellPrice.mul(
-      new FinancialDecimal(sellFeeSchedule.takerFeePercent).div(100),
+    const sellFeeRate = FinancialMath.calculateTakerFeeRate(
+      dislocation.sellPrice,
+      sellFeeSchedule,
     );
+    const buyFeeCost = dislocation.buyPrice.mul(buyFeeRate);
+    const sellFeeCost = dislocation.sellPrice.mul(sellFeeRate);
     const gasEstimate = this.getGasEstimateUsd(buyFeeSchedule, sellFeeSchedule);
     const gasFraction = gasEstimate.div(this.positionSizeUsd);
     const totalCosts = buyFeeCost.plus(sellFeeCost).plus(gasFraction);

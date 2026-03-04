@@ -126,10 +126,12 @@ export class DetectionService {
         continue;
       }
 
-      // Buy leg uses best ask (price you pay to buy YES)
+      // Both order books are normalized to the YES outcome (Kalshi NO levels
+      // are converted to YES-equivalent asks). Bids sorted descending, asks
+      // ascending, so [0] is best bid / best ask. Compare to website "Yes"
+      // prices only — "No" prices (e.g. 0.84) are the complement 1−YES.
       const polyBestAsk = polymarketOrderBook.asks[0]!;
       const kalshiBestAsk = kalshiOrderBook.asks[0]!;
-      // Sell leg uses best bid (price you receive when selling YES)
       const polyBestBid = polymarketOrderBook.bids[0]!;
       const kalshiBestBid = kalshiOrderBook.bids[0]!;
 

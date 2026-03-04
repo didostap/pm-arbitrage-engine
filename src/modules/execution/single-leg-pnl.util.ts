@@ -15,6 +15,10 @@ export interface SingleLegPnlInput {
   takerFeeDecimal: number;
   /** Taker fee on the secondary platform as a decimal (0.00–1.00) */
   secondaryTakerFeeDecimal: number;
+  /** Optional dynamic fee callback for the filled platform. Price (0.00-1.00) → fee rate as decimal fraction. */
+  takerFeeForPrice?: (price: number) => number;
+  /** Optional dynamic fee callback for the secondary platform. Price (0.00-1.00) → fee rate as decimal fraction. */
+  secondaryTakerFeeForPrice?: (price: number) => number;
 }
 
 export interface PnlScenarios {
@@ -43,6 +47,8 @@ export function calculateSingleLegPnlScenarios(
     secondarySide,
     takerFeeDecimal,
     secondaryTakerFeeDecimal,
+    takerFeeForPrice,
+    secondaryTakerFeeForPrice,
   } = input;
 
   const closeNowEstimate = calcCloseNow(
@@ -52,6 +58,7 @@ export function calculateSingleLegPnlScenarios(
     fillSize,
     currentPrices,
     takerFeeDecimal,
+    takerFeeForPrice,
   );
 
   const retryAtCurrentPrice = calcRetry(
@@ -62,6 +69,8 @@ export function calculateSingleLegPnlScenarios(
     currentPrices,
     takerFeeDecimal,
     secondaryTakerFeeDecimal,
+    takerFeeForPrice,
+    secondaryTakerFeeForPrice,
   );
 
   const holdRiskAssessment = calcHold(
@@ -89,6 +98,7 @@ function calcCloseNow(
   fillSize: number,
   currentPrices: SingleLegPnlInput['currentPrices'],
   takerFeeDecimal: number,
+  takerFeeForPrice?: (price: number) => number,
 ): string {
   const platformPrices = getPlatformPrices(filledPlatform, currentPrices);
 
@@ -103,7 +113,9 @@ function calcCloseNow(
   const dFillPrice = new Decimal(fillPrice);
   const dUnwindPrice = new Decimal(unwindPrice);
   const dFillSize = new Decimal(fillSize);
-  const dFee = new Decimal(takerFeeDecimal);
+  const dFee = takerFeeForPrice
+    ? new Decimal(takerFeeForPrice(unwindPrice))
+    : new Decimal(takerFeeDecimal);
 
   // P&L from the unwind trade
   let pnl: Decimal;
@@ -130,6 +142,8 @@ function calcRetry(
   currentPrices: SingleLegPnlInput['currentPrices'],
   takerFeeDecimal: number,
   secondaryTakerFeeDecimal: number,
+  takerFeeForPrice?: (price: number) => number,
+  secondaryTakerFeeForPrice?: (price: number) => number,
 ): string {
   const secondaryPrices = getPlatformPrices(secondaryPlatform, currentPrices);
 
@@ -145,8 +159,12 @@ function calcRetry(
 
   const dFillPrice = new Decimal(fillPrice);
   const dSecondaryPrice = new Decimal(secondaryCurrentPrice);
-  const dFee = new Decimal(takerFeeDecimal);
-  const dSecFee = new Decimal(secondaryTakerFeeDecimal);
+  const dFee = takerFeeForPrice
+    ? new Decimal(takerFeeForPrice(fillPrice))
+    : new Decimal(takerFeeDecimal);
+  const dSecFee = secondaryTakerFeeForPrice
+    ? new Decimal(secondaryTakerFeeForPrice(secondaryCurrentPrice))
+    : new Decimal(secondaryTakerFeeDecimal);
 
   // Net edge: |filledPrice - secondaryCurrentPrice| - fees
   const grossEdge = dFillPrice.minus(dSecondaryPrice).abs();
