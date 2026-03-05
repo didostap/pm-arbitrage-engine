@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import {
   ThresholdEvaluatorService,
@@ -7,6 +7,14 @@ import {
 
 describe('ThresholdEvaluatorService', () => {
   const service = new ThresholdEvaluatorService();
+  // Spy on the internal NestJS Logger used by ThresholdEvaluatorService
+  const loggerErrorSpy = vi
+    .spyOn(service['logger'], 'error')
+    .mockImplementation(() => {});
+
+  beforeEach(() => {
+    loggerErrorSpy.mockClear();
+  });
 
   function makeInput(
     overrides: Partial<ThresholdEvalInput> = {},
@@ -185,22 +193,52 @@ describe('ThresholdEvaluatorService', () => {
   });
 
   describe('edge cases', () => {
-    it('should handle unequal leg sizes correctly', () => {
-      // kalshiSize=100, polymarketSize=80 → minLegSize=80
-      // Threshold = 0.80 * 0.03 * 80 = 1.92
+    it('should use kalshiSize as legSize (equal sizes guaranteed by execution)', () => {
+      // With equal sizes of 100, legSize = kalshiSize = 100
+      // scaledInitialEdge = 0.03 * 100 = 3.0
+      // Take-profit threshold = 0.80 * 3.0 = 2.40
       const input = makeInput({
-        polymarketSize: new Decimal('80'),
         currentKalshiPrice: new Decimal('0.66'),
         currentPolymarketPrice: new Decimal('0.62'),
       });
       const result = service.evaluate(input);
       // kalshi P&L: (0.66-0.62)*100 = 4.0
+      // poly P&L: (0.65-0.62)*100 = 3.0
+      // Fees: 0.66*100*0.02 + 0.62*100*0.02 = 1.32+1.24 = 2.56
+      // Total P&L = 4.0 + 3.0 - 2.56 = 4.44
+      // currentEdge = 4.44 / 100 = 0.0444
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('take_profit');
+      expect(result.currentEdge.toFixed(4)).toBe('0.0444');
+    });
+
+    it('should log error when kalshiSize !== polymarketSize (debug assertion)', () => {
+      const input = makeInput({
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('80'),
+        currentKalshiPrice: new Decimal('0.66'),
+        currentPolymarketPrice: new Decimal('0.62'),
+      });
+      // Should still compute using kalshiSize as legSize (100, not min of 80)
+      const result = service.evaluate(input);
+      // legSize = 100 (kalshiSize), scaledInitialEdge = 0.03 * 100 = 3.0
+      // Take-profit threshold = 0.80 * 3.0 = 2.40
+      // kalshi P&L: (0.66-0.62)*100 = 4.0
       // poly P&L: (0.65-0.62)*80 = 2.4
       // Fees: 0.66*100*0.02 + 0.62*80*0.02 = 1.32+0.992 = 2.312
       // Total P&L = 4.0 + 2.4 - 2.312 = 4.088
-      // 4.088 >= 1.92 → trigger take-profit
+      // currentEdge = 4.088 / 100 = 0.04088
       expect(result.triggered).toBe(true);
       expect(result.type).toBe('take_profit');
+      expect(result.currentEdge.toFixed(5)).toBe('0.04088');
+      // Verify logger.error was called
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Unequal leg sizes'),
+        expect.objectContaining({
+          kalshiSize: '100',
+          polymarketSize: '80',
+        }),
+      );
     });
 
     it('should return result details when no threshold triggered', () => {

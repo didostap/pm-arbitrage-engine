@@ -199,9 +199,26 @@ export class ExecutionService implements IExecutionEngine {
     const secondaryTargetPrice =
       secondarySide === 'buy' ? dislocation.buyPrice : dislocation.sellPrice;
 
-    // === DEPTH-AWARE SIZING — PRIMARY LEG ===
+    // === COLLATERAL-AWARE SIZING — PRIMARY LEG ===
+    // Buy: cost = price per contract. Sell: collateral = (1 - price) per contract.
+    const primaryDivisor =
+      primarySide === 'sell' ? new Decimal(1).minus(targetPrice) : targetPrice;
+
+    // Guard: divisor must be positive (sell price >= 1.0 makes collateral non-positive)
+    if (primaryDivisor.lte(0)) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+          `Non-positive collateral divisor for primary leg (price=${targetPrice.toString()}, side=${primarySide})`,
+          'warning',
+        ),
+      };
+    }
+
     const idealSize = new Decimal(reservation.reservedCapitalUsd)
-      .div(targetPrice)
+      .div(primaryDivisor)
       .floor()
       .toNumber();
 
@@ -227,7 +244,7 @@ export class ExecutionService implements IExecutionEngine {
     );
 
     const primaryMinFillSize = Math.ceil(idealSize * this.minFillRatio);
-    const targetSize = Math.min(idealSize, primaryAvailableDepth);
+    let targetSize = Math.min(idealSize, primaryAvailableDepth);
 
     if (targetSize < primaryMinFillSize) {
       this.logger.warn({
@@ -261,9 +278,6 @@ export class ExecutionService implements IExecutionEngine {
       return { success: false, partialFill: false, error };
     }
 
-    // Track actual capital used (DO NOT mutate reservation)
-    const primaryCapitalUsed = new Decimal(targetSize).mul(targetPrice);
-
     if (targetSize < idealSize) {
       this.logger.log({
         message: 'Depth-aware size cap applied',
@@ -277,7 +291,201 @@ export class ExecutionService implements IExecutionEngine {
       });
     }
 
-    // Step 2: Submit primary leg
+    // === COLLATERAL-AWARE SIZING — SECONDARY LEG ===
+    // Both depth checks happen BEFORE any order submission (6.5.5h flow restructure)
+    const secondaryDivisor =
+      secondarySide === 'sell'
+        ? new Decimal(1).minus(secondaryTargetPrice)
+        : secondaryTargetPrice;
+
+    // Guard: divisor must be positive (sell price >= 1.0 makes collateral non-positive)
+    if (secondaryDivisor.lte(0)) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+          `Non-positive collateral divisor for secondary leg (price=${secondaryTargetPrice.toString()}, side=${secondarySide})`,
+          'warning',
+        ),
+      };
+    }
+
+    const secondaryIdealSize = new Decimal(reservation.reservedCapitalUsd)
+      .div(secondaryDivisor)
+      .floor()
+      .toNumber();
+
+    // Guard: reject if secondary ideal size rounds to zero
+    if (secondaryIdealSize <= 0) {
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+          `Secondary ideal size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, secondaryTargetPrice=${secondaryTargetPrice.toString()})`,
+          'warning',
+        ),
+      };
+    }
+
+    const secondaryAvailableDepth = await this.getAvailableDepth(
+      secondaryConnector,
+      secondaryContractId,
+      secondarySide,
+      secondaryTargetPrice.toNumber(),
+      secondaryPlatform,
+    );
+
+    const secondaryMinFillSize = Math.ceil(
+      secondaryIdealSize * this.minFillRatio,
+    );
+    let secondarySize = Math.min(secondaryIdealSize, secondaryAvailableDepth);
+
+    if (secondarySize < secondaryMinFillSize) {
+      this.logger.warn({
+        message: 'Depth below minimum fill threshold (secondary)',
+        module: 'execution',
+        data: {
+          pairId,
+          idealSize: secondaryIdealSize,
+          availableDepth: secondaryAvailableDepth,
+          minFillSize: secondaryMinFillSize,
+          platform: secondaryPlatform,
+        },
+      });
+      const error = new ExecutionError(
+        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+        `Insufficient liquidity on ${secondaryPlatform} for ${secondaryContractId}`,
+        'warning',
+      );
+      this.eventEmitter.emit(
+        EVENT_NAMES.EXECUTION_FAILED,
+        new ExecutionFailedEvent(
+          EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+          error.message,
+          opportunity.reservationRequest.opportunityId,
+          { platform: secondaryPlatform, contractId: secondaryContractId },
+          undefined,
+          isPaper,
+          mixedMode,
+        ),
+      );
+      return { success: false, partialFill: false, error };
+    }
+
+    if (secondarySize < secondaryIdealSize) {
+      this.logger.log({
+        message: 'Depth-aware size cap applied (secondary)',
+        module: 'execution',
+        data: {
+          idealSize: secondaryIdealSize,
+          cappedSize: secondarySize,
+          availableDepth: secondaryAvailableDepth,
+          platform: secondaryPlatform,
+        },
+      });
+    }
+
+    // === CROSS-LEG EQUALIZATION ===
+    // Both legs must have equal contract counts for proper hedging
+    const equalizedSize = Math.min(targetSize, secondarySize);
+    targetSize = equalizedSize;
+    secondarySize = equalizedSize;
+
+    // === EDGE RE-VALIDATION AFTER EQUALIZATION ===
+    const sizeWasReduced =
+      equalizedSize < idealSize || equalizedSize < secondaryIdealSize;
+
+    if (sizeWasReduced) {
+      // Null guard: fee breakdown must be populated by detection pipeline
+      if (!enriched.feeBreakdown?.gasFraction) {
+        this.logger.error({
+          message:
+            'Missing gasFraction in enriched opportunity — rejecting trade conservatively',
+          module: 'execution',
+          data: { pairId },
+        });
+        return {
+          success: false,
+          partialFill: false,
+          error: new ExecutionError(
+            EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
+            'Fee breakdown missing for edge re-validation',
+            'warning',
+          ),
+        };
+      }
+
+      // Collateral-aware: primaryDivisor accounts for buy cost or sell collateral
+      const conservativePositionSizeUsd = new Decimal(equalizedSize).mul(
+        primaryDivisor.plus(secondaryDivisor),
+      );
+
+      // Recover absolute gas estimate: gasFraction = gasEstimateUsd / detectionPositionSizeUsd
+      const gasEstimateUsd = enriched.feeBreakdown.gasFraction.mul(
+        new Decimal(reservation.reservedCapitalUsd),
+      );
+
+      const newGasFraction = gasEstimateUsd.div(conservativePositionSizeUsd);
+      const adjustedNetEdge = enriched.netEdge
+        .plus(enriched.feeBreakdown.gasFraction) // remove old gas fraction
+        .minus(newGasFraction); // apply new gas fraction
+
+      if (adjustedNetEdge.lt(this.minEdgeThreshold)) {
+        this.logger.warn({
+          message: 'Edge eroded below threshold after equalization',
+          module: 'execution',
+          data: {
+            pairId,
+            originalNetEdge: enriched.netEdge.toString(),
+            adjustedNetEdge: adjustedNetEdge.toString(),
+            threshold: this.minEdgeThreshold.toString(),
+            idealSize,
+            secondaryIdealSize,
+            equalizedSize,
+            originalGasFraction: enriched.feeBreakdown.gasFraction.toString(),
+            newGasFraction: newGasFraction.toString(),
+          },
+        });
+
+        return {
+          success: false,
+          partialFill: false,
+          error: new ExecutionError(
+            EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
+            'Edge eroded below threshold after equalization',
+            'warning',
+          ),
+        };
+      }
+    }
+
+    // === RUNTIME INVARIANT: EQUAL LEG SIZES ===
+    if (targetSize !== secondarySize) {
+      this.logger.error({
+        message: 'Leg size mismatch detected before order submission',
+        module: 'execution',
+        data: {
+          pairId,
+          primarySize: targetSize,
+          secondarySize,
+          primaryPlatform,
+          secondaryPlatform,
+        },
+      });
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.LEG_SIZE_MISMATCH,
+          `Leg size mismatch: primary=${targetSize}, secondary=${secondarySize}`,
+          'error',
+        ),
+      };
+    }
+
+    // === SUBMIT PRIMARY LEG ===
     let primaryOrder: OrderResult;
     try {
       primaryOrder = await primaryConnector.submitOrder({
@@ -312,7 +520,7 @@ export class ExecutionService implements IExecutionEngine {
       return { success: false, partialFill: false, error };
     }
 
-    // Step 3: Persist primary order
+    // Persist primary order
     const primaryOrderRecord = await this.orderRepository.create({
       platform: primaryPlatform === PlatformId.KALSHI ? 'KALSHI' : 'POLYMARKET',
       contractId: primaryContractId,
@@ -326,178 +534,7 @@ export class ExecutionService implements IExecutionEngine {
       isPaper,
     });
 
-    // === DEPTH-AWARE SIZING — SECONDARY LEG ===
-    // Secondary ideal size computed from SECONDARY price (NOT reusing primary's idealSize)
-    const secondaryIdealSize = new Decimal(reservation.reservedCapitalUsd)
-      .div(secondaryTargetPrice)
-      .floor()
-      .toNumber();
-
-    // Guard: reject if secondary ideal size rounds to zero
-    if (secondaryIdealSize <= 0) {
-      return this.handleSingleLeg(
-        pairId,
-        primaryLeg,
-        primaryOrderRecord.orderId,
-        primaryOrder,
-        primarySide,
-        secondarySide,
-        targetPrice,
-        secondaryTargetPrice,
-        targetSize,
-        0,
-        enriched,
-        opportunity,
-        reservation,
-        EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
-        `Secondary ideal size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, secondaryTargetPrice=${secondaryTargetPrice.toString()})`,
-        isPaper,
-        mixedMode,
-      );
-    }
-
-    const secondaryAvailableDepth = await this.getAvailableDepth(
-      secondaryConnector,
-      secondaryContractId,
-      secondarySide,
-      secondaryTargetPrice.toNumber(),
-      secondaryPlatform,
-    );
-
-    const secondaryMinFillSize = Math.ceil(
-      secondaryIdealSize * this.minFillRatio,
-    );
-    const secondarySize = Math.min(secondaryIdealSize, secondaryAvailableDepth);
-
-    if (secondarySize < secondaryMinFillSize) {
-      // Single-leg exposure — primary filled but secondary depth insufficient
-      return this.handleSingleLeg(
-        pairId,
-        primaryLeg,
-        primaryOrderRecord.orderId,
-        primaryOrder,
-        primarySide,
-        secondarySide,
-        targetPrice,
-        secondaryTargetPrice,
-        targetSize,
-        secondarySize,
-        enriched,
-        opportunity,
-        reservation,
-        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
-        `Secondary depth insufficient on ${secondaryPlatform}`,
-        isPaper,
-        mixedMode,
-      );
-    }
-
-    // === EDGE RE-VALIDATION AFTER DEPTH CAPPING ===
-    const sizeWasReduced =
-      targetSize < idealSize || secondarySize < secondaryIdealSize;
-
-    if (sizeWasReduced) {
-      // Null guard: fee breakdown must be populated by detection pipeline
-      if (!enriched.feeBreakdown?.gasFraction) {
-        this.logger.error({
-          message:
-            'Missing gasFraction in enriched opportunity — rejecting trade conservatively',
-          module: 'execution',
-          data: { pairId },
-        });
-        return this.handleSingleLeg(
-          pairId,
-          primaryLeg,
-          primaryOrderRecord.orderId,
-          primaryOrder,
-          primarySide,
-          secondarySide,
-          targetPrice,
-          secondaryTargetPrice,
-          targetSize,
-          secondarySize,
-          enriched,
-          opportunity,
-          reservation,
-          EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
-          'Fee breakdown missing for edge re-validation',
-          isPaper,
-          mixedMode,
-        );
-      }
-
-      // Use smaller leg for conservative gas amortization
-      const smallerLegSize = Math.min(targetSize, secondarySize);
-      const conservativePositionSizeUsd = new Decimal(smallerLegSize).mul(
-        targetPrice.plus(secondaryTargetPrice),
-      );
-
-      // Recover absolute gas estimate: gasFraction = gasEstimateUsd / detectionPositionSizeUsd
-      const gasEstimateUsd = enriched.feeBreakdown.gasFraction.mul(
-        new Decimal(reservation.reservedCapitalUsd),
-      );
-
-      const newGasFraction = gasEstimateUsd.div(conservativePositionSizeUsd);
-      const adjustedNetEdge = enriched.netEdge
-        .plus(enriched.feeBreakdown.gasFraction) // remove old gas fraction
-        .minus(newGasFraction); // apply new gas fraction
-
-      if (adjustedNetEdge.lt(this.minEdgeThreshold)) {
-        this.logger.warn({
-          message: 'Edge eroded below threshold after depth-aware sizing',
-          module: 'execution',
-          data: {
-            pairId,
-            originalNetEdge: enriched.netEdge.toString(),
-            adjustedNetEdge: adjustedNetEdge.toString(),
-            threshold: this.minEdgeThreshold.toString(),
-            idealSize,
-            secondaryIdealSize,
-            targetSize,
-            secondarySize,
-            smallerLegSize,
-            originalGasFraction: enriched.feeBreakdown.gasFraction.toString(),
-            newGasFraction: newGasFraction.toString(),
-          },
-        });
-
-        // Primary already submitted — this becomes a single-leg situation
-        return this.handleSingleLeg(
-          pairId,
-          primaryLeg,
-          primaryOrderRecord.orderId,
-          primaryOrder,
-          primarySide,
-          secondarySide,
-          targetPrice,
-          secondaryTargetPrice,
-          targetSize,
-          secondarySize,
-          enriched,
-          opportunity,
-          reservation,
-          EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
-          'Edge eroded below threshold after depth-aware sizing',
-          isPaper,
-          mixedMode,
-        );
-      }
-    }
-
-    if (secondarySize < secondaryIdealSize) {
-      this.logger.log({
-        message: 'Depth-aware size cap applied (secondary)',
-        module: 'execution',
-        data: {
-          idealSize: secondaryIdealSize,
-          cappedSize: secondarySize,
-          availableDepth: secondaryAvailableDepth,
-          platform: secondaryPlatform,
-        },
-      });
-    }
-
-    // Step 5: Submit secondary leg
+    // === SUBMIT SECONDARY LEG ===
     let secondaryOrder: OrderResult;
     try {
       secondaryOrder = await secondaryConnector.submitOrder({
@@ -580,7 +617,7 @@ export class ExecutionService implements IExecutionEngine {
       );
     }
 
-    // Step 6: Both legs filled — persist secondary order and position
+    // === BOTH LEGS FILLED — PERSIST ===
     const secondaryOrderRecord = await this.orderRepository.create({
       platform:
         secondaryPlatform === PlatformId.KALSHI ? 'KALSHI' : 'POLYMARKET',
@@ -610,8 +647,6 @@ export class ExecutionService implements IExecutionEngine {
       primaryLeg === 'kalshi' ? targetPrice : secondaryTargetPrice;
     const polymarketPrice =
       primaryLeg === 'kalshi' ? secondaryTargetPrice : targetPrice;
-    const kalshiSize = primaryLeg === 'kalshi' ? targetSize : secondarySize;
-    const polymarketSize = primaryLeg === 'kalshi' ? secondarySize : targetSize;
 
     const position = await this.positionRepository.create({
       pair: { connect: { matchId: pairId } },
@@ -624,8 +659,8 @@ export class ExecutionService implements IExecutionEngine {
         polymarket: polymarketPrice.toString(),
       },
       sizes: {
-        kalshi: kalshiSize.toString(),
-        polymarket: polymarketSize.toString(),
+        kalshi: equalizedSize.toString(),
+        polymarket: equalizedSize.toString(),
       },
       expectedEdge: enriched.netEdge.toNumber(),
       status: 'OPEN',
@@ -677,10 +712,17 @@ export class ExecutionService implements IExecutionEngine {
       },
     });
 
-    // Calculate actual capital used across both legs
-    const secondaryCapitalUsed = new Decimal(secondarySize).mul(
-      secondaryTargetPrice,
-    );
+    // Calculate actual capital used across both legs (collateral-aware)
+    const primaryCapitalUsed =
+      primarySide === 'sell'
+        ? new Decimal(targetSize).mul(new Decimal(1).minus(targetPrice))
+        : new Decimal(targetSize).mul(targetPrice);
+    const secondaryCapitalUsed =
+      secondarySide === 'sell'
+        ? new Decimal(secondarySize).mul(
+            new Decimal(1).minus(secondaryTargetPrice),
+          )
+        : new Decimal(secondarySize).mul(secondaryTargetPrice);
     const actualCapitalUsed = primaryCapitalUsed.plus(secondaryCapitalUsed);
 
     return {
