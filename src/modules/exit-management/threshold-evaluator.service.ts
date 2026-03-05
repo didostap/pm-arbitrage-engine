@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
 
 export interface ThresholdEvalInput {
@@ -9,7 +9,9 @@ export interface ThresholdEvalInput {
   currentPolymarketPrice: Decimal;
   kalshiSide: string;
   polymarketSide: string;
+  /** Position size on Kalshi. INVARIANT: Must equal polymarketSize (execution guarantees equal leg sizes). */
   kalshiSize: Decimal;
+  /** Position size on Polymarket. INVARIANT: Must equal kalshiSize. */
   polymarketSize: Decimal;
   kalshiFeeDecimal: Decimal;
   polymarketFeeDecimal: Decimal;
@@ -27,6 +29,8 @@ export interface ThresholdEvalResult {
 
 @Injectable()
 export class ThresholdEvaluatorService {
+  private readonly logger = new Logger(ThresholdEvaluatorService.name);
+
   evaluate(params: ThresholdEvalInput): ThresholdEvalResult {
     const {
       initialEdge,
@@ -43,6 +47,17 @@ export class ThresholdEvaluatorService {
       resolutionDate,
       now,
     } = params;
+
+    // Debug assertion: execution guarantees equal leg sizes
+    if (!kalshiSize.eq(polymarketSize)) {
+      this.logger.error(
+        'Unequal leg sizes detected — execution should guarantee equal sizes',
+        {
+          kalshiSize: kalshiSize.toString(),
+          polymarketSize: polymarketSize.toString(),
+        },
+      );
+    }
 
     // Calculate per-leg P&L
     const kalshiPnl = this.calculateLegPnl(
@@ -68,16 +83,24 @@ export class ThresholdEvaluatorService {
     const totalExitFees = kalshiExitFee.plus(polymarketExitFee);
 
     const currentPnl = kalshiPnl.plus(polymarketPnl).minus(totalExitFees);
-    const minLegSize = Decimal.min(kalshiSize, polymarketSize);
-    const scaledInitialEdge = initialEdge.mul(minLegSize);
+    // Use kalshiSize as legSize — execution guarantees equal sizes
+    const legSize = kalshiSize;
+    const scaledInitialEdge = initialEdge.mul(legSize);
     const currentEdge = currentPnl.div(
-      minLegSize.isZero() ? new Decimal(1) : minLegSize,
+      legSize.isZero() ? new Decimal(1) : legSize,
     );
     const capturedEdgePercent = scaledInitialEdge.isZero()
       ? new Decimal(0)
       : currentPnl.div(scaledInitialEdge).mul(100);
 
-    // Priority 1: Stop-loss — currentPnl <= -(2 * initialEdge * minLegSize)
+    // Priority 1: Stop-loss — currentPnl <= -(2 * initialEdge * legSize)
+    // The 2x multiplier is a conservative default for binary options arbitrage:
+    // - Initial edges are small (0.8%-5%), so 2x provides enough room for normal
+    //   market oscillation without premature exit
+    // - Binary option prices are bounded [0,1], limiting downside vs. unbounded assets
+    // - Consistent with mean-reversion stop-loss practice (2-3x entry signal)
+    // TODO: Consider making configurable via EXIT_STOP_LOSS_MULTIPLIER env var
+    //       for tuning during paper trading validation
     const stopLossThreshold = scaledInitialEdge.mul(-2);
     if (currentPnl.lte(stopLossThreshold)) {
       return {
@@ -89,7 +112,7 @@ export class ThresholdEvaluatorService {
       };
     }
 
-    // Priority 2: Take-profit — currentPnl >= 0.80 * initialEdge * minLegSize
+    // Priority 2: Take-profit — currentPnl >= 0.80 * initialEdge * legSize
     const takeProfitThreshold = scaledInitialEdge.mul(new Decimal('0.80'));
     if (currentPnl.gte(takeProfitThreshold)) {
       return {
