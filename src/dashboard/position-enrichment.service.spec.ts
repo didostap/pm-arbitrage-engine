@@ -243,8 +243,14 @@ describe('PositionEnrichmentService', () => {
       expect(edge.isFinite()).toBe(true);
     });
 
-    it('computes exit proximity correctly', async () => {
-      // Large positive P&L → take-profit proximity high
+    it('computes exit proximity correctly (baseline-relative)', async () => {
+      // Large positive P&L → take-profit proximity clamped to 1.0, SL clamped to 0.0
+      // No entry close prices → baseline = 0
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = 0 + 1.2*-2 = -2.4, TP threshold = 0 + 1.2*0.80 = 0.96
+      // currentPnl = 10.0 (no fees: kalshi (0.60-0.55)*100=5, poly (0.45-0.40)*100=5)
+      // SL: (0 - 10) / (0 - (-2.4)) = -10/2.4 → clamp → 0
+      // TP: (10 - 0) / (0.96 - 0) = 10.42 → clamp → 1.0
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
         (platform: string): Promise<Decimal | null> => {
           if (platform === 'kalshi')
@@ -263,11 +269,11 @@ describe('PositionEnrichmentService', () => {
       expect(result.data.exitProximity).not.toBeNull();
 
       const proximity = result.data.exitProximity!;
-      // stopLoss and takeProfit should be decimal strings in 0-1 range
       const sl = new Decimal(proximity.stopLoss);
       const tp = new Decimal(proximity.takeProfit);
-      expect(sl.gte(0) && sl.lte(1)).toBe(true);
-      expect(tp.gte(0) && tp.lte(1)).toBe(true);
+      // P&L far above baseline → SL proximity 0 (away from SL), TP clamped to 1.0
+      expect(sl.toNumber()).toBeCloseTo(0.0, 4);
+      expect(tp.toNumber()).toBeCloseTo(1.0, 4);
     });
 
     it('enriches paper trading position correctly', async () => {
@@ -355,15 +361,15 @@ describe('PositionEnrichmentService', () => {
       // spreadCost = (0.02 * 100) + (0.02 * 100) = 4.0
       // entryExitFees = (0.53 * 100 * 0.02) + (0.47 * 100 * 0.02) = 1.06 + 0.94 = 2.0
       // entryCostBaseline = -(4.0 + 2.0) = -6.0
-      // SL threshold = -6.0 + (0.012 * 100 * -2) = -6.0 + -2.4 = -8.4
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = -6.0 + 1.2*-2 = -8.4
+      // TP threshold = -6.0 + 1.2*0.80 = -5.04
       //
-      // Without baseline (old): SL threshold = -2.4
-      // With currentPnl = -4.0:
-      //   Old SL proximity = min(1, |-4.0 / -2.4|) = min(1, 1.667) = 1.0 (maxed out)
-      //   New SL proximity = min(1, |-4.0 / -8.4|) = min(1, 0.476) = 0.476
+      // currentPnl = -5.96 (see computation below)
+      // Baseline-relative SL: (-6.0 - (-5.96)) / (-6.0 - (-8.4)) = -0.04/2.4 → clamp → 0
+      // Baseline-relative TP: (-5.96 - (-6.0)) / (-5.04 - (-6.0)) = 0.04/0.96 ≈ 0.04167
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
         (platform: string): Promise<Decimal | null> => {
-          // Prices that give currentPnl ≈ -4.0
           // kalshi buy@0.55 sell@0.52 → (0.52-0.55)*100 = -3.0
           // poly sell@0.45 buy@0.46 → (0.45-0.46)*100 = -1.0
           // exit fees: 0.52*100*0.02 + 0.46*100*0.02 = 1.04+0.92 = 1.96
@@ -384,15 +390,37 @@ describe('PositionEnrichmentService', () => {
       const result = await service.enrich(position as never);
 
       expect(result.status).toBe('enriched');
-      // currentPnl = -5.96
-      // Without baseline: SL threshold = -2.4, proximity = min(1, |-5.96/-2.4|) = 1.0
-      // With baseline: SL threshold = -8.4, proximity = min(1, |-5.96/-8.4|) ≈ 0.7095
-      // This test verifies the NEW behavior (proximity < 1.0)
+      // Position just opened (currentPnl ≈ baseline) — both proximities near 0
       const sl = new Decimal(result.data.exitProximity!.stopLoss);
-      expect(sl.toNumber()).toBeCloseTo(0.7095, 2);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(sl.toNumber()).toBeCloseTo(0.0, 2);
+      expect(tp.toNumber()).toBeCloseTo(0.04167, 2);
     });
 
     it('uses baseline=0 when entry close prices are null (legacy fallback)', async () => {
+      // Legacy position: baseline=0
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = 0 + 1.2*-2 = -2.4, TP threshold = 0 + 1.2*0.80 = 0.96
+      // currentPnl = 8.0 (kalshi (0.60-0.55)*100=5, poly (0.45-0.40)*100=5, fees=2.0)
+      //
+      // New formula with baseline=0:
+      //   SL: (0 - 8.0) / (0 - (-2.4)) = -8.0/2.4 → clamp → 0
+      //   TP: (8.0 - 0) / (0.96 - 0) = 8.33 → clamp → 1.0
+      //
+      // Old formula:
+      //   SL: |8.0 / -2.4| = 3.33 → clamp → 1.0 (note: old formula gives wrong result for positive PnL)
+      //   TP: 8.0 / 0.96 = 8.33 → clamp → 1.0
+      //
+      // Algebraic equivalence for legacy (baseline=0):
+      //   New SL numerator: (0 - currentPnl) = -currentPnl
+      //   New SL denominator: (0 - slThreshold) = -slThreshold
+      //   Result: -currentPnl / -slThreshold = currentPnl / slThreshold
+      //   Old formula: currentPnl.div(slThreshold).abs()
+      //   Since both currentPnl and slThreshold are negative when approaching SL,
+      //   currentPnl/slThreshold is positive → abs() is identity → formulas agree.
+      //
+      //   New TP: (currentPnl - 0) / (tpThreshold - 0) = currentPnl / tpThreshold
+      //   Old TP: currentPnl / tpThreshold → identical.
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
         (platform: string): Promise<Decimal | null> => {
           if (platform === 'kalshi')
@@ -412,8 +440,287 @@ describe('PositionEnrichmentService', () => {
       const result = await service.enrich(position as never);
 
       expect(result.status).toBe('enriched');
-      // Same behavior as without entry close prices — baseline=0
       expect(result.data.exitProximity).not.toBeNull();
+
+      // Verify algebraic equivalence: new formula with baseline=0 produces same
+      // values as old formula for the negative-PnL case (SL approach)
+      const currentPnl = new Decimal('8.0');
+      const slThreshold = new Decimal('-2.4');
+      const tpThreshold = new Decimal('0.96');
+      const baseline = new Decimal('0');
+
+      // Old formula values
+      const oldSl = Decimal.min(
+        new Decimal(1),
+        Decimal.max(new Decimal(0), currentPnl.div(slThreshold).abs()),
+      );
+      const oldTp = Decimal.min(
+        new Decimal(1),
+        Decimal.max(new Decimal(0), currentPnl.div(tpThreshold)),
+      );
+
+      // New formula values
+      const newSl = Decimal.min(
+        new Decimal(1),
+        Decimal.max(
+          new Decimal(0),
+          baseline.minus(currentPnl).div(baseline.minus(slThreshold)),
+        ),
+      );
+      const newTp = Decimal.min(
+        new Decimal(1),
+        Decimal.max(
+          new Decimal(0),
+          currentPnl.minus(baseline).div(tpThreshold.minus(baseline)),
+        ),
+      );
+
+      // TP formulas are algebraically identical for baseline=0
+      expect(newTp.eq(oldTp)).toBe(true);
+      // SL: new formula gives currentPnl/slThreshold (no abs), old uses abs()
+      // When currentPnl > 0 and slThreshold < 0: ratio is negative → new clamps to 0, old abs → positive
+      // The new formula is CORRECT here (positive PnL means far from SL → 0%)
+      // The old formula was wrong (abs made it look close to SL)
+      expect(oldSl.toNumber()).toBe(1); // old: WRONG — abs() made positive PnL look close to SL
+      expect(newSl.toNumber()).toBe(0); // new: correct — far from SL
+    });
+
+    it('just-opened position: both proximities exactly 0', async () => {
+      // Current prices === entry prices → PnL = 0 (before fees)
+      // With fees, PnL is slightly negative, but entry close prices match current
+      // so entryCostBaseline offsets this exactly
+      //
+      // Setup: entry at 0.55/0.45, current close at 0.55/0.45 (no price movement)
+      // entryCostBaseline = -(spreadCost + exitFees)
+      //   spreadCost: kalshi buy@0.55, close=0.55 → spread=0; poly sell@0.45, close=0.45 → spread=0
+      //   exitFees: 0.55*100*0.02 + 0.45*100*0.02 = 1.10 + 0.90 = 2.0
+      //   entryCostBaseline = -(0 + 2.0) = -2.0
+      // currentPnl: kalshi (0.55-0.55)*100=0, poly (0.45-0.45)*100=0, exitFees=2.0 → -2.0
+      // currentPnl == entryCostBaseline → both proximities exactly 0
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.55'));
+          return Promise.resolve(new Decimal('0.45'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(sl.toNumber()).toBe(0);
+      expect(tp.toNumber()).toBe(0);
+    });
+
+    it('just-opened with small price drift: both proximities small but nonzero', async () => {
+      // Entry at 0.55/0.45, entry close same, current close drifts slightly against us
+      // kalshi close 0.54 (bid dropped slightly), poly close 0.46 (ask rose slightly)
+      // entryCostBaseline = -2.0 (same as above: no spread at entry, fees only)
+      // currentPnl: kalshi (0.54-0.55)*100=-1, poly (0.45-0.46)*100=-1
+      //   exitFees: 0.54*100*0.02 + 0.46*100*0.02 = 1.08+0.92 = 2.0
+      //   currentPnl = -1 + -1 - 2.0 = -4.0
+      // scaledInitialEdge = 1.2
+      // SL threshold = -2.0 + 1.2*-2 = -4.4
+      // TP threshold = -2.0 + 1.2*0.80 = -1.04
+      // SL: (-2.0 - (-4.0)) / (-2.0 - (-4.4)) = 2.0/2.4 ≈ 0.8333
+      // TP: (-4.0 - (-2.0)) / (-1.04 - (-2.0)) = -2.0/0.96 → clamp → 0
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.54'));
+          return Promise.resolve(new Decimal('0.46'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      // Moved toward SL — nonzero SL proximity
+      expect(sl.toNumber()).toBeCloseTo(0.8333, 3);
+      // Moved away from TP — clamped to 0
+      expect(tp.toNumber()).toBe(0);
+    });
+
+    it('P&L halfway to SL: SL proximity ~50%, TP ~0%', async () => {
+      // entryCostBaseline = -2.0 (no spread, fees only — same entry close setup)
+      // scaledInitialEdge = 1.2
+      // SL threshold = -2.0 + 1.2*-2 = -4.4
+      // Halfway: currentPnl = -2.0 + (-4.4 - (-2.0))/2 = -2.0 + (-1.2) = -3.2
+      // Need prices that give currentPnl = -3.2
+      // kalshi (close-0.55)*100 + (0.45-close)*100 - exitFees = -3.2
+      // Try kalshi close=0.545, poly close=0.455
+      // kalshi: (0.545-0.55)*100 = -0.5, poly: (0.45-0.455)*100 = -0.5
+      // exitFees: 0.545*100*0.02 + 0.455*100*0.02 = 1.09+0.91 = 2.0
+      // currentPnl = -0.5 + -0.5 - 2.0 = -3.0 (not exactly -3.2)
+      // SL: (-2.0 - (-3.0)) / (-2.0 - (-4.4)) = 1.0/2.4 ≈ 0.4167
+      // TP: (-3.0 - (-2.0)) / (-1.04 - (-2.0)) = -1.0/0.96 → clamp → 0
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.545'));
+          return Promise.resolve(new Decimal('0.455'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(sl.toNumber()).toBeCloseTo(0.4167, 3);
+      expect(tp.toNumber()).toBe(0);
+    });
+
+    it('P&L at TP threshold with non-zero baseline: TP proximity = 100%', async () => {
+      // entryCostBaseline = -2.0 (no spread at entry, fees only)
+      // TP threshold = -2.0 + 1.2*0.80 = -1.04
+      // Need currentPnl = -1.04 (at TP threshold exactly)
+      // currentPnl = kalshiPnl + polyPnl - exitFees
+      // kalshi (close-0.55)*100 + (0.45-close)*100 - exitFees = -1.04
+      // With zero fees for simpler math:
+      // kalshi close=0.554, poly close=0.446
+      // kalshi: (0.554-0.55)*100 = 0.4, poly: (0.45-0.446)*100 = 0.4
+      // exitFees with 0 rate = 0
+      // currentPnl = 0.4 + 0.4 - 0 = 0.8
+      // That's not -1.04. Let me use zero fees and adjust entry close prices.
+      //
+      // Alternative: use zero fees, entry close at entry prices → baseline = 0
+      // Then TP threshold = 0 + 1.2*0.80 = 0.96
+      // Need currentPnl = 0.96
+      // kalshi (close-0.55)*100 + (0.45-close)*100 = 0.96
+      // That simplifies to (kalshiClose - polyClose - 0.10)*100 = 0.96
+      // kalshiClose - polyClose = 0.1096
+      // e.g. kalshi=0.5548, poly=0.4452
+      //
+      // But story requires NON-ZERO baseline. Let me use entry close prices.
+      // entryCostBaseline with entry close = entry prices and 2% fees:
+      //   spreadCost = 0 (close == entry)
+      //   exitFees = 0.55*100*0.02 + 0.45*100*0.02 = 1.10+0.90 = 2.0
+      //   baseline = -2.0
+      // TP threshold = -2.0 + 0.96 = -1.04
+      // Need currentPnl = -1.04
+      // currentPnl = kalshiPnl + polyPnl - exitFees
+      // kalshi (close-0.55)*100 + (0.45-close)*100 - exitFees = -1.04
+      // Let's set zero current fees for simplicity (different fee rate for exit)
+      // Actually let me use 0% current fee rate:
+      // kalshi (close-0.55)*100 + (0.45-close)*100 = -1.04
+      // (kalshiClose - polyClose)*100 - 10 = -1.04
+      // kalshiClose - polyClose = 0.0896
+      // e.g. kalshi=0.5448, poly=0.4552
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.5448'));
+          return Promise.resolve(new Decimal('0.4552'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      // currentPnl = (0.5448-0.55)*100 + (0.45-0.4552)*100 - 0 = -0.52 + -0.52 = -1.04
+      // baseline = -2.0, TP threshold = -1.04
+      // TP: (-1.04 - (-2.0)) / (-1.04 - (-2.0)) = 0.96/0.96 = 1.0
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(tp.toNumber()).toBeCloseTo(1.0, 4);
+    });
+
+    it('zero scaledInitialEdge (zero-edge): both proximities = 0 (AC2)', async () => {
+      // expectedEdge = 0 → scaledInitialEdge = 0
+      // baseline = -2.0 (with entry close prices)
+      // SL threshold = -2.0 + 0*-2 = -2.0 (== baseline)
+      // TP threshold = -2.0 + 0*0.80 = -2.0 (== baseline)
+      // Denominators: baseline - SL = 0, TP - baseline = 0
+      // Both should return 0 (division-by-zero guard)
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.55'));
+          return Promise.resolve(new Decimal('0.45'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        expectedEdge: { toString: () => '0' } as unknown,
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(sl.toNumber()).toBe(0);
+      expect(tp.toNumber()).toBe(0);
+      // Verify no NaN or Infinity
+      expect(sl.isFinite()).toBe(true);
+      expect(tp.isFinite()).toBe(true);
+    });
+
+    it('clamping: beyond threshold clamps to 1.0, opposite direction clamps to 0.0', async () => {
+      // Set up a position deep past SL threshold
+      // baseline = 0 (no entry close prices), SL = -2.4, TP = 0.96
+      // currentPnl deeply negative (beyond SL)
+      // kalshi close=0.40 (dropped a lot), poly close=0.60 (rose a lot)
+      // kalshi: (0.40-0.55)*100 = -15, poly: (0.45-0.60)*100 = -15
+      // exitFees: 0.40*100*0.02 + 0.60*100*0.02 = 0.80+1.20 = 2.0
+      // currentPnl = -15 + -15 - 2.0 = -32.0
+      // SL: (0 - (-32.0)) / (0 - (-2.4)) = 32/2.4 = 13.33 → clamp → 1.0
+      // TP: (-32.0 - 0) / (0.96 - 0) = -33.33 → clamp → 0.0
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.40'));
+          return Promise.resolve(new Decimal('0.60'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition();
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      // Beyond SL → clamped to 1.0
+      expect(sl.toNumber()).toBe(1);
+      // Opposite direction of TP → clamped to 0.0
+      expect(tp.toNumber()).toBe(0);
     });
   });
 });

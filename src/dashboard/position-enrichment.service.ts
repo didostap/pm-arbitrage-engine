@@ -212,24 +212,27 @@ export class PositionEnrichmentService {
       scaledInitialEdge.mul(new Decimal('0.80')),
     );
 
-    const stopLossProximity = Decimal.min(
-      new Decimal(1),
-      Decimal.max(
-        new Decimal(0),
-        stopLossThreshold.isZero()
-          ? new Decimal(0)
-          : currentPnl.div(stopLossThreshold).abs(),
-      ),
-    );
-    const takeProfitProximity = Decimal.min(
-      new Decimal(1),
-      Decimal.max(
-        new Decimal(0),
-        takeProfitThreshold.isZero()
-          ? new Decimal(0)
-          : currentPnl.div(takeProfitThreshold),
-      ),
-    );
+    const slDenom = entryCostBaseline.minus(stopLossThreshold);
+    const stopLossProximity = slDenom.isZero()
+      ? new Decimal(0)
+      : Decimal.min(
+          new Decimal(1),
+          Decimal.max(
+            new Decimal(0),
+            entryCostBaseline.minus(currentPnl).div(slDenom),
+          ),
+        );
+
+    const tpDenom = takeProfitThreshold.minus(entryCostBaseline);
+    const takeProfitProximity = tpDenom.isZero()
+      ? new Decimal(0)
+      : Decimal.min(
+          new Decimal(1),
+          Decimal.max(
+            new Decimal(0),
+            currentPnl.minus(entryCostBaseline).div(tpDenom),
+          ),
+        );
 
     return {
       status: 'enriched',
