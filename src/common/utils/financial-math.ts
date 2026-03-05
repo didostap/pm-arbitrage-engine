@@ -123,6 +123,84 @@ export class FinancialMath {
     return new FinancialDecimal(feeSchedule.takerFeePercent).div(100);
   }
 
+  /**
+   * Compute the mark-to-market entry cost baseline for threshold calibration (6.5.5i).
+   * Returns a non-positive Decimal representing the natural MtM deficit at position entry
+   * (spread cost + exit fees at entry close prices). Returns Decimal(0) when any input is null.
+   */
+  static computeEntryCostBaseline(params: {
+    kalshiEntryPrice: Decimal;
+    polymarketEntryPrice: Decimal;
+    kalshiSide: string;
+    polymarketSide: string;
+    kalshiSize: Decimal;
+    polymarketSize: Decimal;
+    entryClosePriceKalshi: Decimal | null | undefined;
+    entryClosePricePolymarket: Decimal | null | undefined;
+    entryKalshiFeeRate: Decimal | null | undefined;
+    entryPolymarketFeeRate: Decimal | null | undefined;
+  }): Decimal {
+    const {
+      kalshiEntryPrice,
+      polymarketEntryPrice,
+      kalshiSide,
+      polymarketSide,
+      kalshiSize,
+      polymarketSize,
+      entryClosePriceKalshi,
+      entryClosePricePolymarket,
+      entryKalshiFeeRate,
+      entryPolymarketFeeRate,
+    } = params;
+
+    if (
+      entryClosePriceKalshi == null ||
+      entryClosePricePolymarket == null ||
+      entryKalshiFeeRate == null ||
+      entryPolymarketFeeRate == null
+    ) {
+      return new Decimal(0);
+    }
+
+    // Spread cost (direction-aware, clamped to >= 0)
+    const kalshiSpread =
+      kalshiSide === 'buy'
+        ? Decimal.max(
+            new Decimal(0),
+            kalshiEntryPrice.minus(entryClosePriceKalshi),
+          )
+        : Decimal.max(
+            new Decimal(0),
+            entryClosePriceKalshi.minus(kalshiEntryPrice),
+          );
+    const polymarketSpread =
+      polymarketSide === 'buy'
+        ? Decimal.max(
+            new Decimal(0),
+            polymarketEntryPrice.minus(entryClosePricePolymarket),
+          )
+        : Decimal.max(
+            new Decimal(0),
+            entryClosePricePolymarket.minus(polymarketEntryPrice),
+          );
+
+    const spreadCost = kalshiSpread
+      .mul(kalshiSize)
+      .plus(polymarketSpread.mul(polymarketSize));
+
+    // Exit fees at entry close prices using persisted fee rates
+    const entryExitFees = entryClosePriceKalshi
+      .mul(kalshiSize)
+      .mul(entryKalshiFeeRate)
+      .plus(
+        entryClosePricePolymarket
+          .mul(polymarketSize)
+          .mul(entryPolymarketFeeRate),
+      );
+
+    return spreadCost.plus(entryExitFees).neg();
+  }
+
   private static validateDecimalInput(value: Decimal, name: string): void {
     if (value.isNaN()) {
       throw new Error(`FinancialMath: ${name} must not be NaN`);

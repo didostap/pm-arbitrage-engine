@@ -228,6 +228,18 @@ export class ExitMonitorService {
       ),
       resolutionDate: position.pair.resolutionDate,
       now: new Date(),
+      entryClosePriceKalshi: position.entryClosePriceKalshi
+        ? new Decimal(position.entryClosePriceKalshi.toString())
+        : null,
+      entryClosePricePolymarket: position.entryClosePricePolymarket
+        ? new Decimal(position.entryClosePricePolymarket.toString())
+        : null,
+      entryKalshiFeeRate: position.entryKalshiFeeRate
+        ? new Decimal(position.entryKalshiFeeRate.toString())
+        : null,
+      entryPolymarketFeeRate: position.entryPolymarketFeeRate
+        ? new Decimal(position.entryPolymarketFeeRate.toString())
+        : null,
     };
 
     const evalResult = this.thresholdEvaluator.evaluate(evalInput);

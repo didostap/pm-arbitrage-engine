@@ -284,4 +284,98 @@ describe('FinancialMath', () => {
       expect(rate.toNumber()).toBeCloseTo(0.063, 14);
     });
   });
+
+  describe('computeEntryCostBaseline', () => {
+    it('returns negative baseline for realistic spread + fees', () => {
+      const result = FinancialMath.computeEntryCostBaseline({
+        kalshiEntryPrice: new Decimal('0.62'),
+        polymarketEntryPrice: new Decimal('0.65'),
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.60'),
+        entryClosePricePolymarket: new Decimal('0.67'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      // Kalshi buy@0.62, close bid=0.60 → spread = 0.02
+      // Poly sell@0.65, close ask=0.67 → spread = 0.02
+      // spreadCost = (0.02 * 100) + (0.02 * 100) = 4.0
+      // entryExitFees = (0.60 * 100 * 0.02) + (0.67 * 100 * 0.02) = 1.2 + 1.34 = 2.54
+      // baseline = -(4.0 + 2.54) = -6.54
+      expect(result.toNumber()).toBeCloseTo(-6.54, 8);
+    });
+
+    it('returns zero baseline when all entry fields are null', () => {
+      const result = FinancialMath.computeEntryCostBaseline({
+        kalshiEntryPrice: new Decimal('0.62'),
+        polymarketEntryPrice: new Decimal('0.65'),
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: null,
+        entryClosePricePolymarket: null,
+        entryKalshiFeeRate: null,
+        entryPolymarketFeeRate: null,
+      });
+      expect(result.isZero()).toBe(true);
+    });
+
+    it('returns zero baseline when any entry field is null (partial)', () => {
+      const result = FinancialMath.computeEntryCostBaseline({
+        kalshiEntryPrice: new Decimal('0.62'),
+        polymarketEntryPrice: new Decimal('0.65'),
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.60'),
+        entryClosePricePolymarket: new Decimal('0.67'),
+        entryKalshiFeeRate: null,
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      expect(result.isZero()).toBe(true);
+    });
+
+    it('clamps negative spread to zero', () => {
+      // Close price better than fill → negative spread → clamped
+      const result = FinancialMath.computeEntryCostBaseline({
+        kalshiEntryPrice: new Decimal('0.62'),
+        polymarketEntryPrice: new Decimal('0.65'),
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.64'), // better than fill
+        entryClosePricePolymarket: new Decimal('0.63'), // better than fill
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      // Spreads clamped to 0, only exit fees contribute
+      // entryExitFees = (0.64 * 100 * 0.02) + (0.63 * 100 * 0.02) = 1.28 + 1.26 = 2.54
+      // baseline = -(0 + 2.54) = -2.54
+      expect(result.toNumber()).toBeCloseTo(-2.54, 8);
+    });
+
+    it('handles zero spread (close prices equal fill prices)', () => {
+      const result = FinancialMath.computeEntryCostBaseline({
+        kalshiEntryPrice: new Decimal('0.62'),
+        polymarketEntryPrice: new Decimal('0.65'),
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.62'),
+        entryClosePricePolymarket: new Decimal('0.65'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      // spreadCost = 0
+      // entryExitFees = (0.62 * 100 * 0.02) + (0.65 * 100 * 0.02) = 1.24 + 1.30 = 2.54
+      // baseline = -(0 + 2.54) = -2.54
+      expect(result.toNumber()).toBeCloseTo(-2.54, 8);
+    });
+  });
 });

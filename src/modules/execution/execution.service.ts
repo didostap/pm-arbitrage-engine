@@ -41,6 +41,7 @@ import {
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import type { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-opportunity.type';
+import { FinancialMath } from '../../common/utils/financial-math';
 
 @Injectable()
 export class ExecutionService implements IExecutionEngine {
@@ -648,6 +649,131 @@ export class ExecutionService implements IExecutionEngine {
     const polymarketPrice =
       primaryLeg === 'kalshi' ? secondaryTargetPrice : targetPrice;
 
+    // === CLOSE-SIDE PRICE CAPTURE (6.5.5i) ===
+    // Fetch close-side order books to compute entry cost baseline for threshold calibration.
+    // Close-side = the side you'd trade to close each leg (buy→sell at bid, sell→buy at ask).
+    const primaryFillPrice = new Decimal(primaryOrder.filledPrice);
+    const secondaryFillPrice = new Decimal(secondaryOrder.filledPrice);
+    let primaryClosePrice: Decimal = primaryFillPrice;
+    let secondaryClosePrice: Decimal = secondaryFillPrice;
+
+    try {
+      const [primaryBook, secondaryBook] = await Promise.all([
+        primaryConnector.getOrderBook(primaryContractId),
+        secondaryConnector.getOrderBook(secondaryContractId),
+      ]);
+
+      // Primary leg close-side price
+      if (primarySide === 'buy') {
+        // Close buy → sell at best bid
+        primaryClosePrice = primaryBook.bids[0]
+          ? new Decimal(primaryBook.bids[0].price)
+          : primaryFillPrice;
+        if (!primaryBook.bids[0]) {
+          this.logger.warn({
+            message: 'Empty close-side book — using fill price as fallback',
+            module: 'execution',
+            data: {
+              contractId: primaryContractId,
+              side: primarySide,
+              fillPrice: primaryFillPrice.toString(),
+            },
+          });
+        }
+      } else {
+        // Close sell → buy at best ask
+        primaryClosePrice = primaryBook.asks[0]
+          ? new Decimal(primaryBook.asks[0].price)
+          : primaryFillPrice;
+        if (!primaryBook.asks[0]) {
+          this.logger.warn({
+            message: 'Empty close-side book — using fill price as fallback',
+            module: 'execution',
+            data: {
+              contractId: primaryContractId,
+              side: primarySide,
+              fillPrice: primaryFillPrice.toString(),
+            },
+          });
+        }
+      }
+
+      // Secondary leg close-side price
+      if (secondarySide === 'buy') {
+        secondaryClosePrice = secondaryBook.bids[0]
+          ? new Decimal(secondaryBook.bids[0].price)
+          : secondaryFillPrice;
+        if (!secondaryBook.bids[0]) {
+          this.logger.warn({
+            message: 'Empty close-side book — using fill price as fallback',
+            module: 'execution',
+            data: {
+              contractId: secondaryContractId,
+              side: secondarySide,
+              fillPrice: secondaryFillPrice.toString(),
+            },
+          });
+        }
+      } else {
+        secondaryClosePrice = secondaryBook.asks[0]
+          ? new Decimal(secondaryBook.asks[0].price)
+          : secondaryFillPrice;
+        if (!secondaryBook.asks[0]) {
+          this.logger.warn({
+            message: 'Empty close-side book — using fill price as fallback',
+            module: 'execution',
+            data: {
+              contractId: secondaryContractId,
+              side: secondarySide,
+              fillPrice: secondaryFillPrice.toString(),
+            },
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn({
+        message:
+          'Close-side order book fetch failed — using fill prices as fallback',
+        module: 'execution',
+        data: { error: err instanceof Error ? err.message : String(err) },
+      });
+      // primaryClosePrice/secondaryClosePrice already initialized to fill prices
+    }
+
+    // Map to kalshi/polymarket
+    const kalshiEntryClosePrice =
+      primaryLeg === 'kalshi' ? primaryClosePrice : secondaryClosePrice;
+    const polymarketEntryClosePrice =
+      primaryLeg === 'kalshi' ? secondaryClosePrice : primaryClosePrice;
+
+    // Compute fee rates at close prices (must not block position creation)
+    let entryKalshiFeeRate: Decimal;
+    let entryPolymarketFeeRate: Decimal;
+    try {
+      const kalshiFeeSchedule = (
+        primaryLeg === 'kalshi' ? primaryConnector : secondaryConnector
+      ).getFeeSchedule();
+      const polymarketFeeSchedule = (
+        primaryLeg === 'kalshi' ? secondaryConnector : primaryConnector
+      ).getFeeSchedule();
+      entryKalshiFeeRate = FinancialMath.calculateTakerFeeRate(
+        kalshiEntryClosePrice,
+        kalshiFeeSchedule,
+      );
+      entryPolymarketFeeRate = FinancialMath.calculateTakerFeeRate(
+        polymarketEntryClosePrice,
+        polymarketFeeSchedule,
+      );
+    } catch (err) {
+      this.logger.warn({
+        message: 'Fee rate computation failed — using flat fee fallback (2%)',
+        module: 'execution',
+        data: { error: err instanceof Error ? err.message : String(err) },
+      });
+      entryKalshiFeeRate = new Decimal('0.02');
+      entryPolymarketFeeRate = new Decimal('0.02');
+    }
+
     const position = await this.positionRepository.create({
       pair: { connect: { matchId: pairId } },
       kalshiOrder: { connect: { orderId: kalshiOrderId } },
@@ -665,6 +791,10 @@ export class ExecutionService implements IExecutionEngine {
       expectedEdge: enriched.netEdge.toNumber(),
       status: 'OPEN',
       isPaper,
+      entryClosePriceKalshi: kalshiEntryClosePrice.toNumber(),
+      entryClosePricePolymarket: polymarketEntryClosePrice.toNumber(),
+      entryKalshiFeeRate: entryKalshiFeeRate.toNumber(),
+      entryPolymarketFeeRate: entryPolymarketFeeRate.toNumber(),
     });
 
     // Emit OrderFilledEvent for both legs
