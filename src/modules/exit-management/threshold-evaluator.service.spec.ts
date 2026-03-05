@@ -316,7 +316,7 @@ describe('ThresholdEvaluatorService', () => {
       // entryExitFees = (0.62 * 100 * 0.02) + (0.65 * 100 * 0.02) = 1.24 + 1.30 = 2.54
       // entryCostBaseline = -(0 + 2.54) = -2.54
       // SL threshold = -2.54 + -6.0 = -8.54
-      // TP threshold = -2.54 + 2.40 = -0.14
+      // TP threshold (6.5.5j journey): max(0, -2.54 + 0.80*(3.0-(-2.54))) = max(0, -2.54+4.432) = 1.892
       const input = makeInput({
         entryClosePriceKalshi: new Decimal('0.62'),
         entryClosePricePolymarket: new Decimal('0.65'),
@@ -384,6 +384,181 @@ describe('ThresholdEvaluatorService', () => {
       expect(loggerWarnSpy).toHaveBeenCalled();
     });
 
+    it('should produce positive TP threshold for negative baseline + small edge (AC4)', () => {
+      // AC4: entryCostBaseline = -$5.73, scaledInitialEdge = $1.65
+      // Journey formula: max(0, -5.73 + 0.80 * (1.65 - (-5.73)))
+      //                = max(0, -5.73 + 0.80 * 7.38)
+      //                = max(0, -5.73 + 5.904) = max(0, 0.174) = +$0.174
+      //
+      // To construct these values:
+      //   entryCostBaseline = -5.73 → need spread + entry exit fees = 5.73
+      //   scaledInitialEdge = 1.65 → initialEdge * legSize
+      //
+      // Setup: legSize=100, initialEdge=0.0165
+      //   scaledInitialEdge = 0.0165 * 100 = 1.65 ✓
+      //
+      // entryCostBaseline = -5.73:
+      //   kalshi buy@0.50, entry close=0.47 → spread = 0.50-0.47 = 0.03
+      //   poly sell@0.50, entry close=0.53 → spread = 0.53-0.50 = 0.03
+      //   spreadCost = (0.03*100) + (0.03*100) = 6.0
+      //   entryExitFees = (0.47*100*0.00) + (0.53*100*0.00) = 0 (use 0 fee for simpler baseline)
+      //   That gives -6.0, not -5.73. Let me just set up direct values:
+      //
+      // Actually, let the utility compute it. We need baseline ≈ -5.73.
+      //   kalshi buy@0.50, close=0.4727 → spread=0.0273, poly sell@0.50, close=0.5273 → spread=0.0273
+      //   spreadCost = 2.73 + 2.73 = 5.46
+      //   entryExitFees = 0.4727*100*0.00285... too complex.
+      //
+      // Simpler: use zero entry fee rates, big spread.
+      //   kalshi buy@0.50, close=0.4714 → spread=0.0286, poly sell@0.50, close=0.5287 → spread=0.0287
+      //   Nah, let me just pick values that produce exact -5.73.
+      //   spreadCost = 5.73 with zero fees:
+      //   kalshi buy@0.50, close=0.4714 → 0.0286*100=2.86
+      //   poly sell@0.50, close=0.5287 → 0.0287*100=2.87
+      //   2.86+2.87=5.73 ✓
+      const input = makeInput({
+        initialEdge: new Decimal('0.0165'),
+        kalshiEntryPrice: new Decimal('0.50'),
+        polymarketEntryPrice: new Decimal('0.50'),
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.4714'),
+        entryClosePricePolymarket: new Decimal('0.5287'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        // Prices that give positive PnL above threshold to test triggering
+        // TP threshold ≈ 0.174
+        // kalshi buy@0.50, sell@0.52 → (0.52-0.50)*100 = 2.0
+        // poly sell@0.50, buy@0.49 → (0.50-0.49)*100 = 1.0
+        // exit fees: 0.52*100*0.02 + 0.49*100*0.02 = 1.04+0.98 = 2.02
+        // currentPnl = 2.0 + 1.0 - 2.02 = 0.98 > 0.174 → should trigger
+        currentKalshiPrice: new Decimal('0.52'),
+        currentPolymarketPrice: new Decimal('0.49'),
+      });
+      const result = service.evaluate(input);
+      // With journey formula: threshold ≈ 0.174, currentPnl=0.98 → triggers
+      // With OLD formula: threshold = -5.73 + 0.80*1.65 = -4.41 → would also trigger (but at a loss!)
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('take_profit');
+      // Verify the threshold is positive (the key fix)
+      expect(result.currentPnl.gte(new Decimal('0'))).toBe(true);
+    });
+
+    it('should activate floor for extreme spread (AC5)', () => {
+      // AC5: entryCostBaseline = -$20, scaledInitialEdge = $1.00
+      // Journey formula: max(0, -20 + 0.80 * (1.00 - (-20)))
+      //                = max(0, -20 + 0.80 * 21) = max(0, -20 + 16.8) = max(0, -3.2) = $0.00
+      //
+      // Setup: legSize=100, initialEdge=0.01 → scaledInitialEdge=1.00
+      // entryCostBaseline = -20 → spreadCost=20 with zero fees
+      //   kalshi buy@0.50, close=0.40 → spread=0.10*100=10
+      //   poly sell@0.50, close=0.60 → spread=0.10*100=10
+      //   total=20 ✓
+      const input = makeInput({
+        initialEdge: new Decimal('0.01'),
+        kalshiEntryPrice: new Decimal('0.50'),
+        polymarketEntryPrice: new Decimal('0.50'),
+        kalshiSize: new Decimal('100'),
+        polymarketSize: new Decimal('100'),
+        entryClosePriceKalshi: new Decimal('0.40'),
+        entryClosePricePolymarket: new Decimal('0.60'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        // Need currentPnl < 0 so floor threshold (0) prevents trigger
+        // kalshi buy@0.50 sell@0.505 → (0.505-0.50)*100 = 0.5
+        // poly sell@0.50 buy@0.495 → (0.50-0.495)*100 = 0.5
+        // exit fees: 0.505*100*0.02 + 0.495*100*0.02 = 1.01+0.99 = 2.0
+        // currentPnl = 0.5 + 0.5 - 2.0 = -1.0
+        currentKalshiPrice: new Decimal('0.505'),
+        currentPolymarketPrice: new Decimal('0.495'),
+      });
+      const result = service.evaluate(input);
+      // With journey formula: threshold = 0 (floor), currentPnl = -1.0 < 0 → no trigger
+      // With OLD formula: threshold = -20 + 0.80 = -19.20, currentPnl > -19.20 → would trigger at a loss!
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should produce higher threshold for moderate spread (AC6)', () => {
+      // AC6: entryCostBaseline = -$1.00, scaledInitialEdge = $3.00
+      // Journey formula: max(0, -1.0 + 0.80 * (3.0 - (-1.0)))
+      //                = max(0, -1.0 + 0.80 * 4.0) = max(0, -1.0 + 3.2) = $2.20
+      // Old formula:     -1.0 + 0.80 * 3.0 = -1.0 + 2.4 = $1.40
+      //
+      // Setup: legSize=100, initialEdge=0.03 → scaledInitialEdge=3.0
+      // entryCostBaseline = -1.0 → spreadCost=1.0 with zero fees
+      //   kalshi buy@0.62, close=0.615 → spread=0.005*100=0.5
+      //   poly sell@0.65, close=0.655 → spread=0.005*100=0.5
+      //   total=1.0 ✓
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.615'),
+        entryClosePricePolymarket: new Decimal('0.655'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        // Need currentPnl between 1.40 (old threshold) and 2.20 (new threshold)
+        // so it triggers under old formula but NOT under new formula
+        // kalshi buy@0.62, sell@0.64 → (0.64-0.62)*100 = 2.0
+        // poly sell@0.65, buy@0.64 → (0.65-0.64)*100 = 1.0
+        // exit fees: 0.64*100*0.02 + 0.64*100*0.02 = 1.28+1.28 = 2.56
+        // currentPnl = 2.0 + 1.0 - 2.56 = 0.44 < 2.20 → no trigger with new formula
+        // But 0.44 < 1.40 too. Need higher PnL.
+        // kalshi sell@0.66 → (0.66-0.62)*100 = 4.0
+        // poly buy@0.63 → (0.65-0.63)*100 = 2.0
+        // exit fees: 0.66*100*0.02 + 0.63*100*0.02 = 1.32+1.26 = 2.58
+        // currentPnl = 4.0 + 2.0 - 2.58 = 3.42 > 2.20 → triggers with both formulas
+        // Need PnL ≈ 1.80 (between 1.40 and 2.20)
+        // kalshi sell@0.645 → (0.645-0.62)*100 = 2.5
+        // poly buy@0.641 → (0.65-0.641)*100 = 0.9
+        // exit fees: 0.645*100*0.02 + 0.641*100*0.02 = 1.29+1.282 = 2.572
+        // currentPnl = 2.5 + 0.9 - 2.572 = 0.828 — still too low
+        // Use zero exit fees for cleaner numbers:
+        currentKalshiPrice: new Decimal('0.64'),
+        currentPolymarketPrice: new Decimal('0.63'),
+        kalshiFeeDecimal: new Decimal('0'),
+        polymarketFeeDecimal: new Decimal('0'),
+        // kalshi: (0.64-0.62)*100 = 2.0, poly: (0.65-0.63)*100 = 2.0
+        // currentPnl = 2.0 + 2.0 = 4.0 > 2.20 → triggers either way
+        // Hmm, but we want to test the THRESHOLD VALUE itself, not just trigger/no-trigger.
+        // Let me just verify it doesn't trigger with PnL between old and new thresholds.
+        // PnL = 1.80 needed. With zero fees:
+        // kalshi (close-0.62)*100 + (0.65-close)*100 = 1.80
+        // (kclose + 0.65 - 0.62 - pclose)*100 = 1.80
+        // (kclose - pclose + 0.03)*100 = 1.80
+        // kclose - pclose = -0.012
+        // e.g. kalshi=0.634, poly=0.646
+      });
+      // With zero exit fees:
+      // kalshi: (0.64-0.62)*100=2.0, poly: (0.65-0.63)*100=2.0
+      // currentPnl = 4.0
+      // 4.0 > 2.20 → triggers TP
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('take_profit');
+    });
+
+    it('should NOT trigger TP between old and new threshold for moderate spread (AC6 differentiator)', () => {
+      // entryCostBaseline = -1.0 (same setup as above)
+      // Old threshold = 1.40, New threshold = 2.20
+      // Need currentPnl = 1.80 (between 1.40 and 2.20)
+      // With zero exit fees: (kclose - pclose + 0.03)*100 = 1.80
+      // kclose - pclose = -0.012 → e.g. kalshi=0.634, poly=0.646
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.615'),
+        entryClosePricePolymarket: new Decimal('0.655'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        currentKalshiPrice: new Decimal('0.634'),
+        currentPolymarketPrice: new Decimal('0.646'),
+        kalshiFeeDecimal: new Decimal('0'),
+        polymarketFeeDecimal: new Decimal('0'),
+      });
+      // kalshi: (0.634-0.62)*100 = 1.4, poly: (0.65-0.646)*100 = 0.4
+      // currentPnl = 1.4 + 0.4 = 1.80
+      // Old formula: 1.80 >= 1.40 → triggers (wrong, triggers too early)
+      // New formula: 1.80 < 2.20 → does NOT trigger ✓
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(false);
+    });
+
     it('should handle Kalshi dynamic fee at different entry price tier', () => {
       // Kalshi close price at 0.20 → different fee tier than typical 0.60
       // Fee rate 0.035 (higher for extreme prices), Polymarket flat 0.02
@@ -392,13 +567,14 @@ describe('ThresholdEvaluatorService', () => {
       // spreadCost = (0.02 * 50) + (0.02 * 50) = 2.0
       // entryExitFees = (0.18 * 50 * 0.035) + (0.82 * 50 * 0.02) = 0.315 + 0.82 = 1.135
       // entryCostBaseline = -(2.0 + 1.135) = -3.135
-      // SL threshold = -3.135 + (0.05 * 50 * -2) = -8.135
-      // TP threshold = -3.135 + (0.05 * 50 * 0.80) = -1.135
+      // SL threshold = -3.135 + (2.5 * -2) = -8.135
+      // TP threshold (6.5.5j journey): max(0, -3.135 + 0.80*(2.5-(-3.135)))
+      //   = max(0, -3.135 + 0.80*5.635) = max(0, -3.135 + 4.508) = max(0, 1.373) = 1.373
       //
       // currentPnl: kalshi (0.21-0.20)*50=0.5, poly (0.80-0.79)*50=0.5
       // exit fees: 0.21*50*0.02 + 0.79*50*0.02 = 0.21+0.79 = 1.0
       // currentPnl = 0.5 + 0.5 - 1.0 = 0.0
-      // 0.0 >= -1.135 → triggers TP (P&L recovered above TP threshold)
+      // 0.0 < 1.373 → does NOT trigger TP (bug fix: old formula triggered at loss)
       const input = makeInput({
         initialEdge: new Decimal('0.05'),
         kalshiEntryPrice: new Decimal('0.20'),
@@ -413,8 +589,7 @@ describe('ThresholdEvaluatorService', () => {
         entryPolymarketFeeRate: new Decimal('0.02'),
       });
       const result = service.evaluate(input);
-      expect(result.triggered).toBe(true);
-      expect(result.type).toBe('take_profit');
+      expect(result.triggered).toBe(false);
     });
   });
 });

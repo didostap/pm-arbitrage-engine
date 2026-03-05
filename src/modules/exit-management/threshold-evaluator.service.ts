@@ -155,9 +155,13 @@ export class ThresholdEvaluatorService {
       };
     }
 
-    // Priority 2: Take-profit — currentPnl >= entryCostBaseline + 0.80 * initialEdge * legSize
-    const takeProfitThreshold = entryCostBaseline.plus(
-      scaledInitialEdge.mul(new Decimal('0.80')),
+    // Priority 2: Take-profit — journey-based with floor (6.5.5j)
+    // max(0, entryCostBaseline + 0.80 * (scaledInitialEdge - entryCostBaseline))
+    const takeProfitThreshold = Decimal.max(
+      new Decimal(0),
+      entryCostBaseline.plus(
+        scaledInitialEdge.minus(entryCostBaseline).mul(new Decimal('0.80')),
+      ),
     );
     if (currentPnl.gte(takeProfitThreshold)) {
       return {

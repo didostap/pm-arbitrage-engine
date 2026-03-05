@@ -208,8 +208,12 @@ export class PositionEnrichmentService {
     // Exit proximity
     const scaledInitialEdge = initialEdge.mul(legSize);
     const stopLossThreshold = entryCostBaseline.plus(scaledInitialEdge.mul(-2));
-    const takeProfitThreshold = entryCostBaseline.plus(
-      scaledInitialEdge.mul(new Decimal('0.80')),
+    // Journey-based TP with floor (6.5.5j)
+    const takeProfitThreshold = Decimal.max(
+      new Decimal(0),
+      entryCostBaseline.plus(
+        scaledInitialEdge.minus(entryCostBaseline).mul(new Decimal('0.80')),
+      ),
     );
 
     const slDenom = entryCostBaseline.minus(stopLossThreshold);
