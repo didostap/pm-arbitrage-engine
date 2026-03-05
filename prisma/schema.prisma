@@ -169,6 +169,11 @@ model OpenPosition {
   reconciliationContext Json? @map("reconciliation_context")
   isPaper           Boolean        @default(false) @map("is_paper")
 
+  entryClosePriceKalshi      Decimal? @map("entry_close_price_kalshi") @db.Decimal(20, 8)
+  entryClosePricePolymarket  Decimal? @map("entry_close_price_polymarket") @db.Decimal(20, 8)
+  entryKalshiFeeRate         Decimal? @map("entry_kalshi_fee_rate") @db.Decimal(20, 8)
+  entryPolymarketFeeRate     Decimal? @map("entry_polymarket_fee_rate") @db.Decimal(20, 8)
+
   pair            ContractMatch @relation(fields: [pairId], references: [matchId])
   polymarketOrder Order?        @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
   kalshiOrder     Order?        @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])

@@ -251,4 +251,170 @@ describe('ThresholdEvaluatorService', () => {
       expect(result.capturedEdgePercent).toBeInstanceOf(Decimal);
     });
   });
+
+  describe('entry cost baseline (6.5.5i)', () => {
+    // Spy on logger.warn for partial-null warnings
+    const loggerWarnSpy = vi
+      .spyOn(service['logger'], 'warn')
+      .mockImplementation(() => {});
+
+    beforeEach(() => {
+      loggerWarnSpy.mockClear();
+    });
+
+    it('should NOT trigger SL for P&L between old and new thresholds (key differentiator)', () => {
+      // Without baseline: SL threshold = -(2 * 0.03 * 100) = -6.0
+      // With baseline: entryCostBaseline = -(4.0 + 2.54) = -6.54
+      //   SL threshold = -6.54 + -6.0 = -12.54
+      //
+      // Construct P&L = -9.52 (between -6.0 and -12.54):
+      // kalshi buy@0.62, sell@0.58 → (0.58-0.62)*100 = -4.0
+      // poly sell@0.65, buy@0.68 → (0.65-0.68)*100 = -3.0
+      // exit fees: 0.58*100*0.02 + 0.68*100*0.02 = 1.16+1.36 = 2.52
+      // currentPnl = -4.0 + -3.0 - 2.52 = -9.52
+      //
+      // Old behavior: -9.52 <= -6.0 → TRIGGERS SL
+      // New behavior: -9.52 > -12.54 → does NOT trigger SL ✓
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.60'),
+        entryClosePricePolymarket: new Decimal('0.67'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+        currentKalshiPrice: new Decimal('0.58'),
+        currentPolymarketPrice: new Decimal('0.68'),
+      });
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should trigger SL only when P&L drops well below baseline', () => {
+      // Same baseline as above: -6.54
+      // SL threshold = -12.54
+      // Make prices tank enough to breach -12.54
+      // kalshi buy@0.62 → sell@0.52: (0.52-0.62)*100 = -10.0
+      // poly sell@0.65 → buy@0.72: (0.65-0.72)*100 = -7.0
+      // exit fees: 0.52*100*0.02 + 0.72*100*0.02 = 1.04+1.44 = 2.48
+      // currentPnl = -10.0 + -7.0 - 2.48 = -19.48
+      // -19.48 <= -12.54 → trigger SL
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.60'),
+        entryClosePricePolymarket: new Decimal('0.67'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+        currentKalshiPrice: new Decimal('0.52'),
+        currentPolymarketPrice: new Decimal('0.72'),
+      });
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('stop_loss');
+    });
+
+    it('should use zero spread when close prices equal fill prices', () => {
+      // Kalshi buy@0.62, entry close = 0.62 → spread = 0
+      // Poly sell@0.65, entry close = 0.65 → spread = 0
+      // spreadCost = 0
+      // entryExitFees = (0.62 * 100 * 0.02) + (0.65 * 100 * 0.02) = 1.24 + 1.30 = 2.54
+      // entryCostBaseline = -(0 + 2.54) = -2.54
+      // SL threshold = -2.54 + -6.0 = -8.54
+      // TP threshold = -2.54 + 2.40 = -0.14
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.62'),
+        entryClosePricePolymarket: new Decimal('0.65'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      const result = service.evaluate(input);
+      // Default currentPnl ≈ -0.54 (from default prices)
+      // -0.54 > -8.54 → no SL
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should clamp negative spread to zero (market moved favorably)', () => {
+      // Kalshi buy@0.62, entry close bid=0.64 → spread = 0.62-0.64 = -0.02 → clamped to 0
+      // Poly sell@0.65, entry close ask=0.63 → spread = 0.63-0.65 = -0.02 → clamped to 0
+      // Same as zero spread case: spreadCost = 0
+      // entryCostBaseline = -(0 + entryExitFees) = -(0.64*100*0.02 + 0.63*100*0.02) = -(1.28+1.26) = -2.54
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.64'),
+        entryClosePricePolymarket: new Decimal('0.63'),
+        entryKalshiFeeRate: new Decimal('0.02'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      const result = service.evaluate(input);
+      // Should behave same as zero spread
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should default to baseline=0 for legacy positions (null entry close prices)', () => {
+      // No entry close prices → entryCostBaseline = 0 → current behavior
+      const input = makeInput({
+        entryClosePriceKalshi: null,
+        entryClosePricePolymarket: null,
+        entryKalshiFeeRate: null,
+        entryPolymarketFeeRate: null,
+      });
+      const result = service.evaluate(input);
+      // Same result as existing tests without entry close prices
+      // kalshi P&L: (0.63-0.62)*100 = 1.0
+      // poly P&L: (0.65-0.64)*100 = 1.0
+      // exit fees: 0.63*100*0.02 + 0.64*100*0.02 = 1.26+1.28 = 2.54
+      // currentPnl = 1.0 + 1.0 - 2.54 = -0.54
+      // SL threshold = 0 + -6.0 = -6.0
+      // -0.54 > -6.0 → no trigger (current behavior)
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should default to baseline=0 when entry fields are undefined', () => {
+      // Omitting entry close price fields entirely (undefined)
+      const input = makeInput();
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(false);
+    });
+
+    it('should warn and use baseline=0 when entry fields are partially populated', () => {
+      // Only close prices, no fee rates
+      const input = makeInput({
+        entryClosePriceKalshi: new Decimal('0.60'),
+        entryClosePricePolymarket: new Decimal('0.67'),
+        entryKalshiFeeRate: null,
+        entryPolymarketFeeRate: null,
+      });
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(false);
+      expect(loggerWarnSpy).toHaveBeenCalled();
+    });
+
+    it('should handle Kalshi dynamic fee at different entry price tier', () => {
+      // Kalshi close price at 0.20 → different fee tier than typical 0.60
+      // Fee rate 0.035 (higher for extreme prices), Polymarket flat 0.02
+      // Kalshi buy@0.20, entry close bid=0.18 → spread = 0.20-0.18 = 0.02
+      // Poly sell@0.80, entry close ask=0.82 → spread = 0.82-0.80 = 0.02
+      // spreadCost = (0.02 * 50) + (0.02 * 50) = 2.0
+      // entryExitFees = (0.18 * 50 * 0.035) + (0.82 * 50 * 0.02) = 0.315 + 0.82 = 1.135
+      // entryCostBaseline = -(2.0 + 1.135) = -3.135
+      // SL threshold = -3.135 + (0.05 * 50 * -2) = -8.135
+      // TP threshold = -3.135 + (0.05 * 50 * 0.80) = -1.135
+      //
+      // currentPnl: kalshi (0.21-0.20)*50=0.5, poly (0.80-0.79)*50=0.5
+      // exit fees: 0.21*50*0.02 + 0.79*50*0.02 = 0.21+0.79 = 1.0
+      // currentPnl = 0.5 + 0.5 - 1.0 = 0.0
+      // 0.0 >= -1.135 → triggers TP (P&L recovered above TP threshold)
+      const input = makeInput({
+        initialEdge: new Decimal('0.05'),
+        kalshiEntryPrice: new Decimal('0.20'),
+        polymarketEntryPrice: new Decimal('0.80'),
+        currentKalshiPrice: new Decimal('0.21'),
+        currentPolymarketPrice: new Decimal('0.79'),
+        kalshiSize: new Decimal('50'),
+        polymarketSize: new Decimal('50'),
+        entryClosePriceKalshi: new Decimal('0.18'),
+        entryClosePricePolymarket: new Decimal('0.82'),
+        entryKalshiFeeRate: new Decimal('0.035'),
+        entryPolymarketFeeRate: new Decimal('0.02'),
+      });
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('take_profit');
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { FinancialMath } from '../../common/utils/financial-math';
 
 export interface ThresholdEvalInput {
   initialEdge: Decimal;
@@ -17,6 +18,14 @@ export interface ThresholdEvalInput {
   polymarketFeeDecimal: Decimal;
   resolutionDate: Date | null;
   now: Date;
+  /** Close-side top-of-book price at entry for Kalshi leg (6.5.5i). Null for legacy positions. */
+  entryClosePriceKalshi?: Decimal | null;
+  /** Close-side top-of-book price at entry for Polymarket leg (6.5.5i). Null for legacy positions. */
+  entryClosePricePolymarket?: Decimal | null;
+  /** Fee rate as decimal fraction at entry close price for Kalshi (6.5.5i). Null for legacy positions. */
+  entryKalshiFeeRate?: Decimal | null;
+  /** Fee rate as decimal fraction at entry close price for Polymarket (6.5.5i). Null for legacy positions. */
+  entryPolymarketFeeRate?: Decimal | null;
 }
 
 export interface ThresholdEvalResult {
@@ -93,15 +102,49 @@ export class ThresholdEvaluatorService {
       ? new Decimal(0)
       : currentPnl.div(scaledInitialEdge).mul(100);
 
-    // Priority 1: Stop-loss — currentPnl <= -(2 * initialEdge * legSize)
-    // The 2x multiplier is a conservative default for binary options arbitrage:
-    // - Initial edges are small (0.8%-5%), so 2x provides enough room for normal
-    //   market oscillation without premature exit
-    // - Binary option prices are bounded [0,1], limiting downside vs. unbounded assets
-    // - Consistent with mean-reversion stop-loss practice (2-3x entry signal)
-    // TODO: Consider making configurable via EXIT_STOP_LOSS_MULTIPLIER env var
-    //       for tuning during paper trading validation
-    const stopLossThreshold = scaledInitialEdge.mul(-2);
+    // Entry cost baseline (6.5.5i): offset thresholds by the natural MtM deficit at entry
+    const {
+      entryClosePriceKalshi,
+      entryClosePricePolymarket,
+      entryKalshiFeeRate,
+      entryPolymarketFeeRate,
+    } = params;
+
+    const hasAnyEntryField =
+      entryClosePriceKalshi != null ||
+      entryClosePricePolymarket != null ||
+      entryKalshiFeeRate != null ||
+      entryPolymarketFeeRate != null;
+
+    const entryCostBaseline = FinancialMath.computeEntryCostBaseline({
+      kalshiEntryPrice,
+      polymarketEntryPrice,
+      kalshiSide,
+      polymarketSide,
+      kalshiSize,
+      polymarketSize,
+      entryClosePriceKalshi,
+      entryClosePricePolymarket,
+      entryKalshiFeeRate,
+      entryPolymarketFeeRate,
+    });
+
+    // Warn if partially populated (data corruption indicator) — baseline defaults to 0
+    if (entryCostBaseline.isZero() && hasAnyEntryField) {
+      this.logger.warn(
+        'Partially populated entry close price fields — using baseline=0',
+        {
+          entryClosePriceKalshi: entryClosePriceKalshi?.toString() ?? 'null',
+          entryClosePricePolymarket:
+            entryClosePricePolymarket?.toString() ?? 'null',
+          entryKalshiFeeRate: entryKalshiFeeRate?.toString() ?? 'null',
+          entryPolymarketFeeRate: entryPolymarketFeeRate?.toString() ?? 'null',
+        },
+      );
+    }
+
+    // Priority 1: Stop-loss — currentPnl <= entryCostBaseline + -(2 * initialEdge * legSize)
+    const stopLossThreshold = entryCostBaseline.plus(scaledInitialEdge.mul(-2));
     if (currentPnl.lte(stopLossThreshold)) {
       return {
         triggered: true,
@@ -112,8 +155,10 @@ export class ThresholdEvaluatorService {
       };
     }
 
-    // Priority 2: Take-profit — currentPnl >= 0.80 * initialEdge * legSize
-    const takeProfitThreshold = scaledInitialEdge.mul(new Decimal('0.80'));
+    // Priority 2: Take-profit — currentPnl >= entryCostBaseline + 0.80 * initialEdge * legSize
+    const takeProfitThreshold = entryCostBaseline.plus(
+      scaledInitialEdge.mul(new Decimal('0.80')),
+    );
     if (currentPnl.gte(takeProfitThreshold)) {
       return {
         triggered: true,

@@ -2016,4 +2016,157 @@ describe('ExecutionService', () => {
     // above the check. It exists as a regression safety net. The positive path
     // (sizes ARE equal) is implicitly verified by every successful execution test.
   });
+
+  describe('close-side price capture (6.5.5i)', () => {
+    function setupHappyPath() {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+    }
+
+    it('should persist entry close prices from close-side order books', async () => {
+      // Kalshi buy@0.45 → close side is best bid (0.44)
+      // Polymarket sell@0.55 → close side is best ask (0.56)
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      // Primary is kalshi (buy) → close price = best bid = 0.44
+      expect(posData.entryClosePriceKalshi).toBeCloseTo(0.44, 4);
+      // Secondary is polymarket (sell) → close price = best ask = 0.56
+      expect(posData.entryClosePricePolymarket).toBeCloseTo(0.56, 4);
+    });
+
+    it('should persist entry fee rates at close prices', async () => {
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      // Both fee schedules: takerFeePercent=2.0, no takerFeeForPrice
+      // FinancialMath.calculateTakerFeeRate: 2.0/100 = 0.02
+      expect(posData.entryKalshiFeeRate).toBeCloseTo(0.02, 4);
+      expect(posData.entryPolymarketFeeRate).toBeCloseTo(0.02, 4);
+    });
+
+    it('should fall back to fill price when close-side book is empty', async () => {
+      // Kalshi buy@0.45 → close side = bids, make bids empty
+      // Call 1: depth check (normal book), Call 2: close-side capture (empty bids)
+      kalshiConnector.getOrderBook
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockResolvedValue({
+          ...makeKalshiOrderBook(),
+          bids: [], // empty close side for buy leg
+        });
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI, { filledPrice: 0.45 }),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, { filledPrice: 0.55 }),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      // Kalshi close price falls back to fill price (0.45) since bids empty
+      expect(posData.entryClosePriceKalshi).toBeCloseTo(0.45, 4);
+    });
+
+    it('should fall back to fill prices when order book fetch fails', async () => {
+      // First 2 calls succeed (depth checks), then close-side capture fails
+      kalshiConnector.getOrderBook
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockRejectedValue(new Error('Network timeout'));
+      polymarketConnector.getOrderBook
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // depth check
+        .mockRejectedValue(new Error('Rate limited'));
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI, { filledPrice: 0.45 }),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET, { filledPrice: 0.55 }),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      // Position creation should still succeed
+      expect(result.success).toBe(true);
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      // Falls back to fill prices
+      expect(posData.entryClosePriceKalshi).toBeCloseTo(0.45, 4);
+      expect(posData.entryClosePricePolymarket).toBeCloseTo(0.55, 4);
+    });
+
+    it('should compute fee rates at close prices not fill prices', async () => {
+      // Use dynamic Kalshi fee schedule (takerFeeForPrice callback)
+      kalshiConnector.getFeeSchedule.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        makerFeePercent: 0,
+        takerFeePercent: 7.0,
+        description: 'Kalshi dynamic fee schedule',
+        takerFeeForPrice: (price: number) => {
+          // Dynamic fee: rate scales with price distance from 0.5
+          return Math.min(0.07, 0.02 + 0.1 * Math.abs(price - 0.5));
+        },
+      });
+
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      // Kalshi close price = 0.44 (best bid), dynamic fee at 0.44:
+      // 0.02 + 0.1 * |0.44 - 0.5| = 0.02 + 0.006 = 0.026
+      expect(posData.entryKalshiFeeRate).toBeCloseTo(0.026, 4);
+    });
+
+    it('should capture all four fields on position record', async () => {
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      expect(posData).toHaveProperty('entryClosePriceKalshi');
+      expect(posData).toHaveProperty('entryClosePricePolymarket');
+      expect(posData).toHaveProperty('entryKalshiFeeRate');
+      expect(posData).toHaveProperty('entryPolymarketFeeRate');
+      // All should be numbers (Decimal.toNumber())
+      expect(typeof posData.entryClosePriceKalshi).toBe('number');
+      expect(typeof posData.entryClosePricePolymarket).toBe('number');
+      expect(typeof posData.entryKalshiFeeRate).toBe('number');
+      expect(typeof posData.entryPolymarketFeeRate).toBe('number');
+    });
+  });
 });

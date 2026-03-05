@@ -86,9 +86,14 @@ describe('PositionEnrichmentService', () => {
       // Setup: Kalshi buy@0.55, Polymarket sell@0.45
       // Current: Kalshi best bid 0.60 (close buy→sell), Polymarket best ask 0.40 (close sell→buy)
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
-        (platform: string, _contractId: string, _side: 'buy' | 'sell') => {
-          if (platform === 'kalshi') return new Decimal('0.60');
-          return new Decimal('0.40');
+        (
+          platform: string,
+          _contractId: string,
+          _side: 'buy' | 'sell',
+        ): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
         },
       );
       vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
@@ -116,7 +121,7 @@ describe('PositionEnrichmentService', () => {
       const pnl = new Decimal(data.unrealizedPnl!);
       expect(pnl.toNumber()).toBeCloseTo(8.0, 6);
 
-      // Current edge = pnl / minLegSize = 8.0 / 100 = 0.08
+      // Current edge = pnl / legSize = 8.0 / 100 = 0.08
       const edge = new Decimal(data.currentEdge!);
       expect(edge.toNumber()).toBeCloseTo(0.08, 6);
 
@@ -127,9 +132,10 @@ describe('PositionEnrichmentService', () => {
     it('computes negative P&L correctly', async () => {
       // Price moved against us: Kalshi bid dropped, Polymarket ask increased
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
-        (platform: string) => {
-          if (platform === 'kalshi') return new Decimal('0.50'); // bid dropped
-          return new Decimal('0.50'); // ask increased
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.50')); // bid dropped
+          return Promise.resolve(new Decimal('0.50')); // ask increased
         },
       );
       vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
@@ -150,9 +156,10 @@ describe('PositionEnrichmentService', () => {
 
     it('returns partial result when one connector is down', async () => {
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
-        (platform: string) => {
-          if (platform === 'kalshi') return new Decimal('0.60');
-          return null; // polymarket down
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(null); // polymarket down
         },
       );
 
@@ -231,16 +238,18 @@ describe('PositionEnrichmentService', () => {
       // Should not throw — division by zero guarded
       expect(result.status).toBe('enriched');
       const edge = new Decimal(result.data.currentEdge!);
-      // minLegSize is 0, so currentEdge = currentPnl / 1 (fallback)
+
+      // legSize is 0, so currentEdge = currentPnl / 1 (fallback)
       expect(edge.isFinite()).toBe(true);
     });
 
     it('computes exit proximity correctly', async () => {
       // Large positive P&L → take-profit proximity high
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
-        (platform: string) => {
-          if (platform === 'kalshi') return new Decimal('0.60');
-          return new Decimal('0.40');
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
         },
       );
       vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(
@@ -314,6 +323,97 @@ describe('PositionEnrichmentService', () => {
 
       expect(result.data.resolutionDate).toBeNull();
       expect(result.data.timeToResolution).toBeNull();
+    });
+
+    it('uses legSize=kalshiSize for exit proximity (6.5.5h fix in enrichment)', async () => {
+      // Equal sizes (100/100) → legSize = 100
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition();
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = 1.2 * -2 = -2.4 (without baseline)
+      // TP threshold = 1.2 * 0.80 = 0.96 (without baseline)
+      // currentPnl = 8.0 (from first test)
+      // TP proximity = min(1, max(0, 8.0 / 0.96)) = 1.0 (capped)
+      const tp = new Decimal(result.data.exitProximity!.takeProfit);
+      expect(tp.toNumber()).toBeCloseTo(1.0, 4);
+    });
+
+    it('offsets exit proximity with entry cost baseline (6.5.5i)', async () => {
+      // Kalshi buy@0.55, entry close bid=0.53 → spread = 0.55-0.53 = 0.02
+      // Poly sell@0.45, entry close ask=0.47 → spread = 0.47-0.45 = 0.02
+      // spreadCost = (0.02 * 100) + (0.02 * 100) = 4.0
+      // entryExitFees = (0.53 * 100 * 0.02) + (0.47 * 100 * 0.02) = 1.06 + 0.94 = 2.0
+      // entryCostBaseline = -(4.0 + 2.0) = -6.0
+      // SL threshold = -6.0 + (0.012 * 100 * -2) = -6.0 + -2.4 = -8.4
+      //
+      // Without baseline (old): SL threshold = -2.4
+      // With currentPnl = -4.0:
+      //   Old SL proximity = min(1, |-4.0 / -2.4|) = min(1, 1.667) = 1.0 (maxed out)
+      //   New SL proximity = min(1, |-4.0 / -8.4|) = min(1, 0.476) = 0.476
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          // Prices that give currentPnl ≈ -4.0
+          // kalshi buy@0.55 sell@0.52 → (0.52-0.55)*100 = -3.0
+          // poly sell@0.45 buy@0.46 → (0.45-0.46)*100 = -1.0
+          // exit fees: 0.52*100*0.02 + 0.46*100*0.02 = 1.04+0.92 = 1.96
+          // currentPnl = -3.0 + -1.0 - 1.96 = -5.96
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.52'));
+          return Promise.resolve(new Decimal('0.46'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.53' },
+        entryClosePricePolymarket: { toString: () => '0.47' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      // currentPnl = -5.96
+      // Without baseline: SL threshold = -2.4, proximity = min(1, |-5.96/-2.4|) = 1.0
+      // With baseline: SL threshold = -8.4, proximity = min(1, |-5.96/-8.4|) ≈ 0.7095
+      // This test verifies the NEW behavior (proximity < 1.0)
+      const sl = new Decimal(result.data.exitProximity!.stopLoss);
+      expect(sl.toNumber()).toBeCloseTo(0.7095, 2);
+    });
+
+    it('uses baseline=0 when entry close prices are null (legacy fallback)', async () => {
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      // No entry close price fields (legacy position)
+      const position = createMockPosition({
+        entryClosePriceKalshi: null,
+        entryClosePricePolymarket: null,
+        entryKalshiFeeRate: null,
+        entryPolymarketFeeRate: null,
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      // Same behavior as without entry close prices — baseline=0
+      expect(result.data.exitProximity).not.toBeNull();
     });
   });
 });

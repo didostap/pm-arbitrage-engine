@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import type { IPriceFeedService } from '../common/interfaces/price-feed-service.interface.js';
 import { PRICE_FEED_SERVICE_TOKEN } from '../common/interfaces/price-feed-service.interface.js';
 import type { PositionRepository } from '../persistence/repositories/position.repository.js';
+import { FinancialMath } from '../common/utils/financial-math.js';
 
 /** Position shape from findByStatusWithOrders() — includes pair + both orders */
 type PositionWithOrders = Awaited<
@@ -26,6 +27,8 @@ export interface EnrichmentResult {
 
 @Injectable()
 export class PositionEnrichmentService {
+  private readonly logger = new Logger(PositionEnrichmentService.name);
+
   constructor(
     @Inject(PRICE_FEED_SERVICE_TOKEN)
     private readonly priceFeed: IPriceFeedService,
@@ -160,15 +163,54 @@ export class PositionEnrichmentService {
 
     // Totals
     const currentPnl = kalshiPnl.plus(polymarketPnl).minus(totalExitFees);
-    const minLegSize = Decimal.min(kalshiSize, polymarketSize);
+
+    // Use kalshiSize as legSize — execution guarantees equal sizes (6.5.5h)
+    const legSize = kalshiSize;
+
+    // Debug assertion: execution guarantees equal leg sizes (6.5.5h)
+    if (!kalshiSize.eq(polymarketSize)) {
+      this.logger.error(
+        'Unequal leg sizes detected — execution should guarantee equal sizes',
+        {
+          kalshiSize: kalshiSize.toString(),
+          polymarketSize: polymarketSize.toString(),
+          positionId: position.positionId,
+        },
+      );
+    }
+
     const currentEdge = currentPnl.div(
-      minLegSize.isZero() ? new Decimal(1) : minLegSize,
+      legSize.isZero() ? new Decimal(1) : legSize,
     );
 
+    // Entry cost baseline (6.5.5i): offset thresholds by natural MtM deficit at entry
+    const entryCostBaseline = FinancialMath.computeEntryCostBaseline({
+      kalshiEntryPrice,
+      polymarketEntryPrice,
+      kalshiSide: position.kalshiSide,
+      polymarketSide: position.polymarketSide,
+      kalshiSize,
+      polymarketSize,
+      entryClosePriceKalshi: position.entryClosePriceKalshi
+        ? new Decimal(position.entryClosePriceKalshi.toString())
+        : null,
+      entryClosePricePolymarket: position.entryClosePricePolymarket
+        ? new Decimal(position.entryClosePricePolymarket.toString())
+        : null,
+      entryKalshiFeeRate: position.entryKalshiFeeRate
+        ? new Decimal(position.entryKalshiFeeRate.toString())
+        : null,
+      entryPolymarketFeeRate: position.entryPolymarketFeeRate
+        ? new Decimal(position.entryPolymarketFeeRate.toString())
+        : null,
+    });
+
     // Exit proximity
-    const scaledInitialEdge = initialEdge.mul(minLegSize);
-    const stopLossThreshold = scaledInitialEdge.mul(-2);
-    const takeProfitThreshold = scaledInitialEdge.mul(new Decimal('0.80'));
+    const scaledInitialEdge = initialEdge.mul(legSize);
+    const stopLossThreshold = entryCostBaseline.plus(scaledInitialEdge.mul(-2));
+    const takeProfitThreshold = entryCostBaseline.plus(
+      scaledInitialEdge.mul(new Decimal('0.80')),
+    );
 
     const stopLossProximity = Decimal.min(
       new Decimal(1),
