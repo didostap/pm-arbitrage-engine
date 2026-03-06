@@ -1182,6 +1182,109 @@ describe('RiskManagerService', () => {
     });
   });
 
+  describe('releasePartialCapital', () => {
+    it('should reduce totalCapitalDeployed by capitalReleased', async () => {
+      (service as any).openPositionCount = 2;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(300),
+        new FinancialDecimal(-10),
+      );
+
+      const exposure = service.getCurrentExposure();
+      expect(
+        new FinancialDecimal(exposure.totalCapitalDeployed).toNumber(),
+      ).toBe(700);
+    });
+
+    it('should clamp totalCapitalDeployed to 0 if release exceeds deployed', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(100);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(200),
+        new FinancialDecimal(0),
+      );
+
+      const exposure = service.getCurrentExposure();
+      expect(
+        new FinancialDecimal(exposure.totalCapitalDeployed).toNumber(),
+      ).toBe(0);
+    });
+
+    it('should NOT decrement openPositionCount', async () => {
+      (service as any).openPositionCount = 3;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(300),
+        new FinancialDecimal(-5),
+      );
+
+      expect(service.getOpenPositionCount()).toBe(3);
+    });
+
+    it('should NOT delete from paperActivePairIds', async () => {
+      (service as any).openPositionCount = 2;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).paperActivePairIds.add('pair-1');
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(300),
+        new FinancialDecimal(0),
+        'pair-1',
+      );
+
+      expect((service as any).paperActivePairIds.has('pair-1')).toBe(true);
+    });
+
+    it('should update dailyPnl with realizedPnl', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+      (service as any).dailyPnl = new FinancialDecimal(0);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(200),
+        new FinancialDecimal(-15),
+      );
+
+      const exposure = service.getCurrentExposure();
+      expect(new FinancialDecimal(exposure.dailyPnl).toNumber()).toBe(-15);
+    });
+
+    it('should emit BUDGET_RELEASED event with reason partial-exit', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(200),
+        new FinancialDecimal(0),
+      );
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        'risk.budget.released',
+        expect.objectContaining({
+          reservationId: 'partial-exit',
+          opportunityId: 'partial-exit',
+          releasedCapitalUsd: '200',
+        }),
+      );
+    });
+
+    it('should persist state after release', async () => {
+      (service as any).openPositionCount = 1;
+      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+
+      await service.releasePartialCapital(
+        new FinancialDecimal(200),
+        new FinancialDecimal(0),
+      );
+
+      expect(mockPrisma.riskState.upsert).toHaveBeenCalled();
+    });
+  });
+
   describe('haltTrading', () => {
     it('should add reason to activeHaltReasons and halt trading', () => {
       service.haltTrading('daily_loss_limit');

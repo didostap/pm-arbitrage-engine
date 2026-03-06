@@ -69,6 +69,7 @@ export const createMockRiskManager = (
   releaseReservation: vi.fn().mockResolvedValue(undefined),
   adjustReservation: vi.fn().mockResolvedValue(undefined),
   closePosition: vi.fn().mockResolvedValue(undefined),
+  releasePartialCapital: vi.fn().mockResolvedValue(undefined),
   ...overrides,
 });
 

@@ -84,4 +84,17 @@ export interface IRiskManager {
     pnlDelta: unknown,
     pairId?: string,
   ): Promise<void>;
+  /**
+   * Release capital for a partial exit — reduces deployed capital and updates P&L
+   * without decrementing position count or removing from paper active pairs.
+   * Called when a position transitions to EXIT_PARTIAL.
+   * @param capitalReleased - Capital to return to available pool (exited portion)
+   * @param realizedPnl - Realized P&L on the exited contracts
+   * @param pairId - Optional pair ID (NOT removed from paper active set)
+   */
+  releasePartialCapital(
+    capitalReleased: unknown,
+    realizedPnl: unknown,
+    pairId?: string,
+  ): Promise<void>;
 }

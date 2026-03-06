@@ -974,6 +974,47 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState();
   }
 
+  async releasePartialCapital(
+    capitalReleased: unknown,
+    realizedPnl: unknown,
+    _pairId?: string,
+  ): Promise<void> {
+    // NOTE: pairId is intentionally ignored — position is still EXIT_PARTIAL,
+    // so it must NOT be removed from paperActivePairIds and openPositionCount
+    // must NOT be decremented.
+    const capital = new FinancialDecimal(capitalReleased as Decimal);
+    const pnl = new FinancialDecimal(realizedPnl as Decimal);
+
+    this.totalCapitalDeployed = new FinancialDecimal(
+      this.totalCapitalDeployed.minus(capital),
+    );
+    if (this.totalCapitalDeployed.isNegative()) {
+      this.totalCapitalDeployed = new FinancialDecimal(0);
+    }
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.BUDGET_RELEASED,
+      new BudgetReleasedEvent(
+        'partial-exit',
+        'partial-exit',
+        capital.toString(),
+      ),
+    );
+
+    this.logger.log({
+      message: 'Partial exit — capital released for exited contracts',
+      data: {
+        capitalReleased: capital.toString(),
+        realizedPnl: pnl.toString(),
+        openPositionCount: this.openPositionCount,
+        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+      },
+    });
+
+    await this.updateDailyPnl(pnl);
+    await this.persistState();
+  }
+
   private getReservedPositionSlots(): number {
     let total = 0;
     for (const reservation of this.reservations.values()) {
