@@ -1,6 +1,6 @@
-# Deployment Runbook — PM Arbitrage Engine (Paper Trading)
+# Deployment Runbook — PM Arbitrage System (Paper Trading)
 
-This runbook covers end-to-end deployment of the PM Arbitrage Engine on a Hetzner VPS for paper trading validation. The engine runs natively via pm2; PostgreSQL runs in Docker.
+This runbook covers end-to-end deployment of the PM Arbitrage Engine and Dashboard on a Hetzner VPS for paper trading validation. The engine runs natively via pm2; PostgreSQL and the dashboard run in Docker.
 
 **Audience:** Operator (Arbi).
 **Scope:** Paper trading validation (7+ days continuous operation against live market data).
@@ -20,6 +20,7 @@ This runbook covers end-to-end deployment of the PM Arbitrage Engine on a Hetzne
 9. [Telegram Alert Verification](#9-telegram-alert-verification)
 10. [SSH Tunnel Access](#10-ssh-tunnel-access)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Dashboard Deployment](#12-dashboard-deployment)
 
 ---
 
@@ -535,4 +536,314 @@ pm2 flush    # Clear all logs (use with caution)
 
 # Verify logrotate is installed
 pm2 describe pm-arbitrage-engine | grep pm2-logrotate
+```
+
+---
+
+## 12. Dashboard Deployment
+
+The operator dashboard is a React SPA served by nginx in a Docker container. It proxies API and WebSocket requests to the engine and uses runtime environment injection for configuration.
+
+### Architecture Overview
+
+```
+Browser ──SSH Tunnel──▶ VPS:3000 ──▶ Dashboard Container (nginx :80)
+                                          ├── /assets/*     → static files (Vite-built, hash-named)
+                                          ├── /api/*        → proxy to engine:8080
+                                          ├── /ws           → WebSocket proxy to engine:8080
+                                          └── /*            → SPA fallback (index.html)
+```
+
+The dashboard container communicates with the engine container via Docker's internal network (`pm-arbitrage-network`). No direct public access — only reachable via SSH tunnel.
+
+### Prerequisites
+
+- Engine is deployed and running (Sections 1–6 complete)
+- Docker and Docker Compose installed (Section 2)
+- The `pm-arbitrage-dashboard` repository is cloned alongside the engine
+
+### Clone the Dashboard Repository
+
+```bash
+cd /opt
+git clone git@github.com:<your-org>/pm-arbitrage-dashboard.git
+```
+
+The engine's `docker-compose.yml` expects the dashboard at `../pm-arbitrage-dashboard` relative to the engine directory. Verify the layout:
+
+```bash
+ls /opt/pm-arbitrage-engine/docker-compose.yml
+ls /opt/pm-arbitrage-dashboard/Dockerfile
+```
+
+### Environment Variables
+
+The dashboard uses **runtime** environment injection — not build-time Vite variables. The `entrypoint.sh` script generates `/env.js` at container startup from these environment variables:
+
+| Variable         | Description                               | Default                 |
+| ---------------- | ----------------------------------------- | ----------------------- |
+| `API_URL`        | Engine API URL (from nginx's perspective) | `http://localhost:8080` |
+| `WS_URL`         | Engine WebSocket URL                      | `ws://localhost:8080`   |
+| `OPERATOR_TOKEN` | Bearer token for API authentication       | _(empty)_               |
+
+In Docker Compose, these are pre-configured to use Docker's internal DNS:
+
+```yaml
+environment:
+  API_URL: http://engine:8080
+  WS_URL: ws://engine:8080
+  OPERATOR_TOKEN: <YOUR_OPERATOR_TOKEN> # Must match engine's OPERATOR_TOKEN
+```
+
+**IMPORTANT:** The `OPERATOR_TOKEN` must match the value configured in the engine's `.env.production`. If they don't match, the dashboard will receive 401 responses.
+
+### Build & Start with Docker Compose
+
+The dashboard is defined in the engine's `docker-compose.yml` as the `dashboard` service. To deploy the full stack (PostgreSQL + Engine + Dashboard):
+
+```bash
+cd /opt/pm-arbitrage-engine
+
+# Edit docker-compose.yml to set production values:
+# 1. Change POSTGRES_PASSWORD from 'password'
+# 2. Set OPERATOR_TOKEN on the dashboard service
+# 3. Verify engine environment variables
+
+docker compose up -d --build
+```
+
+To deploy **only the dashboard** (if the engine is already running via pm2):
+
+```bash
+cd /opt/pm-arbitrage-engine
+
+# Start just the dashboard container
+docker compose up -d --build dashboard
+```
+
+**Note:** When the engine runs via pm2 (not Docker), the nginx proxy directives (`proxy_pass http://engine:8080`) won't resolve because `engine` is a Docker network hostname. See [Standalone Dashboard Deployment](#standalone-dashboard-deployment) below for this scenario.
+
+### Standalone Dashboard Deployment
+
+When the engine runs natively via pm2 (the default from Section 6), the dashboard container cannot use Docker's internal DNS to reach it. Use the host network or override the proxy target.
+
+**Option A — Run with `--network host`:**
+
+```bash
+docker build -t pm-arbitrage-dashboard /opt/pm-arbitrage-dashboard
+
+docker run -d \
+  --name pm-arbitrage-dashboard \
+  --network host \
+  -e API_URL=http://localhost:8080 \
+  -e WS_URL=ws://localhost:8080 \
+  -e OPERATOR_TOKEN=dev-token-change-me \
+  --restart unless-stopped \
+  pm-arbitrage-dashboard
+```
+
+With `--network host`, nginx listens on VPS port 80. The API proxy resolves `localhost:8080` to the pm2-managed engine. Adjust the nginx config if port 80 conflicts with another service.
+
+**Option B — Override nginx proxy target:**
+
+Create a custom nginx config that points to the host:
+
+```bash
+# On the VPS, create an override config
+cat > nginx-prod.conf << 'EOF'
+# Copy the contents of nginx.conf but replace:
+#   proxy_pass http://engine:8080;
+# with:
+#   proxy_pass http://127.0.0.1:8080;
+EOF
+
+docker run -d \
+  --name pm-arbitrage-dashboard \
+  -p 3000:80 \
+  --add-host=host.docker.internal:host-gateway \
+  -v /opt/pm-arbitrage-dashboard/nginx-prod.conf:/etc/nginx/conf.d/default.conf:ro \
+  -e API_URL=http://host.docker.internal:8080 \
+  -e WS_URL=ws://host.docker.internal:8080 \
+  -e OPERATOR_TOKEN=<YOUR_OPERATOR_TOKEN> \
+  --restart unless-stopped \
+  pm-arbitrage-dashboard
+```
+
+### Runtime Configuration (env.js)
+
+The dashboard uses a two-tier config strategy:
+
+1. **Development (local):** Vite injects `VITE_API_URL`, `VITE_WS_URL`, `VITE_OPERATOR_TOKEN` from `.env` at build time
+2. **Production (Docker):** `entrypoint.sh` generates `/env.js` at container startup, injecting runtime values into `window.__ENV__`
+
+The `index.html` loads `/env.js` before the app bundle:
+
+```html
+<script src="/env.js"></script>
+```
+
+The app reads config via `src/lib/env.ts`, which checks `window.__ENV__` first, then falls back to `import.meta.env.VITE_*` variables.
+
+**Never cache `env.js` or `index.html`** — the nginx config already sets `Cache-Control: no-cache` for both. Vite-hashed `/assets/*` files get 1-year cache headers.
+
+### Caching & Security Headers
+
+The nginx config includes:
+
+| Path          | Cache Policy                          | Rationale                                     |
+| ------------- | ------------------------------------- | --------------------------------------------- |
+| `/assets/*`   | `max-age=31536000, immutable`         | Vite adds content hashes to filenames         |
+| `/env.js`     | `no-cache, no-store, must-revalidate` | Contains runtime config, must always be fresh |
+| `/index.html` | `no-cache`                            | Entry point, must pick up new asset hashes    |
+
+Security headers applied to all responses:
+
+- `X-Frame-Options: DENY` — prevents clickjacking
+- `X-Content-Type-Options: nosniff` — prevents MIME sniffing
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Content-Security-Policy: default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'`
+
+The `style-src 'unsafe-inline'` is required because shadcn/ui (Radix primitives) injects inline styles for positioning and animations.
+
+### UFW Firewall Update
+
+If you want the dashboard accessible only via SSH tunnel (recommended for paper trading):
+
+```bash
+# No changes needed — UFW already blocks all ports except SSH (Section 1)
+# Access via SSH tunnel:
+ssh -L 3000:localhost:3000 -L 8080:localhost:8080 user@<VPS_IP>
+```
+
+On your **local machine**, open `http://localhost:3000` in a browser.
+
+### Updating the Dashboard
+
+```bash
+cd /opt/pm-arbitrage-dashboard
+git pull
+
+cd /opt/pm-arbitrage-engine
+docker compose up -d --build dashboard
+```
+
+Or if running standalone:
+
+```bash
+cd /opt/pm-arbitrage-dashboard
+git pull
+docker build -t pm-arbitrage-dashboard .
+docker stop pm-arbitrage-dashboard && docker rm pm-arbitrage-dashboard
+# Re-run the docker run command from above
+```
+
+### Verification
+
+```bash
+# Check container is running
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep dashboard
+# Expected: pm-arbitrage-dashboard   Up X seconds (healthy)   0.0.0.0:3000->80/tcp
+
+# Check env.js was generated
+docker exec pm-arbitrage-dashboard cat /usr/share/nginx/html/env.js
+# Should show window.__ENV__ with your configured values
+
+# Check nginx is serving (from VPS)
+curl -s http://localhost:3000/ | head -5
+# Should return HTML with <title>PM Arbitrage Dashboard</title>
+
+# Check API proxy (from VPS)
+curl -s http://localhost:3000/api/health
+# Should return engine health response (same as localhost:8080/api/health)
+
+# Via SSH tunnel (from LOCAL machine)
+ssh -L 5000:localhost:5000 user@<VPS_IP>
+# Then open http://localhost:3000 in your browser
+```
+
+### Dashboard Troubleshooting
+
+#### Container Won't Start
+
+```bash
+# Check build logs
+docker compose logs dashboard
+
+# Rebuild from scratch
+docker compose build --no-cache dashboard
+docker compose up -d dashboard
+```
+
+#### 502 Bad Gateway on /api/ Requests
+
+The dashboard can't reach the engine. Check:
+
+```bash
+# Is the engine running?
+pm2 status                    # If using pm2
+docker ps | grep engine       # If using Docker Compose
+
+# Is the engine healthy?
+curl http://localhost:8080/api/health
+
+# Check nginx error logs
+docker exec pm-arbitrage-dashboard cat /var/log/nginx/error.log | tail -20
+```
+
+If the engine runs via pm2, ensure you're using the standalone deployment method (Option A or B above) — the default `docker-compose.yml` nginx config uses `http://engine:8080` which only resolves within Docker's network.
+
+#### 401 Unauthorized
+
+Token mismatch between dashboard and engine:
+
+```bash
+# Check what token the dashboard is using
+docker exec pm-arbitrage-dashboard cat /usr/share/nginx/html/env.js
+
+# Compare with engine's token
+grep OPERATOR_TOKEN /opt/pm-arbitrage-engine/.env.production
+```
+
+Both must match. Update the dashboard's `OPERATOR_TOKEN` environment variable and restart:
+
+```bash
+docker compose up -d dashboard
+# Or re-run docker run with the correct -e OPERATOR_TOKEN=...
+```
+
+#### Blank Page / Assets Not Loading
+
+```bash
+# Check if the build succeeded
+docker exec pm-arbitrage-dashboard ls /usr/share/nginx/html/assets/
+
+# Check browser console for CSP violations (via SSH tunnel + browser DevTools)
+# If CSP blocks resources, review the Content-Security-Policy header in nginx.conf
+```
+
+#### WebSocket Connection Fails
+
+```bash
+# Verify WebSocket proxy works
+# Install wscat: npm install -g wscat
+wscat -c ws://localhost:3000/ws
+# Should connect (or return a protocol error if the engine expects specific subprotocols)
+
+# Check nginx WebSocket config
+docker exec pm-arbitrage-dashboard cat /etc/nginx/conf.d/default.conf | grep -A5 "location /ws"
+```
+
+### Resource Limits
+
+The `docker-compose.yml` constrains the dashboard container to **128 MB RAM** and **0.25 CPU**. This is generous for a static file server. If the container is OOM-killed:
+
+```bash
+# Check if it was killed
+docker inspect pm-arbitrage-dashboard --format '{{.State.OOMKilled}}'
+
+# Increase limit in docker-compose.yml if needed
+deploy:
+  resources:
+    limits:
+      memory: 256M
 ```
