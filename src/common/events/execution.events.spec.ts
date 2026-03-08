@@ -144,6 +144,7 @@ describe('SingleLegExposureEvent', () => {
       pnlScenarios,
       recommendedActions,
       undefined,
+      undefined,
       false,
       false,
     );
@@ -156,6 +157,7 @@ describe('SingleLegExposureEvent', () => {
     expect(event.currentPrices).toEqual(currentPrices);
     expect(event.pnlScenarios).toEqual(pnlScenarios);
     expect(event.recommendedActions).toEqual(recommendedActions);
+    expect(event.origin).toBeUndefined();
     expect(event.isPaper).toBe(false);
     expect(event.mixedMode).toBe(false);
   });
@@ -171,12 +173,32 @@ describe('SingleLegExposureEvent', () => {
       pnlScenarios,
       recommendedActions,
       undefined,
+      undefined,
       true,
       true,
     );
 
     expect(event.isPaper).toBe(true);
     expect(event.mixedMode).toBe(true);
+  });
+
+  it('should store origin when provided', () => {
+    const event = new SingleLegExposureEvent(
+      'pos-1',
+      'pair-1',
+      0.08,
+      filledLeg,
+      failedLeg,
+      currentPrices,
+      pnlScenarios,
+      recommendedActions,
+      undefined,
+      'manual_close',
+      false,
+      false,
+    );
+
+    expect(event.origin).toBe('manual_close');
   });
 
   it('should default isPaper and mixedMode to false', () => {
@@ -222,6 +244,7 @@ describe('SingleLegExposureEvent', () => {
       pnlScenarios,
       recommendedActions,
       'custom-correlation-id',
+      undefined,
       false,
       false,
     );
@@ -499,8 +522,8 @@ describe('ExitTriggeredEvent', () => {
     expect(EVENT_NAMES.EXIT_TRIGGERED).toBe('execution.exit.triggered');
   });
 
-  it('should accept all three exit types', () => {
-    const types = ['take_profit', 'stop_loss', 'time_based'] as const;
+  it('should accept all four exit types', () => {
+    const types = ['take_profit', 'stop_loss', 'time_based', 'manual'] as const;
     for (const exitType of types) {
       const event = new ExitTriggeredEvent(
         'pos-1',

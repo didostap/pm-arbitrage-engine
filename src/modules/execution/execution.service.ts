@@ -1105,6 +1105,7 @@ export class ExecutionService implements IExecutionEngine {
         pnlScenarios,
         recommendedActions,
         undefined,
+        undefined,
         isPaper,
         mixedMode,
       ),

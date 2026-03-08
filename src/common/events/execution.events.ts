@@ -65,6 +65,7 @@ export class SingleLegExposureEvent extends BaseEvent {
     },
     public readonly recommendedActions: string[],
     correlationId?: string,
+    public readonly origin?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
   ) {
@@ -76,7 +77,11 @@ export class ExitTriggeredEvent extends BaseEvent {
   constructor(
     public readonly positionId: string,
     public readonly pairId: string,
-    public readonly exitType: 'take_profit' | 'stop_loss' | 'time_based',
+    public readonly exitType:
+      | 'take_profit'
+      | 'stop_loss'
+      | 'time_based'
+      | 'manual',
     public readonly initialEdge: string,
     public readonly finalEdge: string,
     public readonly realizedPnl: string,

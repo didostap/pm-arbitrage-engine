@@ -174,6 +174,7 @@ export class ExposureAlertScheduler {
         pnlScenarios,
         recommendedActions,
         undefined,
+        undefined,
         isPaper,
         mixedMode,
       ),

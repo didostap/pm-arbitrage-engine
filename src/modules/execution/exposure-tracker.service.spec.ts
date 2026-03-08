@@ -46,6 +46,7 @@ function makeExposureEvent(
     },
     ['Monitor position'],
     undefined,
+    undefined,
     false,
     false,
   );

@@ -9,13 +9,16 @@ import { MatchApprovalService } from './match-approval.service';
 import { PerformanceController } from './performance.controller';
 import { PerformanceService } from './performance.service';
 import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.module';
+import { ExecutionModule } from '../modules/execution/execution.module';
+import { PositionManagementController } from './position-management.controller';
 
 @Module({
-  imports: [DataIngestionModule],
+  imports: [DataIngestionModule, ExecutionModule],
   controllers: [
     DashboardController,
     MatchApprovalController,
     PerformanceController,
+    PositionManagementController,
   ],
   providers: [
     DashboardGateway,

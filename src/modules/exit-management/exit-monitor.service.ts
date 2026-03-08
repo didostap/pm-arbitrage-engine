@@ -3,7 +3,7 @@ import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 
-import { FinancialMath } from '../../common/utils';
+import { FinancialMath, getResidualSize } from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -70,12 +70,13 @@ export class ExitMonitorService {
     let positions;
     try {
       positions = await this.positionRepository.findByStatusWithOrders(
-        'OPEN',
+        { in: ['OPEN', 'EXIT_PARTIAL'] },
         isPaper,
       );
     } catch (error) {
       this.logger.error({
-        message: 'Failed to query open positions for exit evaluation',
+        message:
+          'Failed to query OPEN/EXIT_PARTIAL positions for exit evaluation',
         data: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -88,7 +89,7 @@ export class ExitMonitorService {
     }
 
     this.logger.log({
-      message: `Evaluating ${positions.length} positions for exit`,
+      message: `Evaluating ${positions.length} OPEN/EXIT_PARTIAL positions for exit`,
       data: { count: positions.length, isPaper, mixedMode },
     });
 
@@ -180,18 +181,87 @@ export class ExitMonitorService {
       return;
     }
 
-    // Fetch current close prices (VWAP-aware when position size available)
+    // Compute effective sizes: residual for EXIT_PARTIAL, entry fill for OPEN
+    let kalshiEffectiveSize = new Decimal(kalshiOrder.fillSize.toString());
+    let polymarketEffectiveSize = new Decimal(
+      polymarketOrder.fillSize.toString(),
+    );
+
+    if (position.status === 'EXIT_PARTIAL') {
+      const allPairOrders = await this.orderRepository.findByPairId(
+        position.pairId,
+      );
+      const residual = getResidualSize(position, allPairOrders);
+      kalshiEffectiveSize = residual.kalshi;
+      polymarketEffectiveSize = residual.polymarket;
+
+      if (residual.floored) {
+        this.logger.error({
+          message:
+            'DATA INTEGRITY: Exit orders exceed entry fill size — residual floored to zero',
+          data: {
+            positionId: position.positionId,
+            kalshiResidual: kalshiEffectiveSize.toString(),
+            polymarketResidual: polymarketEffectiveSize.toString(),
+          },
+        });
+      }
+
+      // Zero residual on both legs → position should already be CLOSED
+      if (kalshiEffectiveSize.isZero() && polymarketEffectiveSize.isZero()) {
+        this.logger.warn({
+          message:
+            'EXIT_PARTIAL position has zero residual on both legs — transitioning to CLOSED',
+          data: { positionId: position.positionId },
+        });
+        await this.positionRepository.updateStatus(
+          position.positionId,
+          'CLOSED',
+        );
+        await this.riskManager.closePosition(
+          new Decimal(0),
+          new Decimal(0),
+          position.pairId,
+        );
+        return;
+      }
+
+      // One leg zero, other non-zero → data integrity issue, defer to operator
+      if (kalshiEffectiveSize.isZero() || polymarketEffectiveSize.isZero()) {
+        this.logger.error({
+          message:
+            'DATA INTEGRITY: EXIT_PARTIAL has zero residual on one leg but not the other — skipping exit evaluation',
+          data: {
+            positionId: position.positionId,
+            kalshiResidual: kalshiEffectiveSize.toString(),
+            polymarketResidual: polymarketEffectiveSize.toString(),
+          },
+        });
+        return;
+      }
+
+      this.logger.log({
+        message: 'EXIT_PARTIAL position — using residual sizes',
+        data: {
+          positionId: position.positionId,
+          kalshiResidual: kalshiEffectiveSize.toString(),
+          polymarketResidual: polymarketEffectiveSize.toString(),
+        },
+      });
+    }
+
+    // Fetch current close prices (VWAP-aware using effective position size)
     const kalshiClosePrice = await this.getClosePrice(
       this.kalshiConnector,
       position.pair.kalshiContractId,
       position.kalshiSide,
-      new Decimal(kalshiOrder.fillSize.toString()),
+      kalshiEffectiveSize,
     );
     const polymarketClosePrice = await this.getClosePrice(
       this.polymarketConnector,
       position.pair.polymarketContractId,
       position.polymarketSide,
-      new Decimal(polymarketOrder.fillSize.toString()),
+      polymarketEffectiveSize,
     );
 
     if (kalshiClosePrice === null || polymarketClosePrice === null) {
@@ -218,8 +288,8 @@ export class ExitMonitorService {
       currentPolymarketPrice: polymarketClosePrice,
       kalshiSide: position.kalshiSide,
       polymarketSide: position.polymarketSide,
-      kalshiSize: new Decimal(kalshiOrder.fillSize.toString()),
-      polymarketSize: new Decimal(polymarketOrder.fillSize.toString()),
+      kalshiSize: kalshiEffectiveSize,
+      polymarketSize: polymarketEffectiveSize,
       kalshiFeeDecimal: FinancialMath.calculateTakerFeeRate(
         kalshiClosePrice,
         kalshiFeeSchedule,
@@ -264,6 +334,8 @@ export class ExitMonitorService {
         polymarketClosePrice,
         isPaper,
         mixedMode,
+        kalshiEffectiveSize,
+        polymarketEffectiveSize,
       );
     }
   }
@@ -277,7 +349,28 @@ export class ExitMonitorService {
     polymarketClosePrice: Decimal,
     isPaper: boolean,
     mixedMode: boolean,
+    kalshiEffectiveSize?: Decimal,
+    polymarketEffectiveSize?: Decimal,
   ): Promise<void> {
+    // Re-read position status before order submission (guard against concurrent manual close)
+    const freshPosition = await this.positionRepository.findByIdWithOrders(
+      position.positionId,
+    );
+    if (
+      !freshPosition ||
+      (freshPosition.status !== 'OPEN' &&
+        freshPosition.status !== 'EXIT_PARTIAL')
+    ) {
+      this.logger.warn({
+        message: 'Position status changed during evaluation — skipping exit',
+        data: {
+          positionId: position.positionId,
+          currentStatus: freshPosition?.status ?? 'not_found',
+        },
+      });
+      return;
+    }
+
     const kalshiOrder = position.kalshiOrder!;
     const polymarketOrder = position.polymarketOrder!;
 
@@ -286,10 +379,16 @@ export class ExitMonitorService {
     const polymarketCloseSide =
       position.polymarketSide === 'buy' ? 'sell' : 'buy';
 
-    const kalshiFillSize = new Decimal(kalshiOrder.fillSize!.toString());
-    const polymarketFillSize = new Decimal(
+    const kalshiEntryFillSize = new Decimal(kalshiOrder.fillSize!.toString());
+    const polymarketEntryFillSize = new Decimal(
       polymarketOrder.fillSize!.toString(),
     );
+
+    // Use effective (residual) sizes for exit cap when provided (EXIT_PARTIAL),
+    // otherwise fall back to entry fill sizes (OPEN)
+    const kalshiFillSize = kalshiEffectiveSize ?? kalshiEntryFillSize;
+    const polymarketFillSize =
+      polymarketEffectiveSize ?? polymarketEntryFillSize;
 
     // Determine primary/secondary leg order (same as entry)
     const primaryLeg = position.pair.primaryLeg ?? 'kalshi';
@@ -319,14 +418,17 @@ export class ExitMonitorService {
     const secondaryClosePrice = isPrimaryKalshi
       ? polymarketClosePrice
       : kalshiClosePrice;
-    const primaryEntryFillSize = isPrimaryKalshi
+    const primaryEffectiveSize = isPrimaryKalshi
       ? kalshiFillSize
       : polymarketFillSize;
+    const secondaryEffectiveSize = isPrimaryKalshi
+      ? polymarketFillSize
+      : kalshiFillSize;
     const primaryPlatform = isPrimaryKalshi ? 'KALSHI' : 'POLYMARKET';
     const secondaryPlatform = isPrimaryKalshi ? 'POLYMARKET' : 'KALSHI';
 
     // Pre-exit depth check — intentional second fetch (book may have changed since threshold evaluation)
-    let exitSize = primaryEntryFillSize; // Default: entry fill size
+    let exitSize = Decimal.min(primaryEffectiveSize, secondaryEffectiveSize); // Default: min of both legs' effective sizes
     try {
       const [primaryDepth, secondaryDepth] = await Promise.all([
         this.getAvailableExitDepth(
@@ -356,12 +458,13 @@ export class ExitMonitorService {
         return;
       }
 
-      // Cap exit sizes: min(primaryDepth, secondaryDepth, entryFillSize)
+      // Cap exit sizes: min(primaryDepth, secondaryDepth, primaryEffective, secondaryEffective)
       // Cross-leg equalization: both legs submit the same exitSize
       exitSize = Decimal.min(
         primaryDepth,
         secondaryDepth,
-        primaryEntryFillSize,
+        primaryEffectiveSize,
+        secondaryEffectiveSize,
       );
 
       if (exitSize.isZero()) return;
@@ -552,7 +655,7 @@ export class ExitMonitorService {
       .mul(kalshiExitFillSize)
       .plus(polymarketEntryPrice.mul(polymarketExitFillSize));
 
-    // Determine full vs partial exit (compare exit fills to entry fills)
+    // Determine full vs partial exit (compare exit fills to effective sizes — residual for EXIT_PARTIAL, entry for OPEN)
     const isFullExit =
       kalshiExitFillSize.round().gte(kalshiFillSize.round()) &&
       polymarketExitFillSize.round().gte(polymarketFillSize.round());
@@ -687,6 +790,7 @@ export class ExitMonitorService {
             'Close remaining via POST /api/positions/:id/close-leg',
           ],
           undefined,
+          undefined,
           isPaper,
           mixedMode,
         ),
@@ -817,6 +921,7 @@ export class ExitMonitorService {
           'Retry failed exit leg via POST /api/positions/:id/retry-leg',
           'Close remaining leg via POST /api/positions/:id/close-leg',
         ],
+        undefined,
         undefined,
         isPaper,
         mixedMode,

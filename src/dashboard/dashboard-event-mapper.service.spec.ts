@@ -157,6 +157,7 @@ describe('DashboardEventMapperService', () => {
         },
         ['Retry second leg', 'Close position'],
         'corr-1',
+        undefined,
         false,
         false,
       );

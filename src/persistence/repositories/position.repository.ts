@@ -68,6 +68,14 @@ export class PositionRepository {
     });
   }
 
+  /** Fetches position with pair + both entry orders for close/P&L operations. */
+  async findByIdWithOrders(positionId: string) {
+    return this.prisma.openPosition.findUnique({
+      where: { positionId },
+      include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+    });
+  }
+
   /**
    * Finds all active positions (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL, RECONCILIATION_REQUIRED)
    * with associated pair, kalshiOrder, and polymarketOrder for reconciliation.

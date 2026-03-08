@@ -17,6 +17,8 @@ import { SingleLegResolutionController } from './single-leg-resolution.controlle
 import { ExposureAlertScheduler } from './exposure-alert-scheduler.service';
 import { ComplianceConfigLoaderService } from './compliance/compliance-config-loader.service';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
+import { PositionCloseService } from './position-close.service';
+import { POSITION_CLOSE_SERVICE_TOKEN } from '../../common/interfaces/position-close-service.interface';
 
 @Module({
   imports: [RiskManagementModule, ConnectorModule],
@@ -39,12 +41,17 @@ import { ComplianceValidatorService } from './compliance/compliance-validator.se
       provide: EXECUTION_QUEUE_TOKEN,
       useClass: ExecutionQueueService,
     },
+    {
+      provide: POSITION_CLOSE_SERVICE_TOKEN,
+      useClass: PositionCloseService,
+    },
   ],
   exports: [
     ExecutionLockService,
     EXECUTION_QUEUE_TOKEN,
     EXECUTION_ENGINE_TOKEN,
     ComplianceConfigLoaderService,
+    POSITION_CLOSE_SERVICE_TOKEN,
   ],
 })
 export class ExecutionModule {}
