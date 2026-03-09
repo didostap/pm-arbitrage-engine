@@ -10,5 +10,6 @@ export { PRICE_FEED_SERVICE_TOKEN } from './price-feed-service.interface.js';
 export type {
   IPositionCloseService,
   PositionCloseResult,
+  BatchPositionResult,
 } from './position-close-service.interface.js';
 export { POSITION_CLOSE_SERVICE_TOKEN } from './position-close-service.interface.js';

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 import { PlatformId } from '../common/types/platform.type';
 import type { PlatformHealth } from '../common/types/platform.type';
@@ -10,9 +10,14 @@ import {
   LimitApproachedEvent,
 } from '../common/events/risk.events';
 import { ExitTriggeredEvent } from '../common/events/execution.events';
+import { BatchCompleteEvent } from '../common/events/batch.events';
 import { MatchApprovedEvent } from '../common/events/match-approved.event';
 import { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { WS_EVENTS } from './dto';
+
+vi.mock('../common/services/correlation-context', () => ({
+  getCorrelationId: () => 'test-correlation-id',
+}));
 
 describe('DashboardEventMapperService', () => {
   let mapper: DashboardEventMapperService;
@@ -253,6 +258,56 @@ describe('DashboardEventMapperService', () => {
       expect(result.data.status).toBe('rejected');
       expect(result.data.confidenceScore).toBeNull();
       expect(result.timestamp).toBeDefined();
+    });
+  });
+
+  describe('mapBatchComplete', () => {
+    it('should map BatchCompleteEvent to WsBatchCompletePayload', () => {
+      const event = new BatchCompleteEvent('batch-abc', [
+        {
+          positionId: 'pos-1',
+          pairName: 'BTC > 50k',
+          status: 'success',
+          realizedPnl: '0.01500000',
+        },
+        {
+          positionId: 'pos-2',
+          pairName: 'ETH > 3k',
+          status: 'failure',
+          error: 'Order book empty',
+        },
+        {
+          positionId: 'pos-3',
+          pairName: 'SOL > 100',
+          status: 'rate_limited',
+          error: 'Rate limit exceeded',
+        },
+      ]);
+
+      const result = mapper.mapBatchComplete(event);
+
+      expect(result.event).toBe(WS_EVENTS.BATCH_COMPLETE);
+      expect(result.data.batchId).toBe('batch-abc');
+      expect(result.data.results).toHaveLength(3);
+      expect(result.data.results[0]).toEqual({
+        positionId: 'pos-1',
+        pairName: 'BTC > 50k',
+        status: 'success',
+        realizedPnl: '0.01500000',
+        error: undefined,
+      });
+      expect(result.data.results[1].status).toBe('failure');
+      expect(result.data.results[2].status).toBe('rate_limited');
+      expect(result.timestamp).toBeDefined();
+    });
+
+    it('should handle empty results', () => {
+      const event = new BatchCompleteEvent('batch-empty', []);
+
+      const result = mapper.mapBatchComplete(event);
+
+      expect(result.data.batchId).toBe('batch-empty');
+      expect(result.data.results).toEqual([]);
     });
   });
 });

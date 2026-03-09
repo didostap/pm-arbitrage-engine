@@ -15,6 +15,7 @@ import type {
   SingleLegExposureEvent,
   ExitTriggeredEvent,
 } from '../common/events/execution.events';
+import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
@@ -109,6 +110,12 @@ export class DashboardGateway
   @OnEvent(EVENT_NAMES.EXIT_TRIGGERED)
   handleExitTriggered(event: ExitTriggeredEvent): void {
     const envelope = this.mapper.mapPositionUpdate(event);
+    this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.BATCH_COMPLETE)
+  handleBatchComplete(event: BatchCompleteEvent): void {
+    const envelope = this.mapper.mapBatchComplete(event);
     this.broadcast(envelope);
   }
 

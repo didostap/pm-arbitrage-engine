@@ -5,6 +5,11 @@ import { DashboardGateway } from './dashboard.gateway';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 import type { PlatformHealth } from '../common/types/platform.type';
 import { PlatformId } from '../common/types/platform.type';
+import { BatchCompleteEvent } from '../common/events/batch.events';
+
+vi.mock('../common/services/correlation-context', () => ({
+  getCorrelationId: () => 'test-correlation-id',
+}));
 
 function createMockWsClient(): {
   close: ReturnType<typeof vi.fn>;
@@ -150,6 +155,34 @@ describe('DashboardGateway', () => {
 
       gateway.onModuleDestroy();
       expect(gateway.getConnectedClientCount()).toBe(0);
+    });
+  });
+
+  describe('handleBatchComplete', () => {
+    it('should broadcast batch.complete event to connected clients', () => {
+      const client = createMockWsClient();
+      const request = createMockRequest('test-token');
+      gateway.handleConnection(client as never, request);
+
+      const event = new BatchCompleteEvent('batch-123', [
+        {
+          positionId: 'pos-1',
+          pairName: 'BTC > 50k',
+          status: 'success',
+          realizedPnl: '0.01500000',
+        },
+      ]);
+
+      gateway.handleBatchComplete(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: { batchId: string; results: unknown[] };
+      };
+      expect(sent.event).toBe('batch.complete');
+      expect(sent.data.batchId).toBe('batch-123');
+      expect(sent.data.results).toHaveLength(1);
     });
   });
 });

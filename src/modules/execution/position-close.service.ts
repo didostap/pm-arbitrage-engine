@@ -1,8 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomUUID } from 'crypto';
 import Decimal from 'decimal.js';
 
 import type {
+  BatchPositionResult,
   IPositionCloseService,
   PositionCloseResult,
 } from '../../common/interfaces/position-close-service.interface';
@@ -21,9 +23,14 @@ import {
   ExitTriggeredEvent,
   SingleLegExposureEvent,
 } from '../../common/events/execution.events';
+import { BatchCompleteEvent } from '../../common/events/batch.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
+import { PlatformApiError } from '../../common/errors/platform-api-error';
+import { KALSHI_ERROR_CODES } from '../../common/errors/platform-api-error';
+import { POLYMARKET_ERROR_CODES } from '../../connectors/polymarket/polymarket-error-codes';
 import { PlatformId } from '../../common/types';
 import { FinancialMath, getResidualSize } from '../../common/utils';
+import { getCorrelationId } from '../../common/services/correlation-context';
 
 @Injectable()
 export class PositionCloseService implements IPositionCloseService {
@@ -534,9 +541,19 @@ export class PositionCloseService implements IPositionCloseService {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+
+      if (error instanceof PlatformApiError && this.isRateLimitError(error)) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: 'RATE_LIMITED',
+        };
+      }
+
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
+        errorCode: 'EXECUTION_FAILED',
       };
     } finally {
       if (lockAcquired) this.executionLockService.release();
@@ -629,6 +646,124 @@ export class PositionCloseService implements IPositionCloseService {
       success: false,
       error: `Single-leg exposure: ${filledPlatformId} filled, ${failedPlatformId} failed. Use retry-leg or close-leg to resolve.`,
     };
+  }
+
+  async closeAllPositions(rationale?: string): Promise<{ batchId: string }> {
+    const batchId = randomUUID();
+    const correlationId = getCorrelationId();
+
+    // Query all closeable positions (both live and paper)
+    const [livePositions, paperPositions] = await Promise.all([
+      this.positionRepository.findByStatusWithPair(
+        { in: ['OPEN', 'EXIT_PARTIAL'] },
+        false,
+      ),
+      this.positionRepository.findByStatusWithPair(
+        { in: ['OPEN', 'EXIT_PARTIAL'] },
+        true,
+      ),
+    ]);
+    const positions = [...livePositions, ...paperPositions];
+
+    // Fire-and-forget — controller returns 202 immediately
+    void this.processCloseAllBatch(
+      batchId,
+      positions,
+      rationale,
+      correlationId,
+    );
+
+    return { batchId };
+  }
+
+  private async processCloseAllBatch(
+    batchId: string,
+    positions: Array<{
+      positionId: string;
+      pairId: string;
+      pair: {
+        pairName?: string | null;
+        kalshiContractId: string;
+        polymarketContractId: string;
+      };
+    }>,
+    rationale?: string,
+    correlationId?: string,
+  ): Promise<void> {
+    const results: BatchPositionResult[] = [];
+
+    try {
+      for (const position of positions) {
+        try {
+          const result = await this.closePosition(
+            position.positionId,
+            rationale,
+          );
+          results.push({
+            positionId: position.positionId,
+            pairName:
+              position.pair.pairName ??
+              `${position.pair.kalshiContractId} / ${position.pair.polymarketContractId}`,
+            status: result.success
+              ? 'success'
+              : result.errorCode === 'RATE_LIMITED'
+                ? 'rate_limited'
+                : 'failure',
+            realizedPnl: result.realizedPnl,
+            error: result.error,
+          });
+        } catch (error) {
+          this.logger.error({
+            message: 'Batch close unexpected error',
+            data: {
+              batchId,
+              positionId: position.positionId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+          results.push({
+            positionId: position.positionId,
+            pairName:
+              position.pair.pairName ??
+              `${position.pair.kalshiContractId} / ${position.pair.polymarketContractId}`,
+            status: 'failure',
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Batch close loop failed',
+        data: {
+          batchId,
+          error: error instanceof Error ? error.message : String(error),
+          completedCount: results.length,
+          totalCount: positions.length,
+        },
+      });
+    }
+
+    try {
+      this.eventEmitter.emit(
+        EVENT_NAMES.BATCH_COMPLETE,
+        new BatchCompleteEvent(batchId, results, correlationId),
+      );
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to emit batch.complete event',
+        data: {
+          batchId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private isRateLimitError(error: PlatformApiError): boolean {
+    return (
+      error.code === KALSHI_ERROR_CODES.RATE_LIMIT_EXCEEDED ||
+      error.code === POLYMARKET_ERROR_CODES.RATE_LIMIT
+    );
   }
 
   private computeVwap(

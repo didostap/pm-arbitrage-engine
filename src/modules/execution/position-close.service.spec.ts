@@ -12,6 +12,8 @@ import {
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
+import { PlatformApiError } from '../../common/errors/platform-api-error';
+import { KALSHI_ERROR_CODES } from '../../common/errors/platform-api-error';
 import { ExecutionLockService } from './execution-lock.service';
 import {
   createMockPlatformConnector,
@@ -518,6 +520,270 @@ describe('PositionCloseService', () => {
       // Secondary connector should have getOrderBook called twice:
       // once for initial VWAP, once for re-fetch after primary fills
       expect(polymarketConnector.getOrderBook).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('closePosition — rate limit classification', () => {
+    it('should return RATE_LIMITED errorCode when PlatformApiError is a rate limit', async () => {
+      const position = createMockPosition();
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(position)
+        .mockResolvedValueOnce(position);
+
+      // Simulate rate limit error when fetching order book
+      kalshiConnector.getOrderBook.mockRejectedValue(
+        new PlatformApiError(
+          KALSHI_ERROR_CODES.RATE_LIMIT_EXCEEDED,
+          'Rate limit exceeded',
+          PlatformId.KALSHI,
+          'warning',
+        ),
+      );
+
+      const result = await service.closePosition('pos-1');
+
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('RATE_LIMITED');
+    });
+
+    it('should return EXECUTION_FAILED for non-rate-limit PlatformApiError', async () => {
+      const position = createMockPosition();
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(position)
+        .mockResolvedValueOnce(position);
+
+      kalshiConnector.getOrderBook.mockRejectedValue(
+        new PlatformApiError(
+          KALSHI_ERROR_CODES.MARKET_NOT_FOUND,
+          'Market not found',
+          PlatformId.KALSHI,
+          'warning',
+        ),
+      );
+
+      const result = await service.closePosition('pos-1');
+
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('EXECUTION_FAILED');
+    });
+  });
+
+  describe('closeAllPositions', () => {
+    function createMockPositionWithPair(
+      id: string,
+      overrides: Record<string, unknown> = {},
+    ) {
+      return {
+        positionId: id,
+        pairId: `pair-${id}`,
+        status: 'OPEN',
+        isPaper: false,
+        pair: {
+          matchId: `pair-${id}`,
+          kalshiContractId: `kalshi-${id}`,
+          polymarketContractId: `poly-${id}`,
+          pairName: `Pair ${id}`,
+          primaryLeg: 'kalshi',
+          resolutionDate: null,
+        },
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      // Add mock for findByStatusWithPair (not in default setup)
+      positionRepository.findByStatusWithPair = vi.fn().mockResolvedValue([]);
+    });
+
+    it('should return batchId immediately', async () => {
+      const result = await service.closeAllPositions('Emergency close');
+
+      expect(result.batchId).toBeDefined();
+      expect(typeof result.batchId).toBe('string');
+      expect(result.batchId.length).toBeGreaterThan(0);
+    });
+
+    it('should emit batch.complete with empty results when no positions exist', async () => {
+      positionRepository.findByStatusWithPair!.mockResolvedValue([]); // both live and paper return empty
+
+      await service.closeAllPositions();
+
+      await vi.waitFor(() => {
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.BATCH_COMPLETE,
+          expect.objectContaining({
+            results: [],
+          }),
+        );
+      });
+    });
+
+    it('should close all positions sequentially and emit batch.complete', async () => {
+      const positions = [
+        createMockPositionWithPair('1'),
+        createMockPositionWithPair('2'),
+        createMockPositionWithPair('3'),
+      ];
+
+      // First call (live) returns positions, second call (paper) returns empty
+      positionRepository
+        .findByStatusWithPair!.mockResolvedValueOnce(positions)
+        .mockResolvedValueOnce([]);
+
+      // Mock closePosition to succeed for each
+      for (const pos of positions) {
+        positionRepository
+          .findByIdWithOrders!.mockResolvedValueOnce(
+            createMockPosition({
+              positionId: pos.positionId,
+              pairId: pos.pairId,
+            }),
+          )
+          .mockResolvedValueOnce(
+            createMockPosition({
+              positionId: pos.positionId,
+              pairId: pos.pairId,
+            }),
+          );
+      }
+
+      await service.closeAllPositions('Batch close test');
+
+      await vi.waitFor(() => {
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.BATCH_COMPLETE,
+          expect.anything(),
+        );
+      });
+
+      const batchEmitCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === EVENT_NAMES.BATCH_COMPLETE,
+      );
+      expect(batchEmitCall).toBeDefined();
+      const batchResults = (
+        batchEmitCall![1] as {
+          results: Array<{
+            positionId: string;
+            pairName: string;
+            status: string;
+          }>;
+        }
+      ).results;
+      expect(batchResults).toHaveLength(3);
+      expect(batchResults[0]).toEqual(
+        expect.objectContaining({
+          positionId: '1',
+          pairName: 'Pair 1',
+          status: 'success',
+        }),
+      );
+      expect(batchResults[1]).toEqual(
+        expect.objectContaining({
+          positionId: '2',
+          pairName: 'Pair 2',
+          status: 'success',
+        }),
+      );
+      expect(batchResults[2]).toEqual(
+        expect.objectContaining({
+          positionId: '3',
+          pairName: 'Pair 3',
+          status: 'success',
+        }),
+      );
+    });
+
+    it('should classify mixed results correctly', async () => {
+      const positions = [
+        createMockPositionWithPair('ok'),
+        createMockPositionWithPair('fail'),
+        createMockPositionWithPair('rate'),
+      ];
+
+      positionRepository
+        .findByStatusWithPair!.mockResolvedValueOnce(positions)
+        .mockResolvedValueOnce([]);
+
+      // Spy on closePosition and return predetermined results per positionId
+      const closePositionSpy = vi.spyOn(service, 'closePosition');
+      closePositionSpy
+        .mockResolvedValueOnce({ success: true, realizedPnl: '0.01000000' }) // ok
+        .mockResolvedValueOnce({
+          success: false,
+          error: 'Position not found',
+          errorCode: 'NOT_FOUND',
+        }) // fail
+        .mockResolvedValueOnce({
+          success: false,
+          error: 'Rate limit exceeded',
+          errorCode: 'RATE_LIMITED',
+        }); // rate
+
+      await service.closeAllPositions();
+
+      await vi.waitFor(() => {
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.BATCH_COMPLETE,
+          expect.anything(),
+        );
+      });
+
+      const batchCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === EVENT_NAMES.BATCH_COMPLETE,
+      );
+      expect(batchCall).toBeDefined();
+      const batchEvent = batchCall![1] as {
+        results: Array<{ positionId: string; status: string; error?: string }>;
+      };
+      const results = batchEvent.results;
+
+      expect(results).toHaveLength(3);
+      expect(results.find((r) => r.positionId === 'ok')?.status).toBe(
+        'success',
+      );
+      expect(results.find((r) => r.positionId === 'fail')?.status).toBe(
+        'failure',
+      );
+      expect(results.find((r) => r.positionId === 'rate')?.status).toBe(
+        'rate_limited',
+      );
+
+      closePositionSpy.mockRestore();
+    });
+
+    it('should handle race condition where position was closed during batch', async () => {
+      const positions = [createMockPositionWithPair('1')];
+      positionRepository
+        .findByStatusWithPair!.mockResolvedValueOnce(positions)
+        .mockResolvedValueOnce([]);
+
+      // Pre-lock check: OPEN, post-lock re-read: CLOSED (exit monitor closed it)
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(
+          createMockPosition({ positionId: '1', status: 'OPEN' }),
+        )
+        .mockResolvedValueOnce(
+          createMockPosition({ positionId: '1', status: 'CLOSED' }),
+        );
+
+      await service.closeAllPositions();
+
+      await vi.waitFor(() => {
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.BATCH_COMPLETE,
+          expect.anything(),
+        );
+      });
+
+      const batchCall = eventEmitter.emit.mock.calls.find(
+        (c: unknown[]) => c[0] === EVENT_NAMES.BATCH_COMPLETE,
+      );
+      expect(batchCall).toBeDefined();
+      const batchEvent = batchCall![1] as {
+        results: Array<{ positionId: string; status: string; error?: string }>;
+      };
+      expect(batchEvent.results[0].status).toBe('failure');
+      expect(batchEvent.results[0].error).toContain('not in a closeable state');
     });
   });
 });

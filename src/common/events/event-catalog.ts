@@ -145,6 +145,10 @@ export const EVENT_NAMES = {
   MATCH_APPROVED: 'contract.match.approved',
   /** Emitted when operator rejects a contract match */
   MATCH_REJECTED: 'contract.match.rejected',
+
+  // [Story 7.5.3] Batch Close Events
+  /** Emitted when a batch close-all operation completes */
+  BATCH_COMPLETE: 'execution.batch.complete',
 } as const;
 
 /**

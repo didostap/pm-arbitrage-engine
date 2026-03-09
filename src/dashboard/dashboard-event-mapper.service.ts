@@ -4,6 +4,7 @@ import type { OrderFilledEvent } from '../common/events/execution.events';
 import type { ExecutionFailedEvent } from '../common/events/execution.events';
 import type { SingleLegExposureEvent } from '../common/events/execution.events';
 import type { ExitTriggeredEvent } from '../common/events/execution.events';
+import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
@@ -17,6 +18,7 @@ import type {
   WsAlertNewPayload,
   WsPositionUpdatePayload,
   WsMatchPendingPayload,
+  WsBatchCompletePayload,
 } from './dto';
 import { WS_EVENTS } from './dto';
 
@@ -163,6 +165,25 @@ export class DashboardEventMapperService {
         matchId: event.matchId,
         status: 'rejected',
         confidenceScore: null,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapBatchComplete(
+    event: BatchCompleteEvent,
+  ): WsEventEnvelope<WsBatchCompletePayload> {
+    return {
+      event: WS_EVENTS.BATCH_COMPLETE,
+      data: {
+        batchId: event.batchId,
+        results: event.results.map((r) => ({
+          positionId: r.positionId,
+          pairName: r.pairName,
+          status: r.status,
+          realizedPnl: r.realizedPnl,
+          error: r.error,
+        })),
       },
       timestamp: new Date().toISOString(),
     };

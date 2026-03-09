@@ -4,7 +4,19 @@ export interface PositionCloseResult {
   success: boolean;
   realizedPnl?: string;
   error?: string;
-  errorCode?: 'NOT_FOUND' | 'NOT_CLOSEABLE' | 'EXECUTION_FAILED';
+  errorCode?:
+    | 'NOT_FOUND'
+    | 'NOT_CLOSEABLE'
+    | 'EXECUTION_FAILED'
+    | 'RATE_LIMITED';
+}
+
+export interface BatchPositionResult {
+  positionId: string;
+  pairName: string;
+  status: 'success' | 'failure' | 'rate_limited';
+  realizedPnl?: string;
+  error?: string;
 }
 
 export interface IPositionCloseService {
@@ -12,4 +24,6 @@ export interface IPositionCloseService {
     positionId: string,
     rationale?: string,
   ): Promise<PositionCloseResult>;
+
+  closeAllPositions(rationale?: string): Promise<{ batchId: string }>;
 }

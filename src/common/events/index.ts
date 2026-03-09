@@ -9,4 +9,5 @@ export * from './execution.events';
 export * from './monitoring.events';
 export * from './match-approved.event';
 export * from './match-rejected.event';
+export * from './batch.events';
 export * from './event-catalog';

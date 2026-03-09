@@ -11,6 +11,7 @@ describe('PositionManagementController', () => {
   beforeEach(async () => {
     closeService = {
       closePosition: vi.fn(),
+      closeAllPositions: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -92,5 +93,31 @@ describe('PositionManagementController', () => {
       const httpError = error as { getStatus: () => number };
       expect(httpError.getStatus()).toBe(404);
     }
+  });
+
+  describe('closeAll', () => {
+    it('should return 202 with batchId', async () => {
+      closeService.closeAllPositions!.mockResolvedValue({
+        batchId: 'batch-abc-123',
+      });
+
+      const result = await controller.closeAll({});
+
+      expect(result.data).toEqual({ batchId: 'batch-abc-123' });
+      expect(result.timestamp).toBeDefined();
+      expect(closeService.closeAllPositions).toHaveBeenCalledWith(undefined);
+    });
+
+    it('should pass rationale to service', async () => {
+      closeService.closeAllPositions!.mockResolvedValue({
+        batchId: 'batch-def-456',
+      });
+
+      await controller.closeAll({ rationale: 'Emergency exit' });
+
+      expect(closeService.closeAllPositions).toHaveBeenCalledWith(
+        'Emergency exit',
+      );
+    });
   });
 });

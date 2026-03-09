@@ -49,10 +49,22 @@ export interface WsEventEnvelope<T> {
   timestamp: string;
 }
 
+export interface WsBatchCompletePayload {
+  batchId: string;
+  results: Array<{
+    positionId: string;
+    pairName: string;
+    status: string;
+    realizedPnl?: string;
+    error?: string;
+  }>;
+}
+
 export const WS_EVENTS = {
   HEALTH_CHANGE: 'health.change',
   EXECUTION_COMPLETE: 'execution.complete',
   ALERT_NEW: 'alert.new',
   POSITION_UPDATE: 'position.update',
   MATCH_PENDING: 'match.pending',
+  BATCH_COMPLETE: 'batch.complete',
 } as const;

@@ -4,7 +4,9 @@ import {
   Param,
   Body,
   Inject,
+  HttpCode,
   HttpException,
+  HttpStatus,
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
@@ -20,6 +22,7 @@ import {
 } from '../common/interfaces/position-close-service.interface';
 import { AuthTokenGuard } from '../common/guards/auth-token.guard';
 import { ClosePositionDto } from './dto/close-position.dto';
+import { CloseAllPositionsDto } from './dto/close-all-positions.dto';
 
 @ApiTags('Position Management')
 @ApiBearerAuth()
@@ -30,6 +33,20 @@ export class PositionManagementController {
     @Inject(POSITION_CLOSE_SERVICE_TOKEN)
     private readonly closeService: IPositionCloseService,
   ) {}
+
+  @Post('close-all')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Close all open positions in a batch' })
+  @ApiResponse({ status: 202, description: 'Batch close initiated' })
+  async closeAll(
+    @Body(new ValidationPipe({ whitelist: true })) dto: CloseAllPositionsDto,
+  ) {
+    const result = await this.closeService.closeAllPositions(dto.rationale);
+    return {
+      data: result,
+      timestamp: new Date().toISOString(),
+    };
+  }
 
   @Post(':id/close')
   @ApiOperation({ summary: 'Manually close a position across both platforms' })
