@@ -84,7 +84,7 @@ export class MatchSummaryDto {
   @ApiProperty({
     nullable: true,
     type: Number,
-    description: 'Confidence score (null until Epic 8)',
+    description: 'Confidence score (0-100, null if not yet calculated)',
   })
   confidenceScore!: number | null;
   @ApiProperty() createdAt!: string;

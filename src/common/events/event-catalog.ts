@@ -149,6 +149,10 @@ export const EVENT_NAMES = {
   // [Story 7.5.3] Batch Close Events
   /** Emitted when a batch close-all operation completes */
   BATCH_COMPLETE: 'execution.batch.complete',
+
+  // [Story 8.1] Resolution Tracking Events
+  /** Emitted when resolution outcomes diverge between platforms */
+  RESOLUTION_DIVERGED: 'contract.match.resolution.diverged',
 } as const;
 
 /**

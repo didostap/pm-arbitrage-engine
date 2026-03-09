@@ -10,4 +10,5 @@ export * from './monitoring.events';
 export * from './match-approved.event';
 export * from './match-rejected.event';
 export * from './batch.events';
+export * from './resolution-diverged.event';
 export * from './event-catalog';

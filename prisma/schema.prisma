@@ -76,6 +76,13 @@ model ContractMatch {
   totalCyclesTraded         Int       @default(0) @map("total_cycles_traded")
   primaryLeg                String?   @map("primary_leg") // "kalshi" | "polymarket", default applied in ExecutionService
   resolutionDate            DateTime? @map("resolution_date") @db.Timestamptz
+  confidenceScore           Float?    @map("confidence_score")
+  resolutionCriteriaHash    String?   @map("resolution_criteria_hash")
+  polymarketResolution      String?   @map("polymarket_resolution")
+  kalshiResolution          String?   @map("kalshi_resolution")
+  resolutionTimestamp       DateTime? @map("resolution_timestamp") @db.Timestamptz
+  resolutionDiverged        Boolean?  @map("resolution_diverged")
+  divergenceNotes           String?   @map("divergence_notes")
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -84,6 +91,9 @@ model ContractMatch {
 
   @@unique([polymarketContractId, kalshiContractId])
   @@index([operatorApproved])
+  @@index([resolutionDiverged])
+  @@index([confidenceScore])
+  @@index([resolutionTimestamp])
   @@map("contract_matches")
 }
 

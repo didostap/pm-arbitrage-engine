@@ -211,7 +211,7 @@ export class MatchApprovalService {
       operatorApprovalTimestamp:
         match.operatorApprovalTimestamp?.toISOString() ?? null,
       operatorRationale: match.operatorRationale,
-      confidenceScore: null,
+      confidenceScore: match.confidenceScore ?? null,
       createdAt: match.createdAt.toISOString(),
       updatedAt: match.updatedAt.toISOString(),
     };

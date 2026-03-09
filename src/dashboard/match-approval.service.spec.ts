@@ -133,7 +133,7 @@ describe('MatchApprovalService', () => {
       expect(result.limit).toBe(10);
     });
 
-    it('should map match to MatchSummaryDto with null confidenceScore', async () => {
+    it('should map match to MatchSummaryDto with null confidenceScore when DB field is null', async () => {
       const match = buildMockMatch({
         operatorApproved: true,
         operatorRationale: 'looks good',
@@ -149,6 +149,21 @@ describe('MatchApprovalService', () => {
       expect(dto.kalshiContractId).toBe('kalshi-456');
       expect(dto.confidenceScore).toBeNull();
       expect(dto.createdAt).toBeDefined();
+    });
+
+    it('should forward confidenceScore from DB when present', async () => {
+      const match = buildMockMatch({
+        operatorApproved: true,
+        operatorRationale: 'looks good',
+        confidenceScore: 87.3,
+      });
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.confidenceScore).toBe(87.3);
     });
   });
 
