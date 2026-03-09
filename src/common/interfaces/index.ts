@@ -13,3 +13,8 @@ export type {
   BatchPositionResult,
 } from './position-close-service.interface.js';
 export { POSITION_CLOSE_SERVICE_TOKEN } from './position-close-service.interface.js';
+export type {
+  IScoringStrategy,
+  ScoringResult,
+} from './scoring-strategy.interface.js';
+export { SCORING_STRATEGY_TOKEN } from './scoring-strategy.interface.js';

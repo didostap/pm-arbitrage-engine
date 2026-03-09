@@ -11,4 +11,6 @@ export * from './match-approved.event';
 export * from './match-rejected.event';
 export * from './batch.events';
 export * from './resolution-diverged.event';
+export * from './match-auto-approved.event';
+export * from './match-pending-review.event';
 export * from './event-catalog';

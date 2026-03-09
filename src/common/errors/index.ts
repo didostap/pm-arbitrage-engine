@@ -12,3 +12,7 @@ export {
 export { ConfigValidationError } from './config-validation-error.js';
 export { RiskLimitError, RISK_ERROR_CODES } from './risk-limit-error.js';
 export { ExecutionError, EXECUTION_ERROR_CODES } from './execution-error.js';
+export {
+  LlmScoringError,
+  LLM_SCORING_ERROR_CODES,
+} from './llm-scoring-error.js';

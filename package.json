@@ -18,8 +18,10 @@
     "test:cov": "vitest run --coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@ethersproject/wallet": "^5.8.0",
     "@fastify/static": "^9.0.0",
+    "@google/genai": "^1.44.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",

@@ -153,6 +153,12 @@ export const EVENT_NAMES = {
   // [Story 8.1] Resolution Tracking Events
   /** Emitted when resolution outcomes diverge between platforms */
   RESOLUTION_DIVERGED: 'contract.match.resolution.diverged',
+
+  // [Story 8.2] Confidence Scoring Events
+  /** Emitted when a contract match is auto-approved by confidence scorer */
+  MATCH_AUTO_APPROVED: 'contract.match.auto_approved',
+  /** Emitted when a contract match needs operator review (below auto-approve threshold) */
+  MATCH_PENDING_REVIEW: 'contract.match.pending_review',
 } as const;
 
 /**
