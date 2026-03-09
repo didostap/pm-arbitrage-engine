@@ -141,4 +141,35 @@ export class PositionSummaryDto {
     ],
   })
   status!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Realized P&L in USD for closed positions (decimal string, null for open)',
+    type: String,
+    nullable: true,
+  })
+  realizedPnl!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Exit type for closed positions (null for open)',
+    enum: ['stop_loss', 'take_profit', 'time_based', 'manual'],
+    nullable: true,
+  })
+  exitType!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Projected P&L at stop-loss threshold (decimal string, null if unavailable)',
+    type: String,
+    nullable: true,
+  })
+  projectedSlPnl!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Projected P&L at take-profit threshold (decimal string, null if unavailable)',
+    type: String,
+    nullable: true,
+  })
+  projectedTpPnl!: string | null;
 }

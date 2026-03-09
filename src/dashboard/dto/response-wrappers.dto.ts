@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { DashboardOverviewDto } from './dashboard-overview.dto';
 import { PlatformHealthDto } from './platform-health.dto';
 import { PositionSummaryDto } from './position-summary.dto';
+import { PositionFullDetailDto } from './position-detail.dto';
 import { AlertSummaryDto } from './alert-summary.dto';
 
 export class OverviewResponseDto {
@@ -43,6 +44,14 @@ export class PositionListResponseDto {
 
   @ApiProperty({ description: 'Items per page' })
   limit!: number;
+
+  @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
+  timestamp!: string;
+}
+
+export class PositionFullDetailResponseDto {
+  @ApiProperty({ type: PositionFullDetailDto })
+  data!: PositionFullDetailDto;
 
   @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
   timestamp!: string;

@@ -13,6 +13,7 @@ describe('DashboardController', () => {
       getHealth: vi.fn(),
       getPositions: vi.fn(),
       getPositionById: vi.fn(),
+      getPositionDetails: vi.fn(),
       getAlerts: vi.fn(),
     } as unknown as DashboardService;
     controller = new DashboardController(service);
@@ -68,7 +69,12 @@ describe('DashboardController', () => {
       const result = await controller.getPositions();
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(service.getPositions).toHaveBeenCalledWith(undefined, 1, 50);
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        undefined,
+      );
       expect(result.data).toEqual([]);
       expect(result.count).toBe(0);
       expect(result.page).toBe(1);
@@ -84,7 +90,12 @@ describe('DashboardController', () => {
       await controller.getPositions('paper', '2', '25');
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(service.getPositions).toHaveBeenCalledWith('paper', 2, 25);
+      expect(service.getPositions).toHaveBeenCalledWith(
+        'paper',
+        2,
+        25,
+        undefined,
+      );
     });
 
     it('should convert mode=all to undefined', async () => {
@@ -96,7 +107,29 @@ describe('DashboardController', () => {
       await controller.getPositions('all');
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(service.getPositions).toHaveBeenCalledWith(undefined, 1, 50);
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        undefined,
+      );
+    });
+
+    it('should pass status filter to service', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
+
+      await controller.getPositions(undefined, undefined, undefined, 'CLOSED');
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        'CLOSED',
+      );
     });
   });
 
@@ -124,6 +157,35 @@ describe('DashboardController', () => {
       await expect(controller.getPositionById('nonexistent')).rejects.toThrow(
         SystemHealthError,
       );
+    });
+  });
+
+  describe('GET /dashboard/positions/:id/details', () => {
+    it('should return full position detail', async () => {
+      const detail = {
+        id: 'pos-1',
+        pairName: 'Test Pair',
+        status: 'OPEN',
+        orders: [],
+        auditEvents: [],
+      };
+      (
+        service.getPositionDetails as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(detail);
+
+      const result = await controller.getPositionDetails('pos-1');
+      expect(result.data).toEqual(detail);
+      expect(result.timestamp).toBeDefined();
+    });
+
+    it('should throw 404 when position not found', async () => {
+      (
+        service.getPositionDetails as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(null);
+
+      await expect(
+        controller.getPositionDetails('nonexistent'),
+      ).rejects.toThrow(SystemHealthError);
     });
   });
 

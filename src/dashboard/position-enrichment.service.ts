@@ -4,6 +4,11 @@ import type { IPriceFeedService } from '../common/interfaces/price-feed-service.
 import { PRICE_FEED_SERVICE_TOKEN } from '../common/interfaces/price-feed-service.interface.js';
 import type { PositionRepository } from '../persistence/repositories/position.repository.js';
 import { FinancialMath } from '../common/utils/financial-math.js';
+import { getResidualSize } from '../common/utils/residual-size.js';
+import {
+  SL_MULTIPLIER,
+  TP_RATIO,
+} from '../common/constants/exit-thresholds.js';
 
 /** Position shape from findByStatusWithOrders() — includes pair + both orders */
 type PositionWithOrders = Awaited<
@@ -17,6 +22,8 @@ export interface EnrichedPosition {
   exitProximity: { stopLoss: string; takeProfit: string } | null;
   resolutionDate: string | null;
   timeToResolution: string | null;
+  projectedSlPnl?: string | null;
+  projectedTpPnl?: string | null;
 }
 
 export interface EnrichmentResult {
@@ -34,7 +41,14 @@ export class PositionEnrichmentService {
     private readonly priceFeed: IPriceFeedService,
   ) {}
 
-  async enrich(position: PositionWithOrders): Promise<EnrichmentResult> {
+  async enrich(
+    position: PositionWithOrders,
+    allPairOrders?: Array<{
+      orderId: string;
+      platform: string;
+      fillSize: { toString(): string } | null;
+    }>,
+  ): Promise<EnrichmentResult> {
     const errors: string[] = [];
     const pair = position.pair;
     const kalshiOrder = position.kalshiOrder;
@@ -205,36 +219,77 @@ export class PositionEnrichmentService {
         : null,
     });
 
-    // Exit proximity
-    const scaledInitialEdge = initialEdge.mul(legSize);
-    const stopLossThreshold = entryCostBaseline.plus(scaledInitialEdge.mul(-2));
+    // For EXIT_PARTIAL, recompute thresholds with residual sizes (T9.3)
+    let thresholdLegSize = legSize;
+    let thresholdBaseline = entryCostBaseline;
+
+    if (
+      position.status === 'EXIT_PARTIAL' &&
+      allPairOrders &&
+      allPairOrders.length > 0
+    ) {
+      const residual = getResidualSize(position, allPairOrders);
+      const residualLegSize = Decimal.min(residual.kalshi, residual.polymarket);
+
+      if (residualLegSize.gt(0)) {
+        thresholdLegSize = residualLegSize;
+        thresholdBaseline = FinancialMath.computeEntryCostBaseline({
+          kalshiEntryPrice,
+          polymarketEntryPrice,
+          kalshiSide: position.kalshiSide,
+          polymarketSide: position.polymarketSide,
+          kalshiSize: residual.kalshi,
+          polymarketSize: residual.polymarket,
+          entryClosePriceKalshi: position.entryClosePriceKalshi
+            ? new Decimal(position.entryClosePriceKalshi.toString())
+            : null,
+          entryClosePricePolymarket: position.entryClosePricePolymarket
+            ? new Decimal(position.entryClosePricePolymarket.toString())
+            : null,
+          entryKalshiFeeRate: position.entryKalshiFeeRate
+            ? new Decimal(position.entryKalshiFeeRate.toString())
+            : null,
+          entryPolymarketFeeRate: position.entryPolymarketFeeRate
+            ? new Decimal(position.entryPolymarketFeeRate.toString())
+            : null,
+        });
+      }
+    }
+
+    // Exit proximity and projected P&L thresholds
+    const scaledInitialEdge = initialEdge.mul(thresholdLegSize);
+    const stopLossThreshold = thresholdBaseline.plus(
+      scaledInitialEdge.mul(SL_MULTIPLIER),
+    );
     // Journey-based TP with floor (6.5.5j)
     const takeProfitThreshold = Decimal.max(
       new Decimal(0),
-      entryCostBaseline.plus(
-        scaledInitialEdge.minus(entryCostBaseline).mul(new Decimal('0.80')),
+      thresholdBaseline.plus(
+        scaledInitialEdge
+          .minus(thresholdBaseline)
+          .mul(new Decimal(TP_RATIO.toString())),
       ),
     );
 
-    const slDenom = entryCostBaseline.minus(stopLossThreshold);
+    const slDenom = thresholdBaseline.minus(stopLossThreshold);
     const stopLossProximity = slDenom.isZero()
       ? new Decimal(0)
       : Decimal.min(
           new Decimal(1),
           Decimal.max(
             new Decimal(0),
-            entryCostBaseline.minus(currentPnl).div(slDenom),
+            thresholdBaseline.minus(currentPnl).div(slDenom),
           ),
         );
 
-    const tpDenom = takeProfitThreshold.minus(entryCostBaseline);
+    const tpDenom = takeProfitThreshold.minus(thresholdBaseline);
     const takeProfitProximity = tpDenom.isZero()
       ? new Decimal(0)
       : Decimal.min(
           new Decimal(1),
           Decimal.max(
             new Decimal(0),
-            currentPnl.minus(entryCostBaseline).div(tpDenom),
+            currentPnl.minus(thresholdBaseline).div(tpDenom),
           ),
         );
 
@@ -250,6 +305,8 @@ export class PositionEnrichmentService {
         },
         resolutionDate,
         timeToResolution,
+        projectedSlPnl: stopLossThreshold.toFixed(8),
+        projectedTpPnl: takeProfitThreshold.toFixed(8),
       },
     };
   }

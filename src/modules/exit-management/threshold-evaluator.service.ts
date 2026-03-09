@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { FinancialMath } from '../../common/utils/financial-math';
+import {
+  SL_MULTIPLIER,
+  TP_RATIO,
+} from '../../common/constants/exit-thresholds';
 
 export interface ThresholdEvalInput {
   initialEdge: Decimal;
@@ -144,7 +148,9 @@ export class ThresholdEvaluatorService {
     }
 
     // Priority 1: Stop-loss — currentPnl <= entryCostBaseline + -(2 * initialEdge * legSize)
-    const stopLossThreshold = entryCostBaseline.plus(scaledInitialEdge.mul(-2));
+    const stopLossThreshold = entryCostBaseline.plus(
+      scaledInitialEdge.mul(SL_MULTIPLIER),
+    );
     if (currentPnl.lte(stopLossThreshold)) {
       return {
         triggered: true,
@@ -160,7 +166,9 @@ export class ThresholdEvaluatorService {
     const takeProfitThreshold = Decimal.max(
       new Decimal(0),
       entryCostBaseline.plus(
-        scaledInitialEdge.minus(entryCostBaseline).mul(new Decimal('0.80')),
+        scaledInitialEdge
+          .minus(entryCostBaseline)
+          .mul(new Decimal(TP_RATIO.toString())),
       ),
     );
     if (currentPnl.gte(takeProfitThreshold)) {

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class DashboardOverviewDto {
   @ApiProperty({
@@ -24,4 +24,34 @@ export class DashboardOverviewDto {
 
   @ApiProperty({ description: 'Number of active (unacknowledged) alerts' })
   activeAlertCount!: number;
+
+  @ApiPropertyOptional({
+    description: 'Total bankroll from engine config (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  totalBankroll!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Capital currently deployed in open positions (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  deployedCapital!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Available capital: bankroll - deployed - reserved (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  availableCapital!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Capital reserved for pending executions (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  reservedCapital!: string | null;
 }

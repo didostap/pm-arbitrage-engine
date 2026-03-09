@@ -8,6 +8,7 @@ import { MatchApprovalController } from './match-approval.controller';
 import { MatchApprovalService } from './match-approval.service';
 import { PerformanceController } from './performance.controller';
 import { PerformanceService } from './performance.service';
+import { PositionRepository } from '../persistence/repositories/position.repository';
 import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.module';
 import { ExecutionModule } from '../modules/execution/execution.module';
 import { PositionManagementController } from './position-management.controller';
@@ -27,6 +28,7 @@ import { PositionManagementController } from './position-management.controller';
     PositionEnrichmentService,
     MatchApprovalService,
     PerformanceService,
+    PositionRepository,
   ],
 })
 export class DashboardModule {}

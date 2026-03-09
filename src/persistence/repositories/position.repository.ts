@@ -97,6 +97,43 @@ export class PositionRepository {
     });
   }
 
+  /**
+   * Fetches positions with flexible status filtering and pagination.
+   * When statuses is undefined or empty, returns ALL positions (no status filter).
+   * Includes pair, kalshiOrder, polymarketOrder for enrichment and P&L computation.
+   */
+  async findManyWithFilters(
+    statuses?: string[],
+    isPaper?: boolean,
+    page: number = 1,
+    limit: number = 50,
+  ) {
+    const where: Record<string, unknown> = {};
+
+    if (statuses && statuses.length > 0) {
+      where['status'] = { in: statuses };
+    }
+
+    if (isPaper !== undefined) {
+      where['isPaper'] = isPaper;
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [data, count] = await Promise.all([
+      this.prisma.openPosition.findMany({
+        where,
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.openPosition.count({ where }),
+    ]);
+
+    return { data, count };
+  }
+
   async updateWithOrder(
     positionId: string,
     data: Prisma.OpenPositionUpdateInput,

@@ -17,6 +17,7 @@ import {
   OverviewResponseDto,
   HealthListResponseDto,
   PositionDetailResponseDto,
+  PositionFullDetailResponseDto,
   PositionListResponseDto,
   AlertListResponseDto,
 } from './dto';
@@ -66,10 +67,18 @@ export class DashboardController {
     type: Number,
     description: 'Items per page (default: 50, max: 200)',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated status filter (e.g. "OPEN,EXIT_PARTIAL"). Omit for default open statuses. Empty string for all statuses.',
+  })
   async getPositions(
     @Query('mode') mode?: 'live' | 'paper' | 'all',
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('status') status?: string,
   ): Promise<PositionListResponseDto> {
     const filterMode = mode === 'all' ? undefined : mode;
     const pageNum = Math.max(1, page ? parseInt(page, 10) : 1);
@@ -81,6 +90,7 @@ export class DashboardController {
       filterMode,
       pageNum,
       limitNum,
+      status,
     );
     return {
       data: result.data,
@@ -89,6 +99,33 @@ export class DashboardController {
       limit: limitNum,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('positions/:id/details')
+  @ApiOperation({
+    summary:
+      'Full position breakdown with orders, audit trail, and capital analysis',
+  })
+  @ApiParam({ name: 'id', description: 'Position ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Full position detail',
+    type: PositionFullDetailResponseDto,
+  })
+  @ApiResponse({ status: 404, description: 'Position not found' })
+  async getPositionDetails(
+    @Param('id') id: string,
+  ): Promise<PositionFullDetailResponseDto> {
+    const data = await this.dashboardService.getPositionDetails(id);
+    if (!data) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.NOT_FOUND,
+        `Position ${id} not found`,
+        'warning',
+        'DashboardController',
+      );
+    }
+    return { data, timestamp: new Date().toISOString() };
   }
 
   @Get('positions/:id')

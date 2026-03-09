@@ -784,5 +784,159 @@ describe('PositionEnrichmentService', () => {
       // Opposite direction of TP → clamped to 0.0
       expect(tp.toNumber()).toBe(0);
     });
+
+    it('should include projectedSlPnl and projectedTpPnl for OPEN positions', async () => {
+      // Setup: same as first test, zero entry close prices → baseline = 0
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = 0 + 1.2*-2 = -2.4
+      // TP threshold = max(0, 0 + 0.80*(1.2 - 0)) = 0.96
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition();
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      expect(result.data.projectedSlPnl).toBeDefined();
+      expect(result.data.projectedTpPnl).toBeDefined();
+
+      const sl = new Decimal(result.data.projectedSlPnl!);
+      const tp = new Decimal(result.data.projectedTpPnl!);
+
+      // SL threshold = -2.4
+      expect(sl.toNumber()).toBeCloseTo(-2.4, 6);
+      // TP threshold = 0.96
+      expect(tp.toNumber()).toBeCloseTo(0.96, 6);
+    });
+
+    it('EXIT_PARTIAL: uses residual size for SL/TP thresholds', async () => {
+      // Entry: 100 contracts each side. After partial exit of 60 per side, residual = 40.
+      // scaledInitialEdge (residual) = 0.012 * 40 = 0.48
+      // baseline = 0 (no entry close prices)
+      // SL threshold = 0 + 0.48*-2 = -0.96
+      // TP threshold = max(0, 0 + 0.80*(0.48 - 0)) = 0.384
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        status: 'EXIT_PARTIAL',
+        kalshiOrderId: 'k-order-1',
+        polymarketOrderId: 'pm-order-1',
+      });
+
+      const allPairOrders = [
+        // Entry orders (excluded by getResidualSize)
+        {
+          orderId: 'k-order-1',
+          platform: 'KALSHI',
+          fillSize: { toString: () => '100' },
+        },
+        {
+          orderId: 'pm-order-1',
+          platform: 'POLYMARKET',
+          fillSize: { toString: () => '100' },
+        },
+        // Exit orders (60 contracts each)
+        {
+          orderId: 'exit-k-1',
+          platform: 'KALSHI',
+          fillSize: { toString: () => '60' },
+        },
+        {
+          orderId: 'exit-pm-1',
+          platform: 'POLYMARKET',
+          fillSize: { toString: () => '60' },
+        },
+      ];
+
+      const result = await service.enrich(position as never, allPairOrders);
+
+      expect(result.status).toBe('enriched');
+
+      // Verify residual-based thresholds
+      const sl = new Decimal(result.data.projectedSlPnl!);
+      const tp = new Decimal(result.data.projectedTpPnl!);
+      expect(sl.toNumber()).toBeCloseTo(-0.96, 6);
+      expect(tp.toNumber()).toBeCloseTo(0.384, 6);
+    });
+
+    it('EXIT_PARTIAL: falls back to full size when no allPairOrders provided', async () => {
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.60'));
+          return Promise.resolve(new Decimal('0.40'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({ status: 'EXIT_PARTIAL' });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      // Without allPairOrders, uses full legSize=100
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = 1.2*-2 = -2.4, TP threshold = 0.96
+      const sl = new Decimal(result.data.projectedSlPnl!);
+      const tp = new Decimal(result.data.projectedTpPnl!);
+      expect(sl.toNumber()).toBeCloseTo(-2.4, 6);
+      expect(tp.toNumber()).toBeCloseTo(0.96, 6);
+    });
+
+    it('should return null projectedSlPnl/projectedTpPnl when prices unavailable', async () => {
+      vi.mocked(priceFeed.getCurrentClosePrice).mockResolvedValue(null);
+
+      const position = createMockPosition();
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('failed');
+      expect(result.data.projectedSlPnl).toBeUndefined();
+      expect(result.data.projectedTpPnl).toBeUndefined();
+    });
+
+    it('should compute projectedSlPnl with non-zero entry cost baseline', async () => {
+      // Same setup as 6.5.5i test:
+      // entryCostBaseline = -2.0 (no spread at entry, fees only)
+      // scaledInitialEdge = 0.012 * 100 = 1.2
+      // SL threshold = -2.0 + 1.2*-2 = -4.4
+      // TP threshold (6.5.5j journey): max(0, -2.0 + 0.80*(1.2-(-2.0))) = max(0, -2.0+2.56) = 0.56
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.55'));
+          return Promise.resolve(new Decimal('0.45'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition({
+        entryClosePriceKalshi: { toString: () => '0.55' },
+        entryClosePricePolymarket: { toString: () => '0.45' },
+        entryKalshiFeeRate: { toString: () => '0.02' },
+        entryPolymarketFeeRate: { toString: () => '0.02' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+      const sl = new Decimal(result.data.projectedSlPnl!);
+      const tp = new Decimal(result.data.projectedTpPnl!);
+
+      // SL = -4.4
+      expect(sl.toNumber()).toBeCloseTo(-4.4, 6);
+      // TP = 0.56
+      expect(tp.toNumber()).toBeCloseTo(0.56, 6);
+    });
   });
 });

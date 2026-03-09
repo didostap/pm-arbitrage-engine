@@ -10,6 +10,7 @@ describe('PositionRepository', () => {
       create: vi.fn(),
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      count: vi.fn(),
       update: vi.fn(),
     },
   };
@@ -196,6 +197,105 @@ describe('PositionRepository', () => {
         },
         include: { pair: true, kalshiOrder: true, polymarketOrder: true },
       });
+    });
+  });
+
+  describe('findManyWithFilters', () => {
+    it('should filter by status array when provided', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      const result = await repo.findManyWithFilters(
+        ['OPEN', 'EXIT_PARTIAL'],
+        undefined,
+        1,
+        50,
+      );
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: { in: ['OPEN', 'EXIT_PARTIAL'] } },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 50,
+      });
+      expect(result.count).toBe(0);
+      expect(result.data).toEqual([]);
+    });
+
+    it('should return all statuses when statuses is undefined', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(undefined, undefined, 1, 50);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: {},
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 50,
+      });
+    });
+
+    it('should return all statuses when statuses is empty array', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters([], undefined, 1, 50);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: {},
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 50,
+      });
+    });
+
+    it('should filter by isPaper when provided', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(['OPEN'], true, 1, 50);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
+        where: { status: { in: ['OPEN'] }, isPaper: true },
+        include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 50,
+      });
+    });
+
+    it('should compute pagination correctly', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(75);
+
+      const result = await repo.findManyWithFilters(
+        undefined,
+        undefined,
+        3,
+        25,
+      );
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 50, take: 25 }),
+      );
+      expect(result.count).toBe(75);
+    });
+
+    it('should include orders via pair relation for realized P&L computation', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(undefined, undefined, 1, 10);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { pair: true, kalshiOrder: true, polymarketOrder: true },
+        }),
+      );
     });
   });
 });
