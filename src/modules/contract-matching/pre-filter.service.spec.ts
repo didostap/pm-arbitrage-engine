@@ -116,5 +116,27 @@ describe('PreFilterService', () => {
       const result = service.filterCandidates('test', [], 0.1);
       expect(result).toHaveLength(0);
     });
+
+    it('should not match unrelated contracts that only share a year', () => {
+      const source = 'MicroStrategy sells any Bitcoin by December 31, 2026?';
+      const candidates = [
+        { id: 'c1', description: 'Jobs numbers in June 2026' },
+        { id: 'c2', description: 'Unemployment rate in 2026' },
+      ];
+
+      const result = service.filterCandidates(source, candidates, 0.15);
+      expect(result).toHaveLength(0);
+    });
+
+    it('should not match unrelated contracts that only share a date', () => {
+      const source = 'MicroStrategy sells any Bitcoin by March 31, 2026?';
+      const candidates = [
+        { id: 'c1', description: 'USD/IRR on March 31, 2026' },
+        { id: 'c2', description: 'Treasury spread 10Y-2Y by Dec 31, 2026' },
+      ];
+
+      const result = service.filterCandidates(source, candidates, 0.15);
+      expect(result).toHaveLength(0);
+    });
   });
 });

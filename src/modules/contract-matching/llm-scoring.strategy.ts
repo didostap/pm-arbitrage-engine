@@ -146,7 +146,9 @@ export class LlmScoringStrategy implements IScoringStrategy {
       'LLM_ESCALATION_MAX',
       84,
     );
-    this.maxTokens = this.configService.get<number>('LLM_MAX_TOKENS', 1024);
+    this.maxTokens = Number(
+      this.configService.get<number>('LLM_MAX_TOKENS', 1024),
+    );
 
     if (!this.primaryApiKey) {
       this.logger.warn({
@@ -169,84 +171,95 @@ export class LlmScoringStrategy implements IScoringStrategy {
   ): Promise<ScoringResult> {
     const prompt = buildPrompt(polyDescription, kalshiDescription, metadata);
 
-    // Primary scoring
-    const primaryResult = await this.callLlm(
-      this.primaryProvider,
-      this.primaryModel,
-      this.primaryApiKey,
-      prompt,
-    );
+    try {
+      // Primary scoring
+      const primaryResult = await this.callLlm(
+        this.primaryProvider,
+        this.primaryModel,
+        this.primaryApiKey,
+        prompt,
+      );
 
-    // Check if escalation is needed
-    if (
-      primaryResult.score >= this.escalationMin &&
-      primaryResult.score <= this.escalationMax
-    ) {
-      this.logger.log({
-        message: 'Score in ambiguous zone, escalating',
-        data: {
-          primaryScore: primaryResult.score,
-          escalationMin: this.escalationMin,
-          escalationMax: this.escalationMax,
-        },
-      });
+      // Check if escalation is needed
+      if (
+        primaryResult.score >= this.escalationMin &&
+        primaryResult.score <= this.escalationMax
+      ) {
+        this.logger.log({
+          message: 'Score in ambiguous zone, escalating',
+          data: {
+            primaryScore: primaryResult.score,
+            escalationMin: this.escalationMin,
+            escalationMax: this.escalationMax,
+          },
+        });
 
-      let escalationResult: {
-        score: number;
-        confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-      };
-      try {
-        escalationResult = await this.callLlm(
-          this.escalationProvider,
-          this.escalationModel,
-          this.escalationApiKey,
-          prompt,
-        );
-      } catch (error) {
-        // Preserve specific LlmScoringError codes (e.g., parse failure)
-        // but enrich with primary score metadata for debugging
-        if (error instanceof LlmScoringError) {
+        let escalationResult: {
+          score: number;
+          confidence: 'high' | 'medium' | 'low';
+          reasoning: string;
+        };
+        try {
+          escalationResult = await this.callLlm(
+            this.escalationProvider,
+            this.escalationModel,
+            this.escalationApiKey,
+            prompt,
+          );
+        } catch (error) {
+          // Preserve specific LlmScoringError codes (e.g., parse failure)
+          // but enrich with primary score metadata for debugging
+          if (error instanceof LlmScoringError) {
+            throw new LlmScoringError(
+              error.code,
+              `Escalation failed: ${error.message}`,
+              this.escalationModel,
+              this.escalationProvider,
+              {
+                primaryScore: primaryResult.score,
+                primaryModel: this.primaryModel,
+                ...error.metadata,
+              },
+            );
+          }
           throw new LlmScoringError(
-            error.code,
-            `Escalation failed: ${error.message}`,
+            LLM_SCORING_ERROR_CODES.LLM_API_FAILURE,
+            `Escalation LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
             this.escalationModel,
             this.escalationProvider,
             {
               primaryScore: primaryResult.score,
               primaryModel: this.primaryModel,
-              ...error.metadata,
             },
           );
         }
-        throw new LlmScoringError(
-          LLM_SCORING_ERROR_CODES.LLM_API_FAILURE,
-          `Escalation LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
-          this.escalationModel,
-          this.escalationProvider,
-          {
-            primaryScore: primaryResult.score,
-            primaryModel: this.primaryModel,
-          },
-        );
+
+        return {
+          score: escalationResult.score,
+          confidence: escalationResult.confidence,
+          reasoning: escalationResult.reasoning,
+          model: this.escalationModel,
+          escalated: true,
+        };
       }
 
       return {
-        score: escalationResult.score,
-        confidence: escalationResult.confidence,
-        reasoning: escalationResult.reasoning,
-        model: this.escalationModel,
-        escalated: true,
+        score: primaryResult.score,
+        confidence: primaryResult.confidence,
+        reasoning: primaryResult.reasoning,
+        model: this.primaryModel,
+        escalated: false,
       };
+    } catch (error) {
+      // Re-throw LlmScoringError with original code (e.g., parse failure 4101, escalation errors)
+      if (error instanceof LlmScoringError) throw error;
+      throw new LlmScoringError(
+        LLM_SCORING_ERROR_CODES.LLM_API_FAILURE,
+        `LLM API call failed: ${error instanceof Error ? error.message : String(error)}`,
+        this.primaryModel,
+        this.primaryProvider,
+      );
     }
-
-    return {
-      score: primaryResult.score,
-      confidence: primaryResult.confidence,
-      reasoning: primaryResult.reasoning,
-      model: this.primaryModel,
-      escalated: false,
-    };
   }
 
   private async callLlm(

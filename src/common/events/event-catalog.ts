@@ -159,6 +159,10 @@ export const EVENT_NAMES = {
   MATCH_AUTO_APPROVED: 'contract.match.auto_approved',
   /** Emitted when a contract match needs operator review (below auto-approve threshold) */
   MATCH_PENDING_REVIEW: 'contract.match.pending_review',
+
+  // [Story 8.4] Discovery Pipeline Events
+  /** Emitted when a discovery run completes (success or partial failure) */
+  DISCOVERY_RUN_COMPLETED: 'contract.discovery.run_completed',
 } as const;
 
 /**

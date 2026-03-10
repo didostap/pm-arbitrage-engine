@@ -18,3 +18,11 @@ export type {
   ScoringResult,
 } from './scoring-strategy.interface.js';
 export { SCORING_STRATEGY_TOKEN } from './scoring-strategy.interface.js';
+export type {
+  IContractCatalogProvider,
+  ContractSummary,
+} from './contract-catalog-provider.interface.js';
+export {
+  KALSHI_CATALOG_TOKEN,
+  POLYMARKET_CATALOG_TOKEN,
+} from './contract-catalog-provider.interface.js';

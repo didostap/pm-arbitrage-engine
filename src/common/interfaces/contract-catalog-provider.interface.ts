@@ -1,0 +1,18 @@
+import { PlatformId } from '../types/platform.type.js';
+
+export interface ContractSummary {
+  contractId: string; // Kalshi: market ticker; Polymarket: conditionId
+  title: string; // Short title for pre-filter text comparison
+  description: string; // Full description for LLM scoring
+  category?: string; // Kalshi: series_ticker; Polymarket: primary tag
+  settlementDate?: Date; // Expected resolution/close date
+  platform: PlatformId;
+}
+
+export interface IContractCatalogProvider {
+  listActiveContracts(): Promise<ContractSummary[]>;
+  getPlatformId(): PlatformId;
+}
+
+export const KALSHI_CATALOG_TOKEN = 'IContractCatalogProvider:Kalshi';
+export const POLYMARKET_CATALOG_TOKEN = 'IContractCatalogProvider:Polymarket';

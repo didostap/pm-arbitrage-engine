@@ -78,4 +78,49 @@ declare module 'kalshi-typescript' {
     remaining_count: number;
     place_count: number;
   }
+
+  // [Story 8.4] Events API for catalog discovery
+  export interface KalshiEvent {
+    event_ticker: string;
+    title: string;
+    category?: string;
+    series_ticker?: string;
+    markets?: KalshiMarketDetail[];
+  }
+
+  export interface KalshiMarketDetail {
+    ticker: string;
+    event_ticker: string;
+    title: string;
+    subtitle?: string;
+    yes_sub_title?: string;
+    no_sub_title?: string;
+    status: string;
+    close_time?: string;
+    result?: string;
+    rules_primary?: string;
+  }
+
+  export interface GetEventsResponse {
+    events: KalshiEvent[];
+    cursor: string;
+  }
+
+  export class EventsApi {
+    constructor(
+      configuration?: Configuration,
+      basePath?: string,
+      axios?: unknown,
+    );
+
+    getEvents(
+      limit?: number,
+      cursor?: string,
+      withNestedMarkets?: boolean,
+      withMilestones?: boolean,
+      status?: string,
+      seriesTicker?: string,
+      minCloseTs?: number,
+    ): Promise<{ data: GetEventsResponse }>;
+  }
 }

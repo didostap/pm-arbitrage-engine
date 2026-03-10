@@ -10,6 +10,12 @@ import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.mo
 import { PaperTradingConnector } from './paper/paper-trading.connector.js';
 import { PaperTradingConfig } from './paper/paper-trading.types.js';
 import { GasEstimationService } from './polymarket/gas-estimation.service.js';
+import { KalshiCatalogProvider } from './kalshi/kalshi-catalog-provider.js';
+import { PolymarketCatalogProvider } from './polymarket/polymarket-catalog-provider.js';
+import {
+  KALSHI_CATALOG_TOKEN,
+  POLYMARKET_CATALOG_TOKEN,
+} from '../common/interfaces/contract-catalog-provider.interface.js';
 import { PlatformId } from '../common/types/platform.type.js';
 import { ConfigValidationError } from '../common/errors/config-validation-error.js';
 
@@ -72,6 +78,13 @@ function validatePaperConfig(
     GasEstimationService,
     KalshiConnector,
     PolymarketConnector,
+    KalshiCatalogProvider,
+    PolymarketCatalogProvider,
+    { provide: KALSHI_CATALOG_TOKEN, useExisting: KalshiCatalogProvider },
+    {
+      provide: POLYMARKET_CATALOG_TOKEN,
+      useExisting: PolymarketCatalogProvider,
+    },
     {
       provide: KALSHI_CONNECTOR_TOKEN,
       useFactory: (kalshi: KalshiConnector, config: ConfigService) => {
@@ -105,6 +118,8 @@ function validatePaperConfig(
     PolymarketConnector,
     KALSHI_CONNECTOR_TOKEN,
     POLYMARKET_CONNECTOR_TOKEN,
+    KALSHI_CATALOG_TOKEN,
+    POLYMARKET_CATALOG_TOKEN,
   ],
 })
 export class ConnectorModule {}

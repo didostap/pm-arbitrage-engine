@@ -57,6 +57,45 @@ const STOP_WORDS = new Set([
   'over',
   'after',
   'before',
+  'any',
+  'all',
+  'each',
+  'every',
+  'some',
+  'more',
+  'most',
+  'other',
+  'such',
+  'when',
+  'where',
+  'how',
+  'what',
+  'which',
+  'who',
+  'whom',
+  // Month names — noise for contract matching (date components, not semantics)
+  'january',
+  'february',
+  'march',
+  'april',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec',
 ]);
 
 const TFIDF_WEIGHT = 0.6;
@@ -79,12 +118,22 @@ export interface RankedCandidate extends FilterCandidate {
   keywordOverlap: number;
 }
 
+function isNumericNoise(token: string): boolean {
+  if (!/^\d+$/.test(token)) return false;
+  const num = parseInt(token, 10);
+  // Filter years (1900-2099) and day-of-month (1-31)
+  if (num >= 1900 && num <= 2099) return true;
+  if (num >= 1 && num <= 31) return true;
+  return false;
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
+    .replace(DATE_EXPR, ' ')
     .replace(/[^a-z0-9\s]/g, '')
     .split(/\s+/)
-    .filter((t) => t.length > 0 && !STOP_WORDS.has(t));
+    .filter((t) => t.length > 0 && !STOP_WORDS.has(t) && !isNumericNoise(t));
 }
 
 function termFrequency(tokens: string[]): Map<string, number> {
@@ -121,13 +170,26 @@ function cosineSimilarity(
   return dot / denominator;
 }
 
+// Strip date expressions so their numeric components aren't extracted as keywords.
+// Matches: "March 31, 2026", "Jan 1 2026", "December 2026", "31 March 2026", etc.
+const DATE_EXPR =
+  /\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}(?:,?\s+\d{4})?\b|\b\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:,?\s+\d{4})?\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}\b/gi;
+
+function isYearLike(n: string): boolean {
+  const num = parseInt(n, 10);
+  return num >= 1900 && num <= 2099 && /^\d{4}$/.test(n);
+}
+
 function extractKeywords(text: string): string[] {
   const dates = text.match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/g) ?? [];
   const percentages = text.match(/\d+\.?\d*%/g) ?? [];
   const outcomes =
-    text.match(/\b(yes|no|true|false|win|lose|above|below|over|under)\b/gi) ??
-    [];
-  const numbers = text.match(/\b\d+\.?\d*\b/g) ?? [];
+    text.match(/\b(yes|no|true|false|win|lose|above|below)\b/gi) ?? [];
+  // Strip date expressions before extracting numbers to avoid day-of-month noise
+  const textWithoutDates = text.replace(DATE_EXPR, ' ');
+  const numbers = (textWithoutDates.match(/\b\d+\.?\d*\b/g) ?? []).filter(
+    (n) => !isYearLike(n) && !isNumericNoise(n),
+  );
   return [...dates, ...percentages, ...outcomes, ...numbers].map((s) =>
     s.toLowerCase(),
   );
