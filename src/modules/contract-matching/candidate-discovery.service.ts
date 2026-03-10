@@ -35,7 +35,9 @@ function isWithinSettlementWindow(
   dateB?: Date,
   windowDays = 7,
 ): boolean {
-  if (!dateA || !dateB) return true;
+  if (!dateA || !dateB) {
+    return false;
+  }
   const diffMs = Math.abs(dateA.getTime() - dateB.getTime());
   const diffDays = diffMs / (1000 * 60 * 60 * 24);
   return diffDays <= windowDays;
@@ -67,7 +69,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
       this.configService.get<number>('LLM_MIN_REVIEW_THRESHOLD', 40),
     );
     this.preFilterThreshold = Number(
-      this.configService.get<number>('DISCOVERY_PREFILTER_THRESHOLD', 0.15),
+      this.configService.get<number>('DISCOVERY_PREFILTER_THRESHOLD', 0.25),
     );
     this.settlementWindowDays = Number(
       this.configService.get<number>('DISCOVERY_SETTLEMENT_WINDOW_DAYS', 7),

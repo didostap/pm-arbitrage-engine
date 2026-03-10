@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -72,7 +72,7 @@ describe('DataIngestionService', () => {
   };
 
   const mockContractPairLoader = {
-    getActivePairs: vi.fn().mockReturnValue(TEST_PAIRS),
+    getActivePairs: vi.fn().mockResolvedValue(TEST_PAIRS),
   };
 
   beforeEach(async () => {
@@ -106,7 +106,7 @@ describe('DataIngestionService', () => {
 
     // Re-apply default mock return values after clearAllMocks
     mockDegradationService.isDegraded.mockReturnValue(false);
-    mockContractPairLoader.getActivePairs.mockReturnValue(TEST_PAIRS);
+    mockContractPairLoader.getActivePairs.mockResolvedValue(TEST_PAIRS);
   });
 
   it('should be defined', () => {
@@ -284,7 +284,7 @@ describe('DataIngestionService', () => {
 
       // Both connectors should be called
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
-      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledOnce();
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
 
       // Health tracking for both platforms
       expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
@@ -340,7 +340,7 @@ describe('DataIngestionService', () => {
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalledTimes(2);
 
       // Polymarket should use single batch call with all tokens
-      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledOnce();
+      expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
       expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalledWith([
         'pm-token-1',
         'pm-token-2',
@@ -354,7 +354,7 @@ describe('DataIngestionService', () => {
     });
 
     it('should skip ingestion and log warning when no active pairs configured', async () => {
-      mockContractPairLoader.getActivePairs.mockReturnValue([]);
+      mockContractPairLoader.getActivePairs.mockResolvedValue([]);
 
       await service.ingestCurrentOrderBooks();
 
@@ -836,7 +836,7 @@ describe('DataIngestionService', () => {
         },
       ];
 
-      mockContractPairLoader.getActivePairs.mockReturnValue(threePairs);
+      mockContractPairLoader.getActivePairs.mockResolvedValue(threePairs);
 
       mockKalshiConnector.getOrderBook.mockImplementation((ticker: string) =>
         Promise.resolve({

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { KalshiCatalogProvider } from './kalshi-catalog-provider';
 import { PlatformId } from '../../common/types/platform.type';
 import { PlatformApiError } from '../../common/errors/platform-api-error';
@@ -284,5 +285,128 @@ describe('KalshiCatalogProvider', () => {
     await expect(provider.listActiveContracts()).rejects.toThrow(
       /Kalshi catalog fetch failed/,
     );
+  });
+
+  describe('settlementDate fallback chain', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    });
+
+    function mockMarket(overrides: Record<string, unknown> = {}) {
+      mockGetEvents.mockResolvedValueOnce({
+        data: {
+          events: [
+            {
+              event_ticker: 'EVT-D',
+              title: 'Date Test',
+              markets: [
+                {
+                  ticker: 'DATE-MKT',
+                  event_ticker: 'EVT-D',
+                  title: '',
+                  status: 'open',
+                  ...overrides,
+                },
+              ],
+            },
+          ],
+          cursor: '',
+        },
+      });
+    }
+
+    it('should use expected_expiration_time when present', async () => {
+      mockMarket({
+        expected_expiration_time: '2026-06-15T00:00:00Z',
+        expiration_time: '2026-07-01T00:00:00Z',
+        close_time: '2026-06-30T00:00:00Z',
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toEqual(
+        new Date('2026-06-15T00:00:00Z'),
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should use expiration_time when expected_expiration_time is absent', async () => {
+      mockMarket({
+        expiration_time: '2026-07-01T00:00:00Z',
+        close_time: '2026-06-30T00:00:00Z',
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toEqual(
+        new Date('2026-07-01T00:00:00Z'),
+      );
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should use close_time as last resort and emit warning', async () => {
+      mockMarket({ close_time: '2026-06-30T00:00:00Z' });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toEqual(
+        new Date('2026-06-30T00:00:00Z'),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'Kalshi market missing expected_expiration_time and expiration_time',
+          data: { ticker: 'DATE-MKT', fallback: 'close_time' },
+        }),
+      );
+    });
+
+    it('should emit warning when both expected_expiration_time and expiration_time absent without close_time', async () => {
+      mockMarket({});
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { ticker: 'DATE-MKT', fallback: 'none' },
+        }),
+      );
+    });
+
+    it('should treat empty string expiration_time as absent (fall through to close_time)', async () => {
+      mockMarket({
+        expected_expiration_time: '',
+        expiration_time: '',
+        close_time: '2026-06-30T00:00:00Z',
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toEqual(
+        new Date('2026-06-30T00:00:00Z'),
+      );
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it('should return undefined settlementDate for malformed date string and log warning', async () => {
+      mockMarket({
+        expected_expiration_time: 'not-a-date',
+        expiration_time: 'also-bad',
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Kalshi market has invalid date format',
+          data: { ticker: 'DATE-MKT', rawDate: 'not-a-date' },
+        }),
+      );
+    });
+
+    it('should return undefined settlementDate when all three fields are absent', async () => {
+      mockMarket({});
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.settlementDate).toBeUndefined();
+    });
   });
 });

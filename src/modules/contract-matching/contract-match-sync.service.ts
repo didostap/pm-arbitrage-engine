@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
 import { ContractPairLoaderService } from './contract-pair-loader.service';
-import { ContractPairConfig } from './types/index.js';
 
 @Injectable()
 export class ContractMatchSyncService implements OnApplicationBootstrap {
@@ -17,7 +16,7 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
   }
 
   async syncPairsToDatabase(): Promise<void> {
-    const activePairs = this.pairLoader.getActivePairs();
+    const activePairs = this.pairLoader.getYamlPairs();
 
     if (activePairs.length === 0) {
       this.logger.warn('No active pairs loaded — skipping database sync');
@@ -99,7 +98,7 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
         }
       }
 
-      await this.detectInactivePairs(activePairs);
+      await this.detectUntradablePairs();
 
       this.logger.log({
         message: 'Contract matches seeded to database',
@@ -113,33 +112,27 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
     }
   }
 
-  async detectInactivePairs(activePairs: ContractPairConfig[]): Promise<void> {
-    const activePolyIds = new Set(
-      activePairs.map((p) => p.polymarketContractId),
-    );
-    const activeKalshiIds = new Set(activePairs.map((p) => p.kalshiContractId));
-
-    const allDbPairs = await this.prisma.contractMatch.findMany({
-      where: { operatorApproved: true },
+  async detectUntradablePairs(): Promise<void> {
+    const untradable = await this.prisma.contractMatch.findMany({
+      where: {
+        operatorApproved: true,
+        polymarketClobTokenId: null,
+      },
       select: {
+        matchId: true,
         polymarketContractId: true,
         kalshiContractId: true,
       },
     });
 
-    const inactivePairs = allDbPairs.filter(
-      (dbPair) =>
-        !activePolyIds.has(dbPair.polymarketContractId) ||
-        !activeKalshiIds.has(dbPair.kalshiContractId),
-    );
-
-    if (inactivePairs.length > 0) {
+    if (untradable.length > 0) {
       this.logger.warn({
         message:
-          'Database contains approved pairs not in current config — may need manual review',
+          'Approved pairs missing polymarketClobTokenId — cannot trade until resolved',
         data: {
-          count: inactivePairs.length,
-          pairs: inactivePairs.map((p) => ({
+          count: untradable.length,
+          pairs: untradable.map((p) => ({
+            matchId: p.matchId,
             polymarketContractId: p.polymarketContractId,
             kalshiContractId: p.kalshiContractId,
           })),

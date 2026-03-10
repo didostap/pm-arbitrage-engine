@@ -29,7 +29,7 @@ describe('ContractMatchSyncService', () => {
       findMany: ReturnType<typeof vi.fn>;
     };
   };
-  let pairLoader: { getActivePairs: ReturnType<typeof vi.fn> };
+  let pairLoader: { getYamlPairs: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     prisma = {
@@ -41,7 +41,7 @@ describe('ContractMatchSyncService', () => {
     };
 
     pairLoader = {
-      getActivePairs: vi.fn().mockReturnValue([]),
+      getYamlPairs: vi.fn().mockReturnValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -63,7 +63,7 @@ describe('ContractMatchSyncService', () => {
 
   it('should sync config pairs to database on module init', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
 
     await service.syncPairsToDatabase();
 
@@ -92,20 +92,20 @@ describe('ContractMatchSyncService', () => {
 
   it('should populate matchId on pair config after upsert', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.upsert.mockResolvedValue({
       matchId: 'uuid-new-pair',
     });
 
     await service.syncPairsToDatabase();
 
-    expect(pairs[0].matchId).toBe('uuid-new-pair');
+    expect(pairs[0]!.matchId).toBe('uuid-new-pair');
   });
 
   it('should populate matchId on unchanged pairs from existing record', async () => {
     const ts = new Date('2026-02-15T10:30:00Z');
     const pairs = [makePair({ operatorVerificationTimestamp: ts })];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockResolvedValue({
       matchId: 'uuid-existing',
       operatorApproved: true,
@@ -118,12 +118,12 @@ describe('ContractMatchSyncService', () => {
     await service.syncPairsToDatabase();
 
     expect(prisma.contractMatch.upsert).not.toHaveBeenCalled();
-    expect(pairs[0].matchId).toBe('uuid-existing');
+    expect(pairs[0]!.matchId).toBe('uuid-existing');
   });
 
   it('should upsert existing pairs (updates operator_approved and timestamps)', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockResolvedValue({
       matchId: 'uuid-existing',
       operatorApproved: false,
@@ -146,7 +146,7 @@ describe('ContractMatchSyncService', () => {
 
   it('should insert new pairs that do not exist in DB', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockResolvedValue(null);
 
     await service.syncPairsToDatabase();
@@ -162,48 +162,60 @@ describe('ContractMatchSyncService', () => {
     );
   });
 
-  it('should detect and log inactive pairs (in DB but not in config)', async () => {
+  it('should detect and warn about untradable pairs (approved but missing polymarketClobTokenId)', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findMany.mockResolvedValue([
-      { polymarketContractId: 'poly-1', kalshiContractId: 'kalshi-1' },
-      { polymarketContractId: 'poly-old', kalshiContractId: 'kalshi-old' },
+      {
+        matchId: 'uuid-untradable',
+        polymarketContractId: 'poly-old',
+        kalshiContractId: 'kalshi-old',
+      },
     ]);
 
     const warnSpy = vi.spyOn(service['logger'], 'warn');
 
     await service.syncPairsToDatabase();
 
+    expect(prisma.contractMatch.findMany).toHaveBeenCalledWith({
+      where: {
+        operatorApproved: true,
+        polymarketClobTokenId: null,
+      },
+      select: {
+        matchId: true,
+        polymarketContractId: true,
+        kalshiContractId: true,
+      },
+    });
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          'Database contains approved pairs not in current config — may need manual review',
+          'Approved pairs missing polymarketClobTokenId — cannot trade until resolved',
         data: expect.objectContaining({ count: 1 }),
       }),
     );
   });
 
-  it('should not delete removed pairs from DB', async () => {
+  it('should not warn when no untradable pairs exist', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
-    prisma.contractMatch.findMany.mockResolvedValue([
-      { polymarketContractId: 'poly-1', kalshiContractId: 'kalshi-1' },
-      { polymarketContractId: 'poly-old', kalshiContractId: 'kalshi-old' },
-    ]);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
+    prisma.contractMatch.findMany.mockResolvedValue([]);
+
+    const warnSpy = vi.spyOn(service['logger'], 'warn');
 
     await service.syncPairsToDatabase();
 
-    // No delete methods should exist or be called
-    expect(
-      (prisma.contractMatch as Record<string, unknown>)['delete'],
-    ).toBeUndefined();
-    expect(
-      (prisma.contractMatch as Record<string, unknown>)['deleteMany'],
-    ).toBeUndefined();
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Approved pairs missing polymarketClobTokenId — cannot trade until resolved',
+      }),
+    );
   });
 
   it('should handle empty config pairs gracefully', async () => {
-    pairLoader.getActivePairs.mockReturnValue([]);
+    pairLoader.getYamlPairs.mockReturnValue([]);
 
     const warnSpy = vi.spyOn(service['logger'], 'warn');
 
@@ -217,7 +229,7 @@ describe('ContractMatchSyncService', () => {
 
   it('should set polymarket_description and kalshi_description from eventDescription', async () => {
     const pairs = [makePair({ eventDescription: 'Custom event' })];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
 
     await service.syncPairsToDatabase();
 
@@ -238,7 +250,7 @@ describe('ContractMatchSyncService', () => {
   it('should set operator_approval_timestamp from config operatorVerificationTimestamp', async () => {
     const ts = new Date('2026-01-01T00:00:00Z');
     const pairs = [makePair({ operatorVerificationTimestamp: ts })];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
 
     await service.syncPairsToDatabase();
 
@@ -262,7 +274,7 @@ describe('ContractMatchSyncService', () => {
         kalshiContractId: 'kalshi-2',
       }),
     ];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     // First pair exists (updated), second is new (inserted)
     prisma.contractMatch.findUnique
       .mockResolvedValueOnce({
@@ -288,7 +300,7 @@ describe('ContractMatchSyncService', () => {
 
   it('should handle database errors gracefully (logs error, does not crash)', async () => {
     const pairs = [makePair()];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockRejectedValue(
       new Error('DB connection failed'),
     );
@@ -316,7 +328,7 @@ describe('ContractMatchSyncService', () => {
         kalshiContractId: 'kalshi-B',
       }),
     ];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
 
     await service.syncPairsToDatabase();
 
@@ -346,7 +358,7 @@ describe('ContractMatchSyncService', () => {
   it('should skip upsert for unchanged pairs and count them correctly', async () => {
     const ts = new Date('2026-02-15T10:30:00Z');
     const pairs = [makePair({ operatorVerificationTimestamp: ts })];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
     prisma.contractMatch.findUnique.mockResolvedValue({
       operatorApproved: true,
       polymarketDescription: 'Will event A happen?',
@@ -374,7 +386,7 @@ describe('ContractMatchSyncService', () => {
         operatorVerificationTimestamp: undefined as unknown as Date,
       }),
     ];
-    pairLoader.getActivePairs.mockReturnValue(pairs);
+    pairLoader.getYamlPairs.mockReturnValue(pairs);
 
     await service.syncPairsToDatabase();
 

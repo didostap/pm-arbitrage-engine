@@ -77,7 +77,7 @@ describe('DetectionService', () => {
       polymarketContractId: 'poly-2',
       kalshiContractId: 'kalshi-2',
     });
-    contractPairLoader.getActivePairs.mockReturnValue([pair1, pair2]);
+    contractPairLoader.getActivePairs.mockResolvedValue([pair1, pair2]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'kalshi-contract-1', 0.5, 0.55),
@@ -103,7 +103,7 @@ describe('DetectionService', () => {
         kalshiContractId: `kalshi-${i}`,
       }),
     );
-    contractPairLoader.getActivePairs.mockReturnValue(pairs);
+    contractPairLoader.getActivePairs.mockResolvedValue(pairs);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),
@@ -122,7 +122,7 @@ describe('DetectionService', () => {
 
   // 5.4: Skips pairs when Kalshi is degraded
   it('should skip pairs when Kalshi is degraded', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
     degradationService.isDegraded.mockImplementation(
       (id: PlatformId) => id === PlatformId.KALSHI,
     );
@@ -136,7 +136,7 @@ describe('DetectionService', () => {
 
   // 5.5: Skips pairs when Polymarket is degraded
   it('should skip pairs when Polymarket is degraded', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
     degradationService.isDegraded.mockImplementation(
       (id: PlatformId) => id === PlatformId.POLYMARKET,
     );
@@ -156,7 +156,7 @@ describe('DetectionService', () => {
       polymarketContractId: 'poly-2',
       kalshiContractId: 'kalshi-2',
     });
-    contractPairLoader.getActivePairs.mockReturnValue([pair1, pair2]);
+    contractPairLoader.getActivePairs.mockResolvedValue([pair1, pair2]);
 
     // First pair: Kalshi fails
     kalshiConnector.getOrderBook
@@ -176,7 +176,7 @@ describe('DetectionService', () => {
 
   // 5.7: Skips pair when bids or asks are empty
   it('should skip pair when bids or asks are empty', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0, 0.55), // no bids
@@ -193,7 +193,7 @@ describe('DetectionService', () => {
 
   // 5.8: Identifies dislocation in Scenario A (buy Polymarket, sell Kalshi)
   it('should identify dislocation in Scenario A (buy Polymarket, sell Kalshi)', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Buy Poly at ask=0.40, Sell Kalshi at bid=0.55 (executable sell price)
     // grossEdge = 0.55 - 0.40 = 0.15 (positive → arb exists)
@@ -217,7 +217,7 @@ describe('DetectionService', () => {
 
   // 5.9: Identifies dislocation in Scenario B (buy Kalshi, sell Polymarket)
   it('should identify dislocation in Scenario B (buy Kalshi, sell Polymarket)', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Buy Kalshi at ask=0.40, Sell Poly at bid=0.53 (executable sell price)
     // grossEdge = 0.53 - 0.40 = 0.13 (positive → arb exists)
@@ -241,7 +241,7 @@ describe('DetectionService', () => {
 
   // 5.10: Produces dislocation for both directions when both have positive gross edge
   it('should produce dislocations for both directions when both have positive gross edge', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Scenario: both directions have arb (wide bid-ask spreads on both platforms)
     // Poly bid=0.55, ask=0.40 — Kalshi bid=0.55, ask=0.40
@@ -269,7 +269,7 @@ describe('DetectionService', () => {
 
   // 5.11: No dislocation when prices are identical (gross edge = 0)
   it('should produce no dislocation when prices are identical', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Both bid=0.50, ask=0.50 → buy at ask=0.50, sell at bid=0.50
     // grossEdge = 0.50 - 0.50 = 0 (no arb)
@@ -287,7 +287,7 @@ describe('DetectionService', () => {
 
   // 5.12: No dislocation when sellBid < buyAsk in both directions (negative grossEdge)
   it('should produce no dislocation when sell price < buy price in both directions', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Poly bid=0.58, ask=0.65; Kalshi bid=0.55, ask=0.62
     // Scenario A: buy Poly ask=0.65, sell Kalshi bid=0.55 → grossEdge = 0.55-0.65 = -0.10 → no arb
@@ -319,7 +319,7 @@ describe('DetectionService', () => {
         kalshiContractId: 'kalshi-3',
       }),
     ];
-    contractPairLoader.getActivePairs.mockReturnValue(pairs);
+    contractPairLoader.getActivePairs.mockResolvedValue(pairs);
 
     // First pair: good data with arb (Scenario B: buy Kalshi@0.42, sell Poly@0.50 → edge=0.08)
     kalshiConnector.getOrderBook
@@ -347,7 +347,7 @@ describe('DetectionService', () => {
 
   // 5.14: Returns empty dislocations when no active pairs exist
   it('should return empty dislocations when no active pairs', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([]);
+    contractPairLoader.getActivePairs.mockResolvedValue([]);
 
     const result = await service.detectDislocations();
 
@@ -358,7 +358,7 @@ describe('DetectionService', () => {
 
   // 5.15: Correctly uses FinancialMath.calculateGrossEdge
   it('should use FinancialMath.calculateGrossEdge for price comparison', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Buy Poly at ask=0.40, Sell Kalshi at bid=0.55
     // grossEdge = 0.55 - 0.40 = 0.15 (positive → arb)
@@ -385,7 +385,7 @@ describe('DetectionService', () => {
 
   // M2: Verify detectedAt timestamp is present and valid
   it('should include a valid detectedAt timestamp on dislocations', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     polymarketConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
@@ -418,7 +418,7 @@ describe('DetectionService', () => {
       polymarketClobTokenId: 'clob-CCC',
       kalshiContractId: 'kalshi-DDD',
     });
-    contractPairLoader.getActivePairs.mockReturnValue([pair1, pair2]);
+    contractPairLoader.getActivePairs.mockResolvedValue([pair1, pair2]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),
@@ -437,7 +437,7 @@ describe('DetectionService', () => {
 
   // 6.5.5a: Sell leg must use best bid (executable sell price), not best ask
   it('should use best bid for sell leg in Scenario A (buy Polymarket, sell Kalshi)', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Wide spread: Kalshi bid=0.55, Kalshi ask=0.62
     // Sell Kalshi → receive bid (0.55), NOT ask (0.62)
@@ -462,7 +462,7 @@ describe('DetectionService', () => {
   });
 
   it('should use best bid for sell leg in Scenario B (buy Kalshi, sell Polymarket)', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Wide spread: Poly bid=0.48, Poly ask=0.55
     // Sell Polymarket → receive bid (0.48), NOT ask (0.55)
@@ -488,7 +488,7 @@ describe('DetectionService', () => {
 
   // REGRESSION: Rejects pair when both platforms agree unlikely (false positive under old formula)
   it('should reject pair when both platforms agree event is unlikely', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Both platforms price event as unlikely with overlapping spreads
     // Scenario A: buy Poly@0.04, sell Kalshi@0.01 → grossEdge = 0.01-0.04 = -0.03 → no arb
@@ -508,7 +508,7 @@ describe('DetectionService', () => {
 
   // REGRESSION: Rejects pair when both platforms agree likely (false positive under old formula)
   it('should reject pair when both platforms agree event is likely', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     // Both platforms price event as likely: Poly ask=0.92, Kalshi bid=0.88
     // Scenario A: buy Poly@0.92, sell Kalshi@0.88 → grossEdge = 0.88-0.92 = -0.04 → no arb
@@ -527,7 +527,7 @@ describe('DetectionService', () => {
 
   // L1: Skip pair when asks are empty (bids present)
   it('should skip pair when asks are empty but bids exist', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0), // has bids, no asks
@@ -544,7 +544,7 @@ describe('DetectionService', () => {
 
   // L1b: Skip pair when Polymarket has empty order book
   it('should skip pair when Polymarket has no market depth', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),
@@ -561,7 +561,7 @@ describe('DetectionService', () => {
 
   // 5.6 extra: Polymarket order book fetch fails
   it('should skip pair when Polymarket order book fetch fails', async () => {
-    contractPairLoader.getActivePairs.mockReturnValue([makePair()]);
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),

@@ -54,7 +54,7 @@ describe('PolymarketCatalogProvider', () => {
               question: 'Will BTC hit $100k?',
               description: 'Resolves Yes if BTC reaches $100,000',
               endDate: '2026-12-31T00:00:00.000Z',
-              clobTokenIds: ['clob-token-abc-yes', 'clob-token-abc-no'],
+              clobTokenIds: '["clob-token-abc-yes","clob-token-abc-no"]',
             },
           ],
         },
@@ -89,7 +89,7 @@ describe('PolymarketCatalogProvider', () => {
             {
               conditionId: 'cond-xyz',
               question: 'Will X happen?',
-              clobTokenIds: ['first-token', 'second-token'],
+              clobTokenIds: '["first-token","second-token"]',
             },
           ],
         },

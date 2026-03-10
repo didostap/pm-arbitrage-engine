@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import * as yaml from 'js-yaml';
 import { ContractPairLoaderService } from './contract-pair-loader.service';
+import { PrismaService } from '../../common/prisma.service';
 import { ConfigValidationError } from '../../common/errors';
 
 const mockExistsSync = vi.fn<(path: string) => boolean>();
@@ -48,9 +49,15 @@ function mockFsInvalidYaml(): void {
   mockReadFileSync.mockReturnValue(': invalid: yaml: {{{}}}');
 }
 
+let mockFindMany: ReturnType<typeof vi.fn>;
+let mockFindFirst: ReturnType<typeof vi.fn>;
+
 async function createService(
   configOverrides: Record<string, string> = {},
 ): Promise<ContractPairLoaderService> {
+  mockFindMany = vi.fn().mockResolvedValue([]);
+  mockFindFirst = vi.fn().mockResolvedValue(null);
+
   const module: TestingModule = await Test.createTestingModule({
     providers: [
       ContractPairLoaderService,
@@ -65,6 +72,15 @@ async function createService(
             }
             return defaultVal;
           }),
+        },
+      },
+      {
+        provide: PrismaService,
+        useValue: {
+          contractMatch: {
+            findMany: mockFindMany,
+            findFirst: mockFindFirst,
+          },
         },
       },
     ],
@@ -84,7 +100,7 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pairs = service.getActivePairs();
+      const pairs = await service.getActivePairs();
       expect(pairs).toHaveLength(2);
       expect(pairs[0]!.polymarketContractId).toBe('poly-1');
       expect(pairs[0]!.polymarketClobTokenId).toBe('clob-1');
@@ -95,13 +111,13 @@ describe('ContractPairLoaderService', () => {
       expect(pairs[1]!.primaryLeg).toBe('polymarket');
     });
 
-    it('should return a shallow copy from getActivePairs()', async () => {
+    it('should return a new array from getActivePairs()', async () => {
       mockFsWithContent(VALID_YAML_CONTENT);
       const service = await createService();
       await service.onModuleInit();
 
-      const pairs1 = service.getActivePairs();
-      const pairs2 = service.getActivePairs();
+      const pairs1 = await service.getActivePairs();
+      const pairs2 = await service.getActivePairs();
       expect(pairs1).not.toBe(pairs2);
       expect(pairs1).toEqual(pairs2);
     });
@@ -276,7 +292,7 @@ describe('ContractPairLoaderService', () => {
 
       await service.onModuleInit();
 
-      const activePairs = service.getActivePairs();
+      const activePairs = await service.getActivePairs();
       expect(activePairs).toHaveLength(31);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -292,7 +308,7 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pair = service.findPairByContractId('poly-1');
+      const pair = await service.findPairByContractId('poly-1');
       expect(pair).toBeDefined();
       expect(pair!.kalshiContractId).toBe('kalshi-1');
     });
@@ -302,7 +318,7 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pair = service.findPairByContractId('kalshi-2');
+      const pair = await service.findPairByContractId('kalshi-2');
       expect(pair).toBeDefined();
       expect(pair!.polymarketContractId).toBe('poly-2');
     });
@@ -312,8 +328,44 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pair = service.findPairByContractId('non-existent');
+      const pair = await service.findPairByContractId('non-existent');
       expect(pair).toBeUndefined();
+    });
+
+    it('should find DB-only pair when not in YAML', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindFirst.mockResolvedValue({
+        matchId: 'db-match-1',
+        polymarketContractId: 'db-poly-1',
+        polymarketClobTokenId: 'db-clob-1',
+        kalshiContractId: 'db-kalshi-1',
+        polymarketDescription: 'DB Event',
+        kalshiDescription: 'DB Event Kalshi',
+        operatorApprovalTimestamp: new Date('2026-03-01'),
+        primaryLeg: 'polymarket',
+        createdAt: new Date(),
+      });
+
+      const pair = await service.findPairByContractId('db-poly-1');
+      expect(pair).toBeDefined();
+      expect(pair!.matchId).toBe('db-match-1');
+      expect(pair!.primaryLeg).toBe('polymarket');
+    });
+
+    it('should prefer YAML pair over DB pair', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      // YAML has poly-1, so findPairByContractId should return YAML version
+      const pair = await service.findPairByContractId('poly-1');
+      expect(pair).toBeDefined();
+      expect(pair!.eventDescription).toBe('Will event A happen?');
+      // DB findFirst should not be called since YAML matched
+      expect(mockFindFirst).not.toHaveBeenCalled();
     });
   });
 
@@ -334,7 +386,7 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pairs = service.getActivePairs();
+      const pairs = await service.getActivePairs();
       expect(pairs[0]!.primaryLeg).toBe('kalshi');
     });
   });
@@ -375,7 +427,7 @@ describe('ContractPairLoaderService', () => {
       const service = await createService();
       await service.onModuleInit();
 
-      const pairs = service.getActivePairs();
+      const pairs = await service.getActivePairs();
       expect(pairs[0]!.polymarketClobTokenId).toBe('clob-1');
       expect(pairs[1]!.polymarketClobTokenId).toBe('clob-2');
     });
@@ -399,6 +451,173 @@ describe('ContractPairLoaderService', () => {
       await expect(service.onModuleInit()).rejects.toThrow(
         ConfigValidationError,
       );
+    });
+  });
+
+  describe('getYamlPairs', () => {
+    it('should return only YAML-configured pairs without DB query', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getYamlPairs();
+      expect(pairs).toHaveLength(2);
+      expect(pairs[0]!.polymarketContractId).toBe('poly-1');
+      expect(pairs[1]!.polymarketContractId).toBe('poly-2');
+      expect(mockFindMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('DB-approved pairs integration', () => {
+    it('should return DB-approved pairs alongside YAML pairs', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-1',
+          polymarketContractId: 'db-poly-1',
+          polymarketClobTokenId: 'db-clob-1',
+          kalshiContractId: 'db-kalshi-1',
+          polymarketDescription: 'DB Event Description',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date('2026-03-01'),
+          primaryLeg: 'kalshi',
+          createdAt: new Date('2026-02-28'),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      expect(pairs).toHaveLength(3); // 2 YAML + 1 DB
+      expect(pairs[2]!.matchId).toBe('db-match-1');
+      expect(pairs[2]!.polymarketContractId).toBe('db-poly-1');
+      expect(pairs[2]!.eventDescription).toBe('DB Event Description');
+    });
+
+    it('should deduplicate: YAML pair takes precedence over matching DB pair', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      // DB returns a pair with same contract IDs as YAML pair
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-dup-match',
+          polymarketContractId: 'poly-1',
+          polymarketClobTokenId: 'db-clob-override',
+          kalshiContractId: 'kalshi-1',
+          polymarketDescription: 'DB version',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'polymarket',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      expect(pairs).toHaveLength(2); // No duplicate
+      // YAML version preserved
+      expect(pairs[0]!.polymarketClobTokenId).toBe('clob-1');
+      expect(pairs[0]!.eventDescription).toBe('Will event A happen?');
+    });
+
+    it('should default primaryLeg to kalshi when DB pair has null primaryLeg', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-2',
+          polymarketContractId: 'db-poly-2',
+          polymarketClobTokenId: 'db-clob-2',
+          kalshiContractId: 'db-kalshi-2',
+          polymarketDescription: null,
+          kalshiDescription: 'Kalshi Description',
+          operatorApprovalTimestamp: null,
+          primaryLeg: null,
+          createdAt: new Date('2026-03-01'),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-2');
+      expect(dbPair).toBeDefined();
+      expect(dbPair!.primaryLeg).toBe('kalshi');
+    });
+
+    it('should use kalshiDescription when polymarketDescription is null', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-3',
+          polymarketContractId: 'db-poly-3',
+          polymarketClobTokenId: 'db-clob-3',
+          kalshiContractId: 'db-kalshi-3',
+          polymarketDescription: null,
+          kalshiDescription: 'Kalshi fallback description',
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-3');
+      expect(dbPair!.eventDescription).toBe('Kalshi fallback description');
+    });
+
+    it('should use createdAt as fallback when operatorApprovalTimestamp is null', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const createdAt = new Date('2026-02-20');
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-4',
+          polymarketContractId: 'db-poly-4',
+          polymarketClobTokenId: 'db-clob-4',
+          kalshiContractId: 'db-kalshi-4',
+          polymarketDescription: 'Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: null,
+          primaryLeg: 'kalshi',
+          createdAt,
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-4');
+      expect(dbPair!.operatorVerificationTimestamp).toEqual(createdAt);
+    });
+
+    it('should set matchId from DB row', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'specific-uuid-123',
+          polymarketContractId: 'db-poly-5',
+          polymarketClobTokenId: 'db-clob-5',
+          kalshiContractId: 'db-kalshi-5',
+          polymarketDescription: 'Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.polymarketContractId === 'db-poly-5');
+      expect(dbPair!.matchId).toBe('specific-uuid-123');
     });
   });
 });

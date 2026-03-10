@@ -75,6 +75,33 @@ describe('PreFilterService', () => {
       const expected = 0.6 * result.tfidfScore + 0.4 * result.keywordOverlap;
       expect(result.combinedScore).toBeCloseTo(expected, 5);
     });
+
+    it('should not match FIFA vs golf contracts that only share outcome word "win"', () => {
+      const result = service.computeSimilarity(
+        'Will Jordan win the 2026 FIFA World Cup?',
+        'How many golf championships will Scheffler win in 2026?',
+      );
+
+      expect(result.combinedScore).toBeLessThan(0.25);
+    });
+
+    it('should not produce keyword overlap from outcome words like "win"', () => {
+      const result = service.computeSimilarity(
+        'Will team A win the tournament?',
+        'Will candidate B win the election?',
+      );
+
+      expect(result.keywordOverlap).toBe(0);
+    });
+
+    it('should still match legitimate similar contracts', () => {
+      const result = service.computeSimilarity(
+        'Will Mike Johnson remain Speaker of the House through 2026?',
+        'Mike Johnson Speaker of the House at end of 2026?',
+      );
+
+      expect(result.combinedScore).toBeGreaterThan(0.25);
+    });
   });
 
   describe('filterCandidates', () => {

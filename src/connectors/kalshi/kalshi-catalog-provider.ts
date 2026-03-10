@@ -115,14 +115,38 @@ export class KalshiCatalogProvider implements IContractCatalogProvider {
     const parts = [title];
     if (marketDetail) parts.push(marketDetail);
     if (market.rules_primary) parts.push(market.rules_primary);
+    const rawDate =
+      market.expected_expiration_time ||
+      market.expiration_time ||
+      market.close_time;
+
+    if (!market.expected_expiration_time && !market.expiration_time) {
+      this.logger.warn({
+        message:
+          'Kalshi market missing expected_expiration_time and expiration_time',
+        data: {
+          ticker: market.ticker,
+          fallback: market.close_time ? 'close_time' : 'none',
+        },
+      });
+    }
+
+    const parsedDate = rawDate ? new Date(rawDate) : undefined;
+    if (rawDate && parsedDate && isNaN(parsedDate.getTime())) {
+      this.logger.warn({
+        message: 'Kalshi market has invalid date format',
+        data: { ticker: market.ticker, rawDate },
+      });
+    }
+    const settlementDate =
+      parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate : undefined;
+
     return {
       contractId: market.ticker,
       title,
       description: parts.join('\n'),
       category: event.series_ticker || event.category,
-      settlementDate: market.close_time
-        ? new Date(market.close_time)
-        : undefined,
+      settlementDate,
       platform: PlatformId.KALSHI,
     };
   }

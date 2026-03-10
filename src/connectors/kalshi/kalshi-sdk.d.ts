@@ -96,6 +96,8 @@ declare module 'kalshi-typescript' {
     yes_sub_title?: string;
     no_sub_title?: string;
     status: string;
+    expected_expiration_time?: string;
+    expiration_time?: string;
     close_time?: string;
     result?: string;
     rules_primary?: string;

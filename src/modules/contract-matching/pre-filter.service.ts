@@ -183,16 +183,12 @@ function isYearLike(n: string): boolean {
 function extractKeywords(text: string): string[] {
   const dates = text.match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/g) ?? [];
   const percentages = text.match(/\d+\.?\d*%/g) ?? [];
-  const outcomes =
-    text.match(/\b(yes|no|true|false|win|lose|above|below)\b/gi) ?? [];
   // Strip date expressions before extracting numbers to avoid day-of-month noise
   const textWithoutDates = text.replace(DATE_EXPR, ' ');
   const numbers = (textWithoutDates.match(/\b\d+\.?\d*\b/g) ?? []).filter(
     (n) => !isYearLike(n) && !isNumericNoise(n),
   );
-  return [...dates, ...percentages, ...outcomes, ...numbers].map((s) =>
-    s.toLowerCase(),
-  );
+  return [...dates, ...percentages, ...numbers].map((s) => s.toLowerCase());
 }
 
 function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {

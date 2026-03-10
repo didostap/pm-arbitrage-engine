@@ -100,11 +100,11 @@ export class DataIngestionService implements OnModuleInit {
    * Retrieves configured tickers from contract pair configuration.
    * Returns empty arrays if no pairs are configured (with warning log).
    */
-  private getConfiguredTickers(correlationId: string): {
+  private async getConfiguredTickers(correlationId: string): Promise<{
     kalshiTickers: string[];
     polymarketTokens: string[];
-  } {
-    const activePairs = this.contractPairLoader.getActivePairs();
+  }> {
+    const activePairs = await this.contractPairLoader.getActivePairs();
 
     if (activePairs.length === 0) {
       this.logger.warn({
@@ -134,7 +134,7 @@ export class DataIngestionService implements OnModuleInit {
     });
 
     const { kalshiTickers, polymarketTokens } =
-      this.getConfiguredTickers(correlationId);
+      await this.getConfiguredTickers(correlationId);
 
     if (kalshiTickers.length === 0 && polymarketTokens.length === 0) {
       return;
@@ -306,7 +306,7 @@ export class DataIngestionService implements OnModuleInit {
    */
   private async pollDegradedPlatforms(correlationId: string): Promise<void> {
     const { kalshiTickers, polymarketTokens } =
-      this.getConfiguredTickers(correlationId);
+      await this.getConfiguredTickers(correlationId);
 
     const connectors = [
       {

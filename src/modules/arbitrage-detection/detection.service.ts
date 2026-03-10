@@ -27,7 +27,7 @@ export class DetectionService {
     let pairsEvaluated = 0;
     let pairsSkipped = 0;
 
-    const activePairs = this.contractPairLoader.getActivePairs();
+    const activePairs = await this.contractPairLoader.getActivePairs();
 
     for (const pair of activePairs) {
       // AC2: Skip if either platform is degraded

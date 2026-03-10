@@ -97,7 +97,7 @@ export class PositionEnrichmentService {
       ),
       this.priceFeed.getCurrentClosePrice(
         'polymarket',
-        pair.polymarketContractId,
+        pair.polymarketClobTokenId!,
         position.polymarketSide as 'buy' | 'sell',
       ),
     ]);

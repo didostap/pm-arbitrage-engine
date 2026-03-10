@@ -7,33 +7,101 @@ import * as yaml from 'js-yaml';
 import * as path from 'path';
 
 import { ConfigValidationError } from '../../common/errors/index.js';
+import { PrismaService } from '../../common/prisma.service.js';
 import {
   ContractPairDto,
   ContractPairsConfigDto,
   PrimaryLeg,
 } from './dto/contract-pair.dto.js';
 import { ContractPairConfig } from './types/index.js';
+import type { ContractMatch } from '@prisma/client';
 
 @Injectable()
 export class ContractPairLoaderService implements OnModuleInit {
   private readonly logger = new Logger(ContractPairLoaderService.name);
-  private activePairs: ContractPairConfig[] = [];
+  private yamlPairs: ContractPairConfig[] = [];
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     const configPath = this.resolveConfigPath();
     const rawContent = this.readConfigFile(configPath);
     const parsed = this.parseYaml(rawContent, configPath);
     const pairs = await this.validatePairs(parsed);
-    this.activePairs = pairs.map((dto) => this.toPairConfig(dto));
+    this.yamlPairs = pairs.map((dto) => this.toPairConfig(dto));
     this.logger.log(
-      `Contract pairs loaded: ${this.activePairs.length} pairs from ${configPath}`,
+      `Contract pairs loaded: ${this.yamlPairs.length} pairs from ${configPath}`,
     );
   }
 
-  getActivePairs(): ContractPairConfig[] {
-    return this.activePairs.filter((pair) => {
+  /**
+   * Returns all tradeable pairs: YAML-configured + DB-approved.
+   * YAML pairs take precedence on duplicates.
+   */
+  async getActivePairs(): Promise<ContractPairConfig[]> {
+    const yamlFiltered = this.filterValidPairs(this.yamlPairs);
+
+    const yamlKeys = new Set(
+      yamlFiltered.map(
+        (p) => `${p.polymarketContractId}::${p.kalshiContractId}`,
+      ),
+    );
+
+    const dbMatches = await this.prisma.contractMatch.findMany({
+      where: {
+        operatorApproved: true,
+        polymarketClobTokenId: { not: null },
+      },
+    });
+
+    const dbPairs: ContractPairConfig[] = [];
+    for (const match of dbMatches) {
+      const key = `${match.polymarketContractId}::${match.kalshiContractId}`;
+      if (yamlKeys.has(key)) continue;
+      dbPairs.push(this.dbMatchToConfig(match));
+    }
+
+    return [...yamlFiltered, ...dbPairs];
+  }
+
+  /**
+   * Returns only YAML-configured pairs (no DB query).
+   * Used by ContractMatchSyncService to avoid circular reads.
+   */
+  getYamlPairs(): ContractPairConfig[] {
+    return this.filterValidPairs(this.yamlPairs);
+  }
+
+  async findPairByContractId(
+    contractId: string,
+  ): Promise<ContractPairConfig | undefined> {
+    const yamlMatch = this.yamlPairs.find(
+      (pair) =>
+        pair.polymarketContractId === contractId ||
+        pair.kalshiContractId === contractId,
+    );
+    if (yamlMatch) return yamlMatch;
+
+    const dbMatch = await this.prisma.contractMatch.findFirst({
+      where: {
+        operatorApproved: true,
+        polymarketClobTokenId: { not: null },
+        OR: [
+          { polymarketContractId: contractId },
+          { kalshiContractId: contractId },
+        ],
+      },
+    });
+
+    if (!dbMatch) return undefined;
+    return this.dbMatchToConfig(dbMatch);
+  }
+
+  private filterValidPairs(pairs: ContractPairConfig[]): ContractPairConfig[] {
+    return pairs.filter((pair) => {
       if (!pair.polymarketClobTokenId) {
         this.logger.warn({
           message:
@@ -49,12 +117,20 @@ export class ContractPairLoaderService implements OnModuleInit {
     });
   }
 
-  findPairByContractId(contractId: string): ContractPairConfig | undefined {
-    return this.activePairs.find(
-      (pair) =>
-        pair.polymarketContractId === contractId ||
-        pair.kalshiContractId === contractId,
-    );
+  private dbMatchToConfig(match: ContractMatch): ContractPairConfig {
+    return {
+      polymarketContractId: match.polymarketContractId,
+      polymarketClobTokenId: match.polymarketClobTokenId!,
+      kalshiContractId: match.kalshiContractId,
+      eventDescription:
+        match.polymarketDescription ??
+        match.kalshiDescription ??
+        'Unknown event',
+      operatorVerificationTimestamp:
+        match.operatorApprovalTimestamp ?? match.createdAt,
+      primaryLeg: (match.primaryLeg as 'kalshi' | 'polymarket') ?? 'kalshi',
+      matchId: match.matchId,
+    };
   }
 
   private resolveConfigPath(): string {

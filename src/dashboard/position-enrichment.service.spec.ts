@@ -37,6 +37,7 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
     pair: {
       matchId: 'pair-1',
       polymarketContractId: 'pm-contract-1',
+      polymarketClobTokenId: 'pm-clob-token-1',
       kalshiContractId: 'k-contract-1',
       polymarketDescription: 'Will BTC hit $100K?',
       kalshiDescription: 'BTC-100K-YES',
@@ -904,6 +905,23 @@ describe('PositionEnrichmentService', () => {
       expect(result.status).toBe('failed');
       expect(result.data.projectedSlPnl).toBeUndefined();
       expect(result.data.projectedTpPnl).toBeUndefined();
+    });
+
+    it('should call getCurrentClosePrice with polymarketClobTokenId (not polymarketContractId)', async () => {
+      vi.mocked(priceFeed.getCurrentClosePrice).mockResolvedValue(
+        new Decimal('0.55'),
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const position = createMockPosition();
+      await service.enrich(position as never);
+
+      const calls = vi.mocked(priceFeed.getCurrentClosePrice).mock.calls;
+      const polymarketCall = calls.find((c) => c[0] === 'polymarket');
+      expect(polymarketCall).toBeDefined();
+      // Must use CLOB token ID, not condition ID (polymarketContractId)
+      expect(polymarketCall![1]).toBe('pm-clob-token-1');
+      expect(polymarketCall![1]).not.toBe('pm-contract-1');
     });
 
     it('should compute projectedSlPnl with non-zero entry cost baseline', async () => {

@@ -25,15 +25,23 @@ function buildPrompt(
     context += `\nCategory: ${metadata.category}`;
   }
 
-  return `You are a prediction market contract matching expert. Compare these two contracts from different platforms and determine if they refer to the same real-world event with matching settlement criteria.
+  return `You are a prediction market contract matching expert. Determine if these two contracts are FUNCTIONALLY IDENTICAL — meaning a YES on one platform corresponds to the same real-world outcome as a YES on the other.
 
 Contract A (Polymarket): ${polyDescription}
 Contract B (Kalshi): ${kalshiDescription}${context}
 
-Analyze:
-1. Whether they refer to the same real-world event
-2. Whether settlement/resolution criteria match
-3. Whether dates align
+CRITICAL RULE — Outcome specificity:
+Contracts about the SAME broader event but DIFFERENT specific outcomes are NOT matches. Score them 0-10.
+Examples of NON-matches (same event, different outcome):
+- "Will Party X win the election?" vs "Will Party Y win the election?" — different parties
+- "Will Candidate A win?" vs "Will Candidate B win?" — different candidates
+- "Will Bitcoin exceed $100k?" vs "Will Bitcoin exceed $150k?" — different thresholds
+- "Will unemployment be above 5%?" vs "Will unemployment be above 6%?" — different thresholds
+
+Analyze in this order:
+1. OUTCOME IDENTITY: Do both contracts resolve YES under the exact same condition? Identify the specific entity, party, candidate, person, team, threshold, or metric each contract bets on. If they differ, stop here and score 0-10.
+2. EVENT IDENTITY: Do they reference the same underlying real-world event?
+3. SETTLEMENT ALIGNMENT: Do resolution/settlement criteria and dates match?
 
 Respond with ONLY a JSON object (no markdown, no code blocks):
 {"score": <0-100>, "confidence": "<high|medium|low>", "reasoning": "<brief explanation>"}`;

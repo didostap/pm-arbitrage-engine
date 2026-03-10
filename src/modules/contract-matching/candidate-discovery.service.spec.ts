@@ -67,7 +67,7 @@ describe('CandidateDiscoveryService', () => {
   const configValues: Record<string, string | number> = {
     DISCOVERY_ENABLED: 'true',
     DISCOVERY_CRON_EXPRESSION: '0 0 8,20 * * *',
-    DISCOVERY_PREFILTER_THRESHOLD: 0.15,
+    DISCOVERY_PREFILTER_THRESHOLD: 0.25,
     DISCOVERY_SETTLEMENT_WINDOW_DAYS: 7,
     DISCOVERY_MAX_CANDIDATES_PER_CONTRACT: 20,
     LLM_AUTO_APPROVE_THRESHOLD: 85,
@@ -410,7 +410,7 @@ describe('CandidateDiscoveryService', () => {
       expect(preFilterCalls[0]![1]).toHaveLength(0); // no candidates passed date filter
     });
 
-    it('should not filter by date when settlement date is undefined', async () => {
+    it('should exclude candidates when candidate settlement date is undefined', async () => {
       const noDateKalshi = [
         makeContract(PlatformId.KALSHI, 'K-NODATE', {
           settlementDate: undefined,
@@ -430,7 +430,86 @@ describe('CandidateDiscoveryService', () => {
       const preFilterCalls = preFilter.filterCandidates.mock.calls;
       expect(preFilterCalls).toHaveLength(1);
 
-      expect(preFilterCalls[0]![1]).toHaveLength(1); // candidate passes when date unknown
+      expect(preFilterCalls[0]![1]).toHaveLength(0); // candidate excluded when date undefined
+    });
+
+    it('should exclude candidates when source settlement date is undefined', async () => {
+      const noDatePoly = [
+        makeContract(PlatformId.POLYMARKET, 'P-NODATE', {
+          settlementDate: undefined,
+        }),
+      ];
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, noDatePoly],
+          [PlatformId.KALSHI, [makeContract(PlatformId.KALSHI, 'K1')]],
+        ]),
+      );
+
+      preFilter.filterCandidates.mockReturnValue([]);
+
+      await service.runDiscovery();
+
+      const preFilterCalls = preFilter.filterCandidates.mock.calls;
+      expect(preFilterCalls).toHaveLength(1);
+
+      expect(preFilterCalls[0]![1]).toHaveLength(0); // candidate excluded when source date undefined
+    });
+
+    it('should exclude candidates when both settlement dates are undefined', async () => {
+      const noDatePoly = [
+        makeContract(PlatformId.POLYMARKET, 'P-NODATE', {
+          settlementDate: undefined,
+        }),
+      ];
+      const noDateKalshi = [
+        makeContract(PlatformId.KALSHI, 'K-NODATE', {
+          settlementDate: undefined,
+        }),
+      ];
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, noDatePoly],
+          [PlatformId.KALSHI, noDateKalshi],
+        ]),
+      );
+
+      preFilter.filterCandidates.mockReturnValue([]);
+
+      await service.runDiscovery();
+
+      const preFilterCalls = preFilter.filterCandidates.mock.calls;
+      expect(preFilterCalls).toHaveLength(1);
+
+      expect(preFilterCalls[0]![1]).toHaveLength(0); // both excluded
+    });
+
+    it('should include candidates when both settlement dates are valid and within window', async () => {
+      const nearPoly = [
+        makeContract(PlatformId.POLYMARKET, 'P-NEAR', {
+          settlementDate: new Date('2026-06-15'),
+        }),
+      ];
+      const nearKalshi = [
+        makeContract(PlatformId.KALSHI, 'K-NEAR', {
+          settlementDate: new Date('2026-06-18'),
+        }),
+      ];
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, nearPoly],
+          [PlatformId.KALSHI, nearKalshi],
+        ]),
+      );
+
+      preFilter.filterCandidates.mockReturnValue([]);
+
+      await service.runDiscovery();
+
+      const preFilterCalls = preFilter.filterCandidates.mock.calls;
+      expect(preFilterCalls).toHaveLength(1);
+
+      expect(preFilterCalls[0]![1]).toHaveLength(1); // within 7 day window
     });
 
     it('should limit candidates per contract via DISCOVERY_MAX_CANDIDATES_PER_CONTRACT', async () => {

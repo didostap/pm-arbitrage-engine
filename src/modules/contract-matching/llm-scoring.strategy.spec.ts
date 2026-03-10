@@ -294,4 +294,25 @@ describe('LlmScoringStrategy', () => {
       );
     });
   });
+
+  describe('prompt content', () => {
+    it('should include outcome specificity instructions in the prompt', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 90, confidence: 'high', reasoning: 'match' }),
+      );
+
+      await strategy.scoreMatch(
+        'Will Party X win the election?',
+        'Will Party Y win the election?',
+      );
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      expect(calledPrompt).toContain('FUNCTIONALLY IDENTICAL');
+      expect(calledPrompt).toContain('OUTCOME IDENTITY');
+      expect(calledPrompt).toContain('different parties');
+      expect(calledPrompt).toContain('Score them 0-10');
+    });
+  });
 });
