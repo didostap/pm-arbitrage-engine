@@ -7,6 +7,7 @@ describe('DiscoveryRunCompletedEvent', () => {
     candidatesPreFiltered: 15,
     pairsScored: 8,
     autoApproved: 5,
+    autoRejected: 2,
     pendingReview: 3,
     scoringFailures: 0,
     durationMs: 12345,
@@ -29,6 +30,7 @@ describe('DiscoveryRunCompletedEvent', () => {
     expect(event.stats.candidatesPreFiltered).toBe(15);
     expect(event.stats.pairsScored).toBe(8);
     expect(event.stats.autoApproved).toBe(5);
+    expect(event.stats.autoRejected).toBe(2);
     expect(event.stats.pendingReview).toBe(3);
     expect(event.stats.scoringFailures).toBe(0);
     expect(event.stats.durationMs).toBe(12345);

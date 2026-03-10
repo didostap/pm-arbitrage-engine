@@ -15,6 +15,7 @@ interface PolymarketMarket {
   question: string;
   description?: string;
   endDate?: string;
+  clobTokenIds?: string[];
 }
 
 interface PolymarketEvent {
@@ -105,6 +106,7 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
         : market.question,
       category: event.tags?.[0]?.label,
       settlementDate: market.endDate ? new Date(market.endDate) : undefined,
+      clobTokenId: market.clobTokenIds?.[0],
       platform: PlatformId.POLYMARKET,
     };
   }

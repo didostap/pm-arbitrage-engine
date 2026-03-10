@@ -187,7 +187,7 @@ export class PositionCloseService implements IPositionCloseService {
       const [kalshiOrderBook, polymarketOrderBook] = await Promise.all([
         this.kalshiConnector.getOrderBook(position.pair.kalshiContractId),
         this.polymarketConnector.getOrderBook(
-          position.pair.polymarketContractId,
+          position.pair.polymarketClobTokenId!,
         ),
       ]);
 
@@ -229,9 +229,9 @@ export class PositionCloseService implements IPositionCloseService {
         : this.kalshiConnector;
       const primaryContractId = isPrimaryKalshi
         ? position.pair.kalshiContractId
-        : position.pair.polymarketContractId;
+        : position.pair.polymarketClobTokenId!;
       const secondaryContractId = isPrimaryKalshi
-        ? position.pair.polymarketContractId
+        ? position.pair.polymarketClobTokenId!
         : position.pair.kalshiContractId;
       const primaryCloseSide = isPrimaryKalshi
         ? kalshiCloseSide

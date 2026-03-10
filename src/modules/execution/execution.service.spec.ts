@@ -37,6 +37,7 @@ function makePairConfig(
 ): ContractPairConfig {
   return {
     polymarketContractId: 'pm-contract-1',
+    polymarketClobTokenId: 'mock-clob-token-1',
     kalshiContractId: 'kalshi-contract-1',
     eventDescription: 'Test event',
     operatorVerificationTimestamp: new Date(),
@@ -1021,7 +1022,7 @@ describe('ExecutionService', () => {
 
       const event = depthFailedCalls[0]![1] as DepthCheckFailedEvent;
       expect(event.platform).toBe(PlatformId.POLYMARKET);
-      expect(event.contractId).toBe('pm-contract-1');
+      expect(event.contractId).toBe('mock-clob-token-1');
       expect(event.side).toBe('sell');
       expect(event.errorType).toBe('Error');
       expect(event.errorMessage).toBe('Connection timeout');

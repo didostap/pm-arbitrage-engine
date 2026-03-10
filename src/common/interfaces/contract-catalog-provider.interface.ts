@@ -6,6 +6,7 @@ export interface ContractSummary {
   description: string; // Full description for LLM scoring
   category?: string; // Kalshi: series_ticker; Polymarket: primary tag
   settlementDate?: Date; // Expected resolution/close date
+  clobTokenId?: string; // Polymarket CLOB token ID (YES outcome)
   platform: PlatformId;
 }
 

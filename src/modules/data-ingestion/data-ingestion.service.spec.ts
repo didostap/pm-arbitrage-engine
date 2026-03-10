@@ -21,6 +21,7 @@ const TEST_PAIRS: ContractPairConfig[] = [
   {
     kalshiContractId: 'KALSHI-TICKER-1',
     polymarketContractId: 'pm-token-1',
+    polymarketClobTokenId: 'pm-token-1',
     eventDescription: 'Test event 1',
     operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
     primaryLeg: 'kalshi',
@@ -28,6 +29,7 @@ const TEST_PAIRS: ContractPairConfig[] = [
   {
     kalshiContractId: 'KALSHI-TICKER-2',
     polymarketContractId: 'pm-token-2',
+    polymarketClobTokenId: 'pm-token-2',
     eventDescription: 'Test event 2',
     operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
     primaryLeg: 'polymarket',
@@ -811,6 +813,7 @@ describe('DataIngestionService', () => {
         {
           kalshiContractId: 'KALSHI-A',
           polymarketContractId: 'pm-a',
+          polymarketClobTokenId: 'pm-a',
           eventDescription: 'Event A',
           operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
           primaryLeg: 'kalshi',
@@ -818,6 +821,7 @@ describe('DataIngestionService', () => {
         {
           kalshiContractId: 'KALSHI-B',
           polymarketContractId: 'pm-b',
+          polymarketClobTokenId: 'pm-b',
           eventDescription: 'Event B',
           operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
           primaryLeg: 'polymarket',
@@ -825,6 +829,7 @@ describe('DataIngestionService', () => {
         {
           kalshiContractId: 'KALSHI-C',
           polymarketContractId: 'pm-c',
+          polymarketClobTokenId: 'pm-c',
           eventDescription: 'Event C',
           operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
           primaryLeg: 'kalshi',

@@ -5,6 +5,7 @@
  */
 export interface ContractPairConfig {
   polymarketContractId: string;
+  polymarketClobTokenId: string;
   kalshiContractId: string;
   eventDescription: string;
   operatorVerificationTimestamp: Date;

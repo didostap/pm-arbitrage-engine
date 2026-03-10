@@ -475,12 +475,12 @@ export class SingleLegResolutionService {
   }
 
   private getContractId(
-    pair: { kalshiContractId: string; polymarketContractId: string },
+    pair: { kalshiContractId: string; polymarketClobTokenId: string | null },
     platform: PlatformId,
   ): string {
     return platform === PlatformId.KALSHI
       ? pair.kalshiContractId
-      : pair.polymarketContractId;
+      : pair.polymarketClobTokenId!;
   }
 
   private getSide(
@@ -501,7 +501,7 @@ export class SingleLegResolutionService {
     polymarketSide: string | null;
     pairId: string;
     positionId: string;
-    pair: { kalshiContractId: string; polymarketContractId: string };
+    pair: { kalshiContractId: string; polymarketClobTokenId: string | null };
   }) {
     const filledPlatform = this.getFilledPlatform(position);
     const failedPlatform = this.getFailedPlatform(position);
@@ -538,7 +538,7 @@ export class SingleLegResolutionService {
       ).catch(() => null),
       withTimeout(
         this.polymarketConnector.getOrderBook(
-          position.pair.polymarketContractId,
+          position.pair.polymarketClobTokenId!,
         ),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),

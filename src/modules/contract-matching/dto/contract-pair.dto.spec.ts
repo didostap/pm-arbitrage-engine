@@ -12,6 +12,7 @@ function makeValidPair(
 ): Record<string, unknown> {
   return {
     polymarketContractId: 'poly-abc-123',
+    polymarketClobTokenId: 'clob-abc-123',
     kalshiContractId: 'kalshi-xyz-456',
     eventDescription: 'Will X happen by Y date?',
     operatorVerificationTimestamp: '2026-02-15T12:00:00Z',
@@ -41,6 +42,17 @@ describe('ContractPairDto', () => {
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.property).toBe('polymarketContractId');
+  });
+
+  it('should fail when polymarketClobTokenId is missing', async () => {
+    const data = makeValidPair();
+    delete data.polymarketClobTokenId;
+    const dto = plainToInstance(ContractPairDto, data);
+    const errors = await validate(dto);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.property === 'polymarketClobTokenId')).toBe(
+      true,
+    );
   });
 
   it('should fail when kalshiContractId is empty string', async () => {
@@ -126,6 +138,7 @@ describe('ContractPairsConfigDto.validateDuplicatesAndLimits', () => {
         ContractPairDto,
         makeValidPair({
           polymarketContractId: `poly-${i}`,
+          polymarketClobTokenId: `clob-${i}`,
           kalshiContractId: `kalshi-${i}`,
         }),
       ),

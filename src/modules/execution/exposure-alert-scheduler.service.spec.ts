@@ -33,6 +33,7 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
       matchId: 'pair-1',
       kalshiContractId: 'kalshi-contract-1',
       polymarketContractId: 'poly-contract-1',
+      polymarketClobTokenId: 'mock-clob-token-1',
     },
     createdAt: new Date(),
     updatedAt: new Date(),

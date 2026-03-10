@@ -54,6 +54,7 @@ describe('PolymarketCatalogProvider', () => {
               question: 'Will BTC hit $100k?',
               description: 'Resolves Yes if BTC reaches $100,000',
               endDate: '2026-12-31T00:00:00.000Z',
+              clobTokenIds: ['clob-token-abc-yes', 'clob-token-abc-no'],
             },
           ],
         },
@@ -75,6 +76,50 @@ describe('PolymarketCatalogProvider', () => {
       new Date('2026-12-31T00:00:00.000Z'),
     );
     expect(contract.platform).toBe(PlatformId.POLYMARKET);
+    expect(contract.clobTokenId).toBe('clob-token-abc-yes');
+  });
+
+  it('should map clobTokenId from clobTokenIds[0]', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      okResponse([
+        {
+          id: 'event-1',
+          title: 'Test Event',
+          markets: [
+            {
+              conditionId: 'cond-xyz',
+              question: 'Will X happen?',
+              clobTokenIds: ['first-token', 'second-token'],
+            },
+          ],
+        },
+      ]),
+    );
+    fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+    const result = await provider.listActiveContracts();
+    expect(result[0]!.clobTokenId).toBe('first-token');
+  });
+
+  it('should leave clobTokenId undefined when clobTokenIds is missing', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      okResponse([
+        {
+          id: 'event-1',
+          title: 'Test Event',
+          markets: [
+            {
+              conditionId: 'cond-no-clob',
+              question: 'Will Y happen?',
+            },
+          ],
+        },
+      ]),
+    );
+    fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+    const result = await provider.listActiveContracts();
+    expect(result[0]!.clobTokenId).toBeUndefined();
   });
 
   it('should handle offset-based pagination', async () => {

@@ -17,6 +17,7 @@ import { MatchApprovedEvent } from '../../common/events/match-approved.event.js'
 import { MatchAutoApprovedEvent } from '../../common/events/match-auto-approved.event.js';
 import { MatchPendingReviewEvent } from '../../common/events/match-pending-review.event.js';
 import { LlmScoringError } from '../../common/errors/llm-scoring-error.js';
+import { ConfigValidationError } from '../../common/errors/config-validation-error.js';
 import { withCorrelationId } from '../../common/services/correlation-context.js';
 
 interface DiscoveryStats {
@@ -24,6 +25,7 @@ interface DiscoveryStats {
   candidatesPreFiltered: number;
   pairsScored: number;
   autoApproved: number;
+  autoRejected: number;
   pendingReview: number;
   scoringFailures: number;
 }
@@ -43,6 +45,7 @@ function isWithinSettlementWindow(
 export class CandidateDiscoveryService implements OnModuleInit {
   private readonly logger = new Logger(CandidateDiscoveryService.name);
   private readonly autoApproveThreshold: number;
+  private readonly minReviewThreshold: number;
   private readonly preFilterThreshold: number;
   private readonly settlementWindowDays: number;
   private readonly maxCandidatesPerContract: number;
@@ -60,6 +63,9 @@ export class CandidateDiscoveryService implements OnModuleInit {
     this.autoApproveThreshold = Number(
       this.configService.get<number>('LLM_AUTO_APPROVE_THRESHOLD', 85),
     );
+    this.minReviewThreshold = Number(
+      this.configService.get<number>('LLM_MIN_REVIEW_THRESHOLD', 40),
+    );
     this.preFilterThreshold = Number(
       this.configService.get<number>('DISCOVERY_PREFILTER_THRESHOLD', 0.15),
     );
@@ -75,6 +81,15 @@ export class CandidateDiscoveryService implements OnModuleInit {
   }
 
   onModuleInit(): void {
+    if (this.minReviewThreshold >= this.autoApproveThreshold) {
+      throw new ConfigValidationError(
+        `LLM_MIN_REVIEW_THRESHOLD (${this.minReviewThreshold}) must be less than LLM_AUTO_APPROVE_THRESHOLD (${this.autoApproveThreshold})`,
+        [
+          `LLM_MIN_REVIEW_THRESHOLD (${this.minReviewThreshold}) must be less than LLM_AUTO_APPROVE_THRESHOLD (${this.autoApproveThreshold})`,
+        ],
+      );
+    }
+
     const enabled = this.configService.get<string>(
       'DISCOVERY_ENABLED',
       'false',
@@ -116,6 +131,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
         candidatesPreFiltered: 0,
         pairsScored: 0,
         autoApproved: 0,
+        autoRejected: 0,
         pendingReview: 0,
         scoringFailures: 0,
       };
@@ -244,10 +260,12 @@ export class CandidateDiscoveryService implements OnModuleInit {
       );
 
       const isAutoApproved = result.score >= this.autoApproveThreshold;
+      const isBelowReviewThreshold = result.score < this.minReviewThreshold;
 
       const match = await this.prisma.contractMatch.create({
         data: {
           polymarketContractId: polyContract.contractId,
+          polymarketClobTokenId: polyContract.clobTokenId ?? null,
           kalshiContractId: kalshiContract.contractId,
           polymarketDescription: polyContract.description,
           kalshiDescription: kalshiContract.description,
@@ -260,7 +278,9 @@ export class CandidateDiscoveryService implements OnModuleInit {
           operatorApprovalTimestamp: isAutoApproved ? new Date() : null,
           operatorRationale: isAutoApproved
             ? `Auto-approved by discovery pipeline (score: ${result.score}, model: ${result.model}, escalated: ${result.escalated})`
-            : null,
+            : isBelowReviewThreshold
+              ? `Auto-rejected: below review threshold (score: ${result.score}, threshold: ${this.minReviewThreshold})`
+              : null,
         },
       });
 
@@ -286,6 +306,8 @@ export class CandidateDiscoveryService implements OnModuleInit {
             result.escalated,
           ),
         );
+      } else if (isBelowReviewThreshold) {
+        stats.autoRejected++;
       } else {
         stats.pendingReview++;
         this.eventEmitter.emit(

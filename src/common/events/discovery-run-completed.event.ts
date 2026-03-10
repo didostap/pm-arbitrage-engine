@@ -5,6 +5,7 @@ export interface DiscoveryRunStats {
   candidatesPreFiltered: number;
   pairsScored: number;
   autoApproved: number;
+  autoRejected: number;
   pendingReview: number;
   scoringFailures: number;
   durationMs: number;

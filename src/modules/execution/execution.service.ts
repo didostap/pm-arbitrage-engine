@@ -140,10 +140,10 @@ export class ExecutionService implements IExecutionEngine {
     const primaryContractId =
       primaryLeg === 'kalshi'
         ? dislocation.pairConfig.kalshiContractId
-        : dislocation.pairConfig.polymarketContractId;
+        : dislocation.pairConfig.polymarketClobTokenId;
     const secondaryContractId =
       primaryLeg === 'kalshi'
-        ? dislocation.pairConfig.polymarketContractId
+        ? dislocation.pairConfig.polymarketClobTokenId
         : dislocation.pairConfig.kalshiContractId;
 
     // === COMPLIANCE GATE ===
@@ -1020,7 +1020,7 @@ export class ExecutionService implements IExecutionEngine {
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),
       withTimeout(
-        this.polymarketConnector.getOrderBook(pairConfig.polymarketContractId),
+        this.polymarketConnector.getOrderBook(pairConfig.polymarketClobTokenId),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),
     ]);

@@ -22,6 +22,10 @@ export class ContractPairDto {
 
   @IsString()
   @IsNotEmpty()
+  polymarketClobTokenId!: string;
+
+  @IsString()
+  @IsNotEmpty()
   kalshiContractId!: string;
 
   @IsString()

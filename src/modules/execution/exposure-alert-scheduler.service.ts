@@ -70,7 +70,10 @@ export class ExposureAlertScheduler {
     kalshiSide: string | null;
     polymarketSide: string | null;
     expectedEdge: unknown;
-    pair: { kalshiContractId: string; polymarketContractId: string } | null;
+    pair: {
+      kalshiContractId: string;
+      polymarketClobTokenId: string | null;
+    } | null;
   }): Promise<void> {
     // Debounce check
     const now = Date.now();

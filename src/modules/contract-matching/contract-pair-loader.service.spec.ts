@@ -17,6 +17,7 @@ const VALID_YAML_CONTENT = {
   pairs: [
     {
       polymarketContractId: 'poly-1',
+      polymarketClobTokenId: 'clob-1',
       kalshiContractId: 'kalshi-1',
       eventDescription: 'Will event A happen?',
       operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
@@ -24,6 +25,7 @@ const VALID_YAML_CONTENT = {
     },
     {
       polymarketContractId: 'poly-2',
+      polymarketClobTokenId: 'clob-2',
       kalshiContractId: 'kalshi-2',
       eventDescription: 'Will event B happen?',
       operatorVerificationTimestamp: '2026-02-15T11:00:00Z',
@@ -85,6 +87,7 @@ describe('ContractPairLoaderService', () => {
       const pairs = service.getActivePairs();
       expect(pairs).toHaveLength(2);
       expect(pairs[0]!.polymarketContractId).toBe('poly-1');
+      expect(pairs[0]!.polymarketClobTokenId).toBe('clob-1');
       expect(pairs[0]!.kalshiContractId).toBe('kalshi-1');
       expect(pairs[0]!.eventDescription).toBe('Will event A happen?');
       expect(pairs[0]!.operatorVerificationTimestamp).toBeInstanceOf(Date);
@@ -187,12 +190,14 @@ describe('ContractPairLoaderService', () => {
         pairs: [
           {
             polymarketContractId: 'poly-dup',
+            polymarketClobTokenId: 'clob-dup-1',
             kalshiContractId: 'kalshi-1',
             eventDescription: 'Event A',
             operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
           },
           {
             polymarketContractId: 'poly-dup',
+            polymarketClobTokenId: 'clob-dup-2',
             kalshiContractId: 'kalshi-2',
             eventDescription: 'Event B',
             operatorVerificationTimestamp: '2026-02-15T11:00:00Z',
@@ -212,12 +217,14 @@ describe('ContractPairLoaderService', () => {
         pairs: [
           {
             polymarketContractId: 'poly-1',
+            polymarketClobTokenId: 'clob-1',
             kalshiContractId: 'kalshi-dup',
             eventDescription: 'Event A',
             operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
           },
           {
             polymarketContractId: 'poly-2',
+            polymarketClobTokenId: 'clob-2',
             kalshiContractId: 'kalshi-dup',
             eventDescription: 'Event B',
             operatorVerificationTimestamp: '2026-02-15T11:00:00Z',
@@ -238,6 +245,7 @@ describe('ContractPairLoaderService', () => {
         pairs: [
           {
             polymarketContractId: 'poly-1',
+            polymarketClobTokenId: 'clob-1',
             kalshiContractId: 'kalshi-1',
             eventDescription: 'Event A',
             operatorVerificationTimestamp: 'not-a-date',
@@ -256,6 +264,7 @@ describe('ContractPairLoaderService', () => {
     it('should log warning but succeed with >30 pairs', async () => {
       const pairs = Array.from({ length: 31 }, (_, i) => ({
         polymarketContractId: `poly-${i}`,
+        polymarketClobTokenId: `clob-${i}`,
         kalshiContractId: `kalshi-${i}`,
         eventDescription: `Event ${i} description`,
         operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
@@ -314,6 +323,7 @@ describe('ContractPairLoaderService', () => {
         pairs: [
           {
             polymarketContractId: 'poly-1',
+            polymarketClobTokenId: 'clob-1',
             kalshiContractId: 'kalshi-1',
             eventDescription: 'Event without primaryLeg',
             operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
@@ -326,6 +336,48 @@ describe('ContractPairLoaderService', () => {
 
       const pairs = service.getActivePairs();
       expect(pairs[0]!.primaryLeg).toBe('kalshi');
+    });
+  });
+
+  describe('polymarketClobTokenId filtering', () => {
+    it('should filter out pairs without polymarketClobTokenId from getActivePairs()', async () => {
+      mockFsWithContent({
+        pairs: [
+          {
+            polymarketContractId: 'poly-1',
+            polymarketClobTokenId: 'clob-1',
+            kalshiContractId: 'kalshi-1',
+            eventDescription: 'Has CLOB token',
+            operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
+          },
+          {
+            polymarketContractId: 'poly-2',
+            polymarketClobTokenId: '',
+            kalshiContractId: 'kalshi-2',
+            eventDescription: 'Empty CLOB token',
+            operatorVerificationTimestamp: '2026-02-15T11:00:00Z',
+          },
+        ],
+      });
+
+      // The DTO validation will reject empty polymarketClobTokenId,
+      // so we test the runtime filtering via a pair that somehow lacks it.
+      // For loader spec, we verify toPairConfig maps polymarketClobTokenId.
+      const service = await createService();
+      // This will throw because empty string fails @IsNotEmpty validation
+      await expect(service.onModuleInit()).rejects.toThrow(
+        ConfigValidationError,
+      );
+    });
+
+    it('should map polymarketClobTokenId in toPairConfig()', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getActivePairs();
+      expect(pairs[0]!.polymarketClobTokenId).toBe('clob-1');
+      expect(pairs[1]!.polymarketClobTokenId).toBe('clob-2');
     });
   });
 

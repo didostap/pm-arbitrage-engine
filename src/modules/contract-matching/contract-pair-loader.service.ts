@@ -33,7 +33,20 @@ export class ContractPairLoaderService implements OnModuleInit {
   }
 
   getActivePairs(): ContractPairConfig[] {
-    return [...this.activePairs];
+    return this.activePairs.filter((pair) => {
+      if (!pair.polymarketClobTokenId) {
+        this.logger.warn({
+          message:
+            'Excluding pair from trading pipeline — missing polymarketClobTokenId',
+          data: {
+            matchId: pair.matchId,
+            polymarketContractId: pair.polymarketContractId,
+          },
+        });
+        return false;
+      }
+      return true;
+    });
   }
 
   findPairByContractId(contractId: string): ContractPairConfig | undefined {
@@ -158,6 +171,7 @@ export class ContractPairLoaderService implements OnModuleInit {
   private toPairConfig(dto: ContractPairDto): ContractPairConfig {
     return {
       polymarketContractId: dto.polymarketContractId,
+      polymarketClobTokenId: dto.polymarketClobTokenId,
       kalshiContractId: dto.kalshiContractId,
       eventDescription: dto.eventDescription,
       operatorVerificationTimestamp: new Date(

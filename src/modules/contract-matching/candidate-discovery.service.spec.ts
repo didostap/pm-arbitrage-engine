@@ -32,6 +32,9 @@ function makeContract(
     description: `Description ${id}`,
     platform,
     settlementDate: new Date('2026-06-15'),
+    ...(platform === PlatformId.POLYMARKET
+      ? { clobTokenId: `clob-${id}` }
+      : {}),
     ...overrides,
   };
 }
@@ -68,6 +71,7 @@ describe('CandidateDiscoveryService', () => {
     DISCOVERY_SETTLEMENT_WINDOW_DAYS: 7,
     DISCOVERY_MAX_CANDIDATES_PER_CONTRACT: 20,
     LLM_AUTO_APPROVE_THRESHOLD: 85,
+    LLM_MIN_REVIEW_THRESHOLD: 40,
   };
 
   beforeEach(() => {
@@ -231,6 +235,7 @@ describe('CandidateDiscoveryService', () => {
       expect(prisma.contractMatch.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           polymarketContractId: 'P1',
+          polymarketClobTokenId: 'clob-P1',
           kalshiContractId: 'K1',
           confidenceScore: 90,
           operatorApproved: true,
@@ -250,6 +255,7 @@ describe('CandidateDiscoveryService', () => {
         expect.objectContaining({
           stats: expect.objectContaining({
             autoApproved: 1,
+            autoRejected: 0,
             pendingReview: 0,
             scoringFailures: 0,
           }),
@@ -353,6 +359,7 @@ describe('CandidateDiscoveryService', () => {
           stats: expect.objectContaining({
             scoringFailures: 1,
             autoApproved: 1,
+            autoRejected: 0,
           }),
         }),
       );
@@ -512,11 +519,315 @@ describe('CandidateDiscoveryService', () => {
             candidatesPreFiltered: 0,
             pairsScored: 0,
             autoApproved: 0,
+            autoRejected: 0,
             pendingReview: 0,
             scoringFailures: 0,
           }),
         }),
       );
+    });
+
+    it('should auto-reject candidates with score below minReviewThreshold', async () => {
+      preFilter.filterCandidates
+        .mockReturnValueOnce([
+          {
+            id: 'K1',
+            description: 'Title K1',
+            combinedScore: 0.5,
+            tfidfScore: 0.4,
+            keywordOverlap: 0.6,
+          },
+        ])
+        .mockReturnValue([]);
+
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(25));
+
+      await service.runDiscovery();
+
+      // Match still created in DB (for record-keeping)
+      expect(prisma.contractMatch.create).toHaveBeenCalledTimes(1);
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          operatorRationale: expect.stringContaining(
+            'Auto-rejected: below review threshold',
+          ),
+        }),
+      });
+
+      // No match events emitted for auto-rejected
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_PENDING_REVIEW,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_AUTO_APPROVED,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_APPROVED,
+        expect.anything(),
+      );
+
+      // Stats should track autoRejected
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            autoRejected: 1,
+            pendingReview: 0,
+            autoApproved: 0,
+          }),
+        }),
+      );
+    });
+
+    it('should emit pending review for scores between minReviewThreshold and autoApproveThreshold', async () => {
+      preFilter.filterCandidates
+        .mockReturnValueOnce([
+          {
+            id: 'K1',
+            description: 'Title K1',
+            combinedScore: 0.5,
+            tfidfScore: 0.4,
+            keywordOverlap: 0.6,
+          },
+        ])
+        .mockReturnValue([]);
+
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(60));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          operatorRationale: null,
+        }),
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_PENDING_REVIEW,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            pendingReview: 1,
+            autoRejected: 0,
+            autoApproved: 0,
+          }),
+        }),
+      );
+    });
+
+    it('should store polymarketClobTokenId as null when clobTokenId is undefined', async () => {
+      const polyWithoutClob = [
+        makeContract(PlatformId.POLYMARKET, 'P-NOCLOB', {
+          clobTokenId: undefined,
+        }),
+      ];
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, polyWithoutClob],
+          [PlatformId.KALSHI, kalshiContracts],
+        ]),
+      );
+
+      preFilter.filterCandidates
+        .mockReturnValueOnce([
+          {
+            id: 'K1',
+            description: 'Title K1',
+            combinedScore: 0.5,
+            tfidfScore: 0.4,
+            keywordOverlap: 0.6,
+          },
+        ])
+        .mockReturnValue([]);
+
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(90));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          polymarketClobTokenId: null,
+        }),
+      });
+    });
+  });
+
+  describe('three-tier scoring boundary values', () => {
+    const polyContracts = [makeContract(PlatformId.POLYMARKET, 'P1')];
+    const kalshiContracts = [makeContract(PlatformId.KALSHI, 'K1')];
+
+    beforeEach(() => {
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, polyContracts],
+          [PlatformId.KALSHI, kalshiContracts],
+        ]),
+      );
+      preFilter.filterCandidates
+        .mockReturnValueOnce([
+          {
+            id: 'K1',
+            description: 'Title K1',
+            combinedScore: 0.5,
+            tfidfScore: 0.4,
+            keywordOverlap: 0.6,
+          },
+        ])
+        .mockReturnValue([]);
+    });
+
+    it('should auto-reject at score 39 (one below minReviewThreshold)', async () => {
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(39));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          operatorRationale: expect.stringContaining(
+            'Auto-rejected: below review threshold',
+          ),
+        }),
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            autoRejected: 1,
+            pendingReview: 0,
+            autoApproved: 0,
+          }),
+        }),
+      );
+    });
+
+    it('should pending-review at score 40 (exactly minReviewThreshold)', async () => {
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(40));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          operatorRationale: null,
+        }),
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_PENDING_REVIEW,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            pendingReview: 1,
+            autoRejected: 0,
+            autoApproved: 0,
+          }),
+        }),
+      );
+    });
+
+    it('should pending-review at score 84 (one below autoApproveThreshold)', async () => {
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(84));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          operatorRationale: null,
+        }),
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_PENDING_REVIEW,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            pendingReview: 1,
+            autoRejected: 0,
+            autoApproved: 0,
+          }),
+        }),
+      );
+    });
+
+    it('should auto-approve at score 85 (exactly autoApproveThreshold)', async () => {
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(makeScoringResult(85));
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: true,
+        }),
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_APPROVED,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_AUTO_APPROVED,
+        expect.anything(),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.objectContaining({
+          stats: expect.objectContaining({
+            autoApproved: 1,
+            pendingReview: 0,
+            autoRejected: 0,
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('threshold validation', () => {
+    it('should throw ConfigValidationError when minReviewThreshold >= autoApproveThreshold', () => {
+      configValues['LLM_MIN_REVIEW_THRESHOLD'] = 85;
+      configValues['LLM_AUTO_APPROVE_THRESHOLD'] = 85;
+
+      const invalidService = new CandidateDiscoveryService(
+        catalogSync as unknown as CatalogSyncService,
+        preFilter as unknown as PreFilterService,
+        scoringStrategy,
+        prisma as unknown as PrismaService,
+        eventEmitter as unknown as EventEmitter2,
+        configService,
+        schedulerRegistry as unknown as SchedulerRegistry,
+      );
+
+      expect(() => invalidService.onModuleInit()).toThrow(
+        'LLM_MIN_REVIEW_THRESHOLD',
+      );
+
+      // Reset
+      configValues['LLM_MIN_REVIEW_THRESHOLD'] = 40;
+      configValues['LLM_AUTO_APPROVE_THRESHOLD'] = 85;
     });
   });
 });

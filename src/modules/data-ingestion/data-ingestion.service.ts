@@ -119,7 +119,7 @@ export class DataIngestionService implements OnModuleInit {
 
     return {
       kalshiTickers: activePairs.map((p) => p.kalshiContractId),
-      polymarketTokens: activePairs.map((p) => p.polymarketContractId),
+      polymarketTokens: activePairs.map((p) => p.polymarketClobTokenId),
     };
   }
 

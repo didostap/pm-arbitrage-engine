@@ -73,6 +73,13 @@ export class MatchListQueryDto {
 export class MatchSummaryDto {
   @ApiProperty() matchId!: string;
   @ApiProperty() polymarketContractId!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Polymarket CLOB token ID for trading (null for auto-discovered pairs without CLOB mapping)',
+  })
+  polymarketClobTokenId!: string | null;
   @ApiProperty() kalshiContractId!: string;
   @ApiProperty() polymarketDescription!: string;
   @ApiProperty() kalshiDescription!: string;

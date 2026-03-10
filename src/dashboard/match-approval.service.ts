@@ -204,6 +204,7 @@ export class MatchApprovalService {
     return {
       matchId: match.matchId,
       polymarketContractId: match.polymarketContractId,
+      polymarketClobTokenId: match.polymarketClobTokenId ?? null,
       kalshiContractId: match.kalshiContractId,
       polymarketDescription: match.polymarketDescription ?? '',
       kalshiDescription: match.kalshiDescription ?? '',

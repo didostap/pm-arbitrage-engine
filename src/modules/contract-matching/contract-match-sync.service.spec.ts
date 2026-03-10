@@ -11,6 +11,7 @@ function makePair(
 ): ContractPairConfig {
   return {
     polymarketContractId: 'poly-1',
+    polymarketClobTokenId: 'mock-clob-token-1',
     kalshiContractId: 'kalshi-1',
     eventDescription: 'Will event A happen?',
     operatorVerificationTimestamp: new Date('2026-02-15T10:30:00Z'),
@@ -77,11 +78,13 @@ describe('ContractMatchSyncService', () => {
         },
         create: expect.objectContaining({
           polymarketContractId: 'poly-1',
+          polymarketClobTokenId: 'mock-clob-token-1',
           kalshiContractId: 'kalshi-1',
           operatorApproved: true,
         }),
         update: expect.objectContaining({
           operatorApproved: true,
+          polymarketClobTokenId: 'mock-clob-token-1',
         }),
       }),
     );
@@ -109,6 +112,7 @@ describe('ContractMatchSyncService', () => {
       polymarketDescription: 'Will event A happen?',
       kalshiDescription: 'Will event A happen?',
       operatorApprovalTimestamp: ts,
+      polymarketClobTokenId: 'mock-clob-token-1',
     });
 
     await service.syncPairsToDatabase();
@@ -348,6 +352,7 @@ describe('ContractMatchSyncService', () => {
       polymarketDescription: 'Will event A happen?',
       kalshiDescription: 'Will event A happen?',
       operatorApprovalTimestamp: ts,
+      polymarketClobTokenId: 'mock-clob-token-1',
     });
 
     const logSpy = vi.spyOn(service['logger'], 'log');

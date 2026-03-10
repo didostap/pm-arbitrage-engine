@@ -47,7 +47,9 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
           existing.operatorApproved === true &&
           existing.polymarketDescription === description &&
           existing.kalshiDescription === description &&
-          existing.operatorApprovalTimestamp?.getTime() === timestamp?.getTime()
+          existing.operatorApprovalTimestamp?.getTime() ===
+            timestamp?.getTime() &&
+          existing.polymarketClobTokenId === pair.polymarketClobTokenId
         ) {
           pair.matchId = existing.matchId;
           unchanged++;
@@ -66,9 +68,11 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
             operatorApprovalTimestamp: timestamp,
             polymarketDescription: description,
             kalshiDescription: description,
+            polymarketClobTokenId: pair.polymarketClobTokenId,
           },
           create: {
             polymarketContractId: pair.polymarketContractId,
+            polymarketClobTokenId: pair.polymarketClobTokenId,
             kalshiContractId: pair.kalshiContractId,
             polymarketDescription: description,
             kalshiDescription: description,

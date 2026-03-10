@@ -28,6 +28,7 @@ function makeOrderBook(
 function makePair(overrides?: Partial<ContractPairConfig>): ContractPairConfig {
   return {
     polymarketContractId: 'poly-contract-1',
+    polymarketClobTokenId: 'mock-clob-token-1',
     kalshiContractId: 'kalshi-contract-1',
     eventDescription: 'Will event X happen?',
     operatorVerificationTimestamp: new Date(),
@@ -409,10 +410,12 @@ describe('DetectionService', () => {
   it('should call connectors with correct contract IDs for each pair', async () => {
     const pair1 = makePair({
       polymarketContractId: 'poly-AAA',
+      polymarketClobTokenId: 'clob-AAA',
       kalshiContractId: 'kalshi-BBB',
     });
     const pair2 = makePair({
       polymarketContractId: 'poly-CCC',
+      polymarketClobTokenId: 'clob-CCC',
       kalshiContractId: 'kalshi-DDD',
     });
     contractPairLoader.getActivePairs.mockReturnValue([pair1, pair2]);
@@ -428,8 +431,8 @@ describe('DetectionService', () => {
 
     expect(kalshiConnector.getOrderBook).toHaveBeenCalledWith('kalshi-BBB');
     expect(kalshiConnector.getOrderBook).toHaveBeenCalledWith('kalshi-DDD');
-    expect(polymarketConnector.getOrderBook).toHaveBeenCalledWith('poly-AAA');
-    expect(polymarketConnector.getOrderBook).toHaveBeenCalledWith('poly-CCC');
+    expect(polymarketConnector.getOrderBook).toHaveBeenCalledWith('clob-AAA');
+    expect(polymarketConnector.getOrderBook).toHaveBeenCalledWith('clob-CCC');
   });
 
   // 6.5.5a: Sell leg must use best bid (executable sell price), not best ask

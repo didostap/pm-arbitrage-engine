@@ -66,6 +66,7 @@ model PlatformHealthLog {
 model ContractMatch {
   matchId                   String    @id @default(uuid()) @map("match_id")
   polymarketContractId      String    @map("polymarket_contract_id")
+  polymarketClobTokenId     String?   @map("polymarket_clob_token_id")
   kalshiContractId          String    @map("kalshi_contract_id")
   polymarketDescription     String?   @map("polymarket_description")
   kalshiDescription         String?   @map("kalshi_description")
@@ -91,6 +92,7 @@ model ContractMatch {
 
   @@unique([polymarketContractId, kalshiContractId])
   @@index([operatorApproved])
+  @@index([polymarketClobTokenId])
   @@index([resolutionDiverged])
   @@index([confidenceScore])
   @@index([resolutionTimestamp])

@@ -86,7 +86,7 @@ export class DetectionService {
 
       try {
         polymarketOrderBook = await this.polymarketConnector.getOrderBook(
-          pair.polymarketContractId,
+          pair.polymarketClobTokenId,
         );
       } catch (error) {
         this.logger.error({

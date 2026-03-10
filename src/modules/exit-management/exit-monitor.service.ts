@@ -259,7 +259,7 @@ export class ExitMonitorService {
     );
     const polymarketClosePrice = await this.getClosePrice(
       this.polymarketConnector,
-      position.pair.polymarketContractId,
+      position.pair.polymarketClobTokenId!,
       position.polymarketSide,
       polymarketEffectiveSize,
     );
@@ -402,9 +402,9 @@ export class ExitMonitorService {
       : this.kalshiConnector;
     const primaryContractId = isPrimaryKalshi
       ? position.pair.kalshiContractId
-      : position.pair.polymarketContractId;
+      : position.pair.polymarketClobTokenId!;
     const secondaryContractId = isPrimaryKalshi
-      ? position.pair.polymarketContractId
+      ? position.pair.polymarketClobTokenId!
       : position.pair.kalshiContractId;
     const primaryCloseSide = isPrimaryKalshi
       ? kalshiCloseSide
