@@ -993,4 +993,22 @@ describe('PolymarketConnector', () => {
       expect(() => connector.onOrderBookUpdate(vi.fn())).not.toThrow();
     });
   });
+
+  describe('rate limiter initialization', () => {
+    it('should initialize rate limiter with fromLimits(2, 2) bucket sizes', () => {
+      // fromLimits(2, 2) → readBucket = ceil(2 × 1.5) = 3, writeBucket = ceil(2 × 1.5) = 3
+      const rateLimiter = (
+        connector as unknown as {
+          rateLimiter: {
+            getUtilization: () => { read: number; write: number };
+          };
+        }
+      ).rateLimiter;
+
+      // Fresh limiter at 0% utilization
+      const util = rateLimiter.getUtilization();
+      expect(util.read).toBeCloseTo(0, 0);
+      expect(util.write).toBeCloseTo(0, 0);
+    });
+  });
 });

@@ -9,6 +9,7 @@ const mockGetMarketOrderbook = vi.fn();
 const mockCreateOrder = vi.fn();
 const mockGetOrder = vi.fn();
 const mockCancelOrder = vi.fn();
+const mockGetAccountApiLimits = vi.fn();
 
 // Mock withRetry to execute fn once without retries (avoids real delay in tests)
 vi.mock('../../common/utils/index.js', async (importOriginal) => {
@@ -34,6 +35,9 @@ vi.mock('kalshi-typescript', () => {
     getOrder = mockGetOrder;
     cancelOrder = mockCancelOrder;
   }
+  class MockAccountApi {
+    getAccountApiLimits = mockGetAccountApiLimits;
+  }
   class MockKalshiAuth {
     generateAuthHeaders() {
       return {};
@@ -44,6 +48,7 @@ vi.mock('kalshi-typescript', () => {
     MarketApi: MockMarketApi,
     PortfolioApi: MockPortfolioApi,
     OrdersApi: MockOrdersApi,
+    AccountApi: MockAccountApi,
     KalshiAuth: MockKalshiAuth,
   };
 });
@@ -55,6 +60,14 @@ vi.mock('kalshi-typescript/dist/api/orders-api.js', () => {
     cancelOrder = mockCancelOrder;
   }
   return { OrdersApi: MockOrdersApi };
+});
+
+// Mock deep import for AccountApi
+vi.mock('kalshi-typescript/dist/api/account-api.js', () => {
+  class MockAccountApi {
+    getAccountApiLimits = mockGetAccountApiLimits;
+  }
+  return { AccountApi: MockAccountApi };
 });
 
 // Mock ws
@@ -82,6 +95,7 @@ describe('KalshiConnector', () => {
                 KALSHI_API_KEY_ID: 'test-key-id',
                 KALSHI_PRIVATE_KEY_PATH: '/path/to/test.pem',
                 KALSHI_API_BASE_URL: 'https://demo-api.kalshi.co',
+                KALSHI_API_TIER: 'BASIC',
               };
               return config[key] ?? defaultValue;
             }),
@@ -512,6 +526,97 @@ describe('KalshiConnector', () => {
   describe('onOrderBookUpdate', () => {
     it('should accept callback without error', () => {
       expect(() => connector.onOrderBookUpdate(vi.fn())).not.toThrow();
+    });
+  });
+
+  describe('initializeRateLimiterFromApi (via onModuleInit)', () => {
+    it('should upgrade rate limiter when API returns valid limits', async () => {
+      // Use PREMIER limits (100/100) to distinguish from BASIC default (20/10)
+      mockGetAccountApiLimits.mockResolvedValue({
+        data: { usage_tier: 'PREMIER', read_limit: 100, write_limit: 100 },
+      });
+
+      await connector.onModuleInit();
+
+      expect(mockGetAccountApiLimits).toHaveBeenCalledOnce();
+
+      // Verify limiter was upgraded by checking bucket size
+      // PREMIER fromLimits(100, 100) → readBucket = ceil(100 × 1.5) = 150
+      // BASIC fromTier('BASIC') → readBucket = ceil(20 × 1.5) = 30
+      const rateLimiter = (
+        connector as unknown as {
+          rateLimiter: {
+            acquireRead: () => Promise<void>;
+            getUtilization: () => { read: number; write: number };
+          };
+        }
+      ).rateLimiter;
+      await rateLimiter.acquireRead();
+      const util = rateLimiter.getUtilization();
+      // 1/150 ≈ 0.67% (PREMIER) vs 1/30 ≈ 3.33% (BASIC)
+      expect(util.read).toBeLessThan(1);
+    });
+
+    it('should keep default limiter when API returns invalid data', async () => {
+      mockGetAccountApiLimits.mockResolvedValue({
+        data: { usage_tier: 'BASIC', read_limit: 0, write_limit: 10 },
+      });
+
+      const loggerSpy = vi.spyOn(connector['logger'], 'warn');
+
+      await connector.onModuleInit();
+
+      expect(mockGetAccountApiLimits).toHaveBeenCalledOnce();
+      expect(loggerSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Invalid rate limit data from API; keeping default limiter',
+        }),
+      );
+    });
+
+    it('should keep default limiter when API call fails', async () => {
+      mockGetAccountApiLimits.mockRejectedValue(new Error('Network error'));
+
+      const loggerSpy = vi.spyOn(connector['logger'], 'warn');
+
+      await connector.onModuleInit();
+
+      expect(mockGetAccountApiLimits).toHaveBeenCalledOnce();
+      expect(loggerSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'Failed to fetch API rate limits; keeping default tier-based limiter',
+        }),
+      );
+    });
+
+    it('should skip API call when KALSHI_API_KEY_ID is empty', async () => {
+      // Create connector with empty API key
+      const module = await Test.createTestingModule({
+        providers: [
+          KalshiConnector,
+          {
+            provide: ConfigService,
+            useValue: {
+              get: vi.fn((key: string, defaultValue?: string) => {
+                const config: Record<string, string> = {
+                  KALSHI_API_KEY_ID: '',
+                  KALSHI_PRIVATE_KEY_PATH: '/path/to/test.pem',
+                  KALSHI_API_BASE_URL: 'https://demo-api.kalshi.co',
+                  KALSHI_API_TIER: 'BASIC',
+                };
+                return config[key] ?? defaultValue;
+              }),
+            },
+          },
+        ],
+      }).compile();
+
+      const unconfiguredConnector =
+        module.get<KalshiConnector>(KalshiConnector);
+      await unconfiguredConnector.onModuleInit();
+
+      expect(mockGetAccountApiLimits).not.toHaveBeenCalled();
     });
   });
 });

@@ -74,9 +74,13 @@ export class PolymarketConnector
     );
     this.chainId = this.configService.get<number>('POLYMARKET_CHAIN_ID', 137);
 
-    // Polymarket rate limits: ~100 req/min public, 300 req/10s for /books
-    // Bucket sized for burst headroom: 8 pairs per cycle needs ~8 reads, 20 gives 2.5x margin
-    this.rateLimiter = new RateLimiter(20, 4, 1, this.logger);
+    // Polymarket rate limits: ~100 req/min (~1.67/s), no published write limit.
+    // fromLimits(2, 2) → readBucket: 3 tokens (ceil(2×1.5)), readRefill: 1.6/s (2×0.8)
+    // Note: bucket size (3 tokens) is sized for post-batch-migration read patterns (~1-3 reads/cycle).
+    // If batch order book fetch (Story 6-5-2a) is reverted or read patterns increase
+    // (e.g., retry storms), revisit these limits. withRetry() exponential backoff provides
+    // additional mitigation.
+    this.rateLimiter = RateLimiter.fromLimits(2, 2, this.logger);
   }
 
   async onModuleInit(): Promise<void> {

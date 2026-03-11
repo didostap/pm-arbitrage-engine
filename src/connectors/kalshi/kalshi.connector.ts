@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
 import { Configuration, MarketApi } from 'kalshi-typescript';
 import { OrdersApi } from 'kalshi-typescript/dist/api/orders-api.js';
+import { AccountApi } from 'kalshi-typescript/dist/api/account-api.js';
 import type { IPlatformConnector } from '../../common/interfaces/index.js';
 import type {
   CancelResult,
@@ -62,6 +63,20 @@ interface KalshiOrdersApi {
   cancelOrder(orderId: string): Promise<KalshiCancelOrderResponse>;
 }
 
+/** Minimal shape of the Kalshi SDK AccountApi response for rate limits. */
+interface KalshiAccountApiLimitsResponse {
+  data: {
+    usage_tier: string;
+    read_limit: number;
+    write_limit: number;
+  };
+}
+
+/** Minimal shape of Kalshi SDK AccountApi. */
+interface KalshiAccountApi {
+  getAccountApiLimits(): Promise<KalshiAccountApiLimitsResponse>;
+}
+
 @Injectable()
 export class KalshiConnector
   implements IPlatformConnector, OnModuleInit, OnModuleDestroy
@@ -69,8 +84,9 @@ export class KalshiConnector
   private readonly logger = new Logger(KalshiConnector.name);
   private readonly marketApi: MarketApi;
   private readonly ordersApi: KalshiOrdersApi;
+  private readonly accountApi: KalshiAccountApi;
   private readonly wsClient: KalshiWebSocketClient;
-  private readonly rateLimiter: RateLimiter;
+  private rateLimiter: RateLimiter;
   private lastHeartbeat: Date | null = null;
   private connected = false;
 
@@ -110,6 +126,9 @@ export class KalshiConnector
     this.ordersApi = new OrdersApi(
       config as ConstructorParameters<typeof OrdersApi>[0],
     ) as unknown as KalshiOrdersApi;
+    this.accountApi = new AccountApi(
+      config as ConstructorParameters<typeof AccountApi>[0],
+    ) as unknown as KalshiAccountApi;
 
     // Kalshi WS endpoint: .../trade-api/ws/v2 (not .../trade-api/v2/ws)
     const wsUrl = baseUrl
@@ -122,9 +141,9 @@ export class KalshiConnector
       wsUrl,
     });
 
-    // Kalshi BASIC tier: 20 read/s, 10 write/s
-    // Bucket sized for burst headroom: 8 pairs + order polls per cycle, 24 gives ~2x margin
-    this.rateLimiter = new RateLimiter(24, 10, 1, this.logger);
+    // Default rate limiter from tier config; may be upgraded in onModuleInit() via API
+    const tier = this.configService.get<string>('KALSHI_API_TIER', 'BASIC');
+    this.rateLimiter = RateLimiter.fromTier(tier, this.logger);
   }
 
   async onModuleInit(): Promise<void> {
@@ -140,6 +159,8 @@ export class KalshiConnector
       return;
     }
 
+    await this.initializeRateLimiterFromApi();
+
     try {
       await this.connect();
     } catch (error) {
@@ -148,6 +169,56 @@ export class KalshiConnector
       this.logger.error({
         message:
           'Kalshi initial connection failed; will retry via WebSocket reconnect',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async initializeRateLimiterFromApi(): Promise<void> {
+    try {
+      const response = await this.accountApi.getAccountApiLimits();
+      const { read_limit, write_limit, usage_tier } = response.data;
+
+      if (
+        !read_limit ||
+        !write_limit ||
+        read_limit <= 0 ||
+        write_limit <= 0 ||
+        isNaN(read_limit) ||
+        isNaN(write_limit)
+      ) {
+        this.logger.warn({
+          message: 'Invalid rate limit data from API; keeping default limiter',
+          module: 'connector',
+          timestamp: new Date().toISOString(),
+          platformId: PlatformId.KALSHI,
+          metadata: { read_limit, write_limit, usage_tier },
+        });
+        return;
+      }
+
+      this.rateLimiter = RateLimiter.fromLimits(
+        read_limit,
+        write_limit,
+        this.logger,
+      );
+
+      this.logger.log({
+        message: 'Rate limiter upgraded from API',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: { usage_tier, read_limit, write_limit },
+      });
+    } catch (error) {
+      this.logger.warn({
+        message:
+          'Failed to fetch API rate limits; keeping default tier-based limiter',
         module: 'connector',
         timestamp: new Date().toISOString(),
         platformId: PlatformId.KALSHI,

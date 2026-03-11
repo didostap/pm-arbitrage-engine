@@ -14,6 +14,7 @@ export const RATE_LIMIT_TIERS: Record<string, RateLimitTier> = {
 
 const SAFETY_BUFFER = 0.8; // Use only 80% of published limit
 const ALERT_THRESHOLD = 0.7; // Alert at 70% utilization
+const BURST_MULTIPLIER = 1.5; // Burst bucket = 1.5× sustained rate
 
 /**
  * Dual-bucket token bucket rate limiter.
@@ -29,7 +30,8 @@ export class RateLimiter {
   constructor(
     private readonly maxReadTokens: number,
     private readonly maxWriteTokens: number,
-    private readonly refillRatePerSec: number = 1,
+    private readonly readRefillRatePerSec: number,
+    private readonly writeRefillRatePerSec: number,
     logger?: Logger,
   ) {
     this.logger = logger ?? new Logger(RateLimiter.name);
@@ -46,24 +48,54 @@ export class RateLimiter {
     if (!tierConfig) {
       throw new Error(`Unknown rate limit tier: ${tier}`);
     }
-    return new RateLimiter(
-      Math.floor(tierConfig.read * SAFETY_BUFFER),
-      Math.floor(tierConfig.write * SAFETY_BUFFER),
-      1,
+    return RateLimiter.fromLimits(tierConfig.read, tierConfig.write, logger);
+  }
+
+  /**
+   * Create a rate limiter from raw per-second limits.
+   * Bucket size = ceil(limit × BURST_MULTIPLIER), refill rate = limit × SAFETY_BUFFER.
+   */
+  static fromLimits(
+    readLimit: number,
+    writeLimit: number,
+    logger?: Logger,
+  ): RateLimiter {
+    if (readLimit <= 0 || writeLimit <= 0) {
+      throw new Error(
+        `Invalid rate limits: readLimit=${readLimit}, writeLimit=${writeLimit} (must be positive)`,
+      );
+    }
+    const readBurst = Math.ceil(readLimit * BURST_MULTIPLIER);
+    const writeBurst = Math.ceil(writeLimit * BURST_MULTIPLIER);
+    const readSustained = readLimit * SAFETY_BUFFER;
+    const writeSustained = writeLimit * SAFETY_BUFFER;
+
+    const limiter = new RateLimiter(
+      readBurst,
+      writeBurst,
+      readSustained,
+      writeSustained,
       logger,
     );
+
+    limiter.logger.log({
+      message: 'Rate limiter configured',
+      data: { readBurst, writeBurst, readSustained, writeSustained },
+    });
+
+    return limiter;
   }
 
   async acquireRead(): Promise<void> {
     this.refill();
-    await this.waitIfNeeded(this.readTokens);
+    await this.waitIfNeeded(this.readTokens, this.readRefillRatePerSec);
     this.readTokens--;
     this.checkUtilization('read', this.readTokens, this.maxReadTokens);
   }
 
   async acquireWrite(): Promise<void> {
     this.refill();
-    await this.waitIfNeeded(this.writeTokens);
+    await this.waitIfNeeded(this.writeTokens, this.writeRefillRatePerSec);
     this.writeTokens--;
     this.checkUtilization('write', this.writeTokens, this.maxWriteTokens);
   }
@@ -93,9 +125,12 @@ export class RateLimiter {
     }
   }
 
-  private async waitIfNeeded(tokens: number): Promise<void> {
+  private async waitIfNeeded(
+    tokens: number,
+    refillRate: number,
+  ): Promise<void> {
     if (tokens < 1) {
-      const waitMs = (1 / this.refillRatePerSec) * 1000;
+      const waitMs = (1 / refillRate) * 1000;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       this.refill();
     }
@@ -104,16 +139,17 @@ export class RateLimiter {
   private refill(): void {
     const now = Date.now();
     const elapsed = (now - this.lastRefill) / 1000;
-    const tokensToAdd = elapsed * this.refillRatePerSec;
+    const readToAdd = elapsed * this.readRefillRatePerSec;
+    const writeToAdd = elapsed * this.writeRefillRatePerSec;
 
-    if (tokensToAdd >= 0.01) {
+    if (readToAdd >= 0.01 || writeToAdd >= 0.01) {
       this.readTokens = Math.min(
         this.maxReadTokens,
-        this.readTokens + tokensToAdd,
+        this.readTokens + readToAdd,
       );
       this.writeTokens = Math.min(
         this.maxWriteTokens,
-        this.writeTokens + tokensToAdd,
+        this.writeTokens + writeToAdd,
       );
       this.lastRefill = now;
     }
