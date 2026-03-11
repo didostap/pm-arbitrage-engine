@@ -28,7 +28,13 @@ import type {
   ReconciliationResult,
   ReconciliationDiscrepancy,
 } from '../common/types/reconciliation.types';
+import type { PositionId, PairId } from '../common/types/branded.type';
 import { AuditLogService } from '../modules/monitoring/audit-log.service';
+import {
+  asOrderId,
+  asPositionId,
+  asPairId,
+} from '../common/types/branded.type';
 
 const API_CALL_TIMEOUT_MS = 10_000;
 const OVERALL_TIMEOUT_MS = 60_000;
@@ -246,7 +252,7 @@ export class StartupReconciliationService {
 
       try {
         const platformStatus = await this.callWithTimeout(
-          () => connector.getOrder(order.orderId),
+          () => connector.getOrder(asOrderId(order.orderId)),
           API_CALL_TIMEOUT_MS,
         );
 
@@ -291,8 +297,10 @@ export class StartupReconciliationService {
           );
 
           discrepancies.push({
-            positionId: matchingPosition?.positionId ?? order.pairId,
-            pairId: order.pairId,
+            positionId: asPositionId(
+              matchingPosition?.positionId ?? order.pairId,
+            ),
+            pairId: asPairId(order.pairId),
             discrepancyType: 'order_not_found',
             localState: 'PENDING',
             platformState: 'not_found',
@@ -347,8 +355,8 @@ export class StartupReconciliationService {
       if (position.kalshiOrder) {
         if (!kalshiAvailable) {
           posDiscrepancies.push({
-            positionId: position.positionId,
-            pairId: position.pairId,
+            positionId: asPositionId(position.positionId),
+            pairId: asPairId(position.pairId),
             discrepancyType: 'platform_unavailable',
             localState: position.kalshiOrder.status,
             platformState: 'platform_unavailable',
@@ -358,14 +366,16 @@ export class StartupReconciliationService {
           try {
             const result = await this.callWithTimeout(
               () =>
-                this.kalshiConnector.getOrder(position.kalshiOrder!.orderId),
+                this.kalshiConnector.getOrder(
+                  asOrderId(position.kalshiOrder!.orderId),
+                ),
               API_CALL_TIMEOUT_MS,
             );
             ordersVerified++;
 
             const disc = this.checkOrderDiscrepancy(
-              position.positionId,
-              position.pairId,
+              asPositionId(position.positionId),
+              asPairId(position.pairId),
               position.kalshiOrder.status,
               result.status,
               PlatformId.KALSHI,
@@ -391,8 +401,8 @@ export class StartupReconciliationService {
       if (position.polymarketOrder) {
         if (!polymarketAvailable) {
           posDiscrepancies.push({
-            positionId: position.positionId,
-            pairId: position.pairId,
+            positionId: asPositionId(position.positionId),
+            pairId: asPairId(position.pairId),
             discrepancyType: 'platform_unavailable',
             localState: position.polymarketOrder.status,
             platformState: 'platform_unavailable',
@@ -404,15 +414,15 @@ export class StartupReconciliationService {
             const result = await this.callWithTimeout(
               () =>
                 this.polymarketConnector.getOrder(
-                  position.polymarketOrder!.orderId,
+                  asOrderId(position.polymarketOrder!.orderId),
                 ),
               API_CALL_TIMEOUT_MS,
             );
             ordersVerified++;
 
             const disc = this.checkOrderDiscrepancy(
-              position.positionId,
-              position.pairId,
+              asPositionId(position.positionId),
+              asPairId(position.pairId),
               position.polymarketOrder.status,
               result.status,
               PlatformId.POLYMARKET,
@@ -494,7 +504,7 @@ export class StartupReconciliationService {
       await this.riskManager.closePosition(
         new Decimal(0),
         new Decimal(0),
-        position.pairId,
+        asPairId(position.pairId),
       );
     }
 
@@ -580,14 +590,14 @@ export class StartupReconciliationService {
       // Reconciliation runs at startup before mode context is relevant.
       // Hardcoding false/false for live defaults.
       new OrderFilledEvent(
-        order.orderId,
+        asOrderId(order.orderId),
         isKalshi ? PlatformId.KALSHI : PlatformId.POLYMARKET,
         order.side,
         0, // original price not available here
         0, // original size not available here
         platformStatus.fillPrice ?? 0,
         platformStatus.fillSize ?? 0,
-        matchingPosition.positionId,
+        asPositionId(matchingPosition.positionId),
         undefined,
         false,
         false,
@@ -608,8 +618,8 @@ export class StartupReconciliationService {
   }
 
   private checkOrderDiscrepancy(
-    positionId: string,
-    pairId: string,
+    positionId: PositionId,
+    pairId: PairId,
     localStatus: string,
     platformStatus: string,
     _platform: PlatformId,

@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import type { OpportunityId, PairId, ReservationId } from './branded.type.js';
 
 export interface RiskDecision {
   approved: boolean;
@@ -27,16 +28,16 @@ export interface RiskConfig {
 }
 
 export interface ReservationRequest {
-  opportunityId: string;
+  opportunityId: OpportunityId;
   recommendedPositionSizeUsd: Decimal;
-  pairId: string;
+  pairId: PairId;
   isPaper: boolean;
 }
 
 export interface BudgetReservation {
-  reservationId: string;
-  opportunityId: string;
-  pairId: string;
+  reservationId: ReservationId;
+  opportunityId: OpportunityId;
+  pairId: PairId;
   isPaper: boolean;
   reservedPositionSlots: number;
   reservedCapitalUsd: Decimal;
@@ -51,7 +52,7 @@ export interface RankedOpportunity {
 }
 
 export interface ExecutionQueueResult {
-  opportunityId: string;
+  opportunityId: OpportunityId;
   reserved: boolean;
   executed: boolean;
   committed: boolean;

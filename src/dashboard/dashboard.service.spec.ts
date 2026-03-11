@@ -211,7 +211,7 @@ describe('DashboardService', () => {
 
       (configService.get as ReturnType<typeof vi.fn>).mockImplementation(
         (key: string, defaultValue?: string) => {
-          if (key === 'BANKROLL_USD') return '10000';
+          if (key === 'RISK_BANKROLL_USD') return '10000';
           const config: Record<string, string> = {
             PLATFORM_MODE_KALSHI: 'paper',
             PLATFORM_MODE_POLYMARKET: 'paper',
@@ -228,7 +228,7 @@ describe('DashboardService', () => {
       expect(result.availableCapital).toBe('9400');
     });
 
-    it('should return null balance fields when BANKROLL_USD not configured', async () => {
+    it('should return null balance fields when RISK_BANKROLL_USD not configured', async () => {
       (
         prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
       ).mockResolvedValue([]);
@@ -277,7 +277,7 @@ describe('DashboardService', () => {
 
       (configService.get as ReturnType<typeof vi.fn>).mockImplementation(
         (key: string, defaultValue?: string) => {
-          if (key === 'BANKROLL_USD') return '10000';
+          if (key === 'RISK_BANKROLL_USD') return '10000';
           const config: Record<string, string> = {
             PLATFORM_MODE_KALSHI: 'paper',
             PLATFORM_MODE_POLYMARKET: 'paper',

@@ -31,6 +31,13 @@ import {
   RISK_ERROR_CODES,
 } from '../../common/errors/risk-limit-error';
 import { randomUUID } from 'crypto';
+import {
+  asReservationId,
+  asOpportunityId,
+  type OpportunityId,
+  type ReservationId,
+  type PairId,
+} from '../../common/types/branded.type';
 
 export const HALT_REASONS = {
   DAILY_LOSS_LIMIT: 'daily_loss_limit',
@@ -409,7 +416,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   async processOverride(
-    opportunityId: string,
+    opportunityId: OpportunityId,
     rationale: string,
   ): Promise<RiskDecision> {
     // FIRST: Check if daily loss halt is active — cannot be overridden
@@ -768,7 +775,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
 
     const reservation: BudgetReservation = {
-      reservationId: randomUUID(),
+      reservationId: asReservationId(randomUUID()),
       opportunityId: request.opportunityId,
       pairId: request.pairId,
       isPaper: request.isPaper,
@@ -806,7 +813,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     return reservation;
   }
 
-  async commitReservation(reservationId: string): Promise<void> {
+  async commitReservation(reservationId: ReservationId): Promise<void> {
     const reservation = this.reservations.get(reservationId);
     if (!reservation) {
       throw new RiskLimitError(
@@ -850,7 +857,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState();
   }
 
-  async releaseReservation(reservationId: string): Promise<void> {
+  async releaseReservation(reservationId: ReservationId): Promise<void> {
     const reservation = this.reservations.get(reservationId);
     if (!reservation) {
       throw new RiskLimitError(
@@ -891,7 +898,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   async adjustReservation(
-    reservationId: string,
+    reservationId: ReservationId,
     newCapitalUsd: Decimal,
   ): Promise<void> {
     const reservation = this.reservations.get(reservationId);
@@ -927,7 +934,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   async closePosition(
     capitalReturned: unknown,
     pnlDelta: unknown,
-    pairId?: string,
+    pairId?: PairId,
   ): Promise<void> {
     if (pairId) {
       this.paperActivePairIds.delete(pairId);
@@ -954,8 +961,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     this.eventEmitter.emit(
       EVENT_NAMES.BUDGET_RELEASED,
       new BudgetReleasedEvent(
-        'position-close',
-        'position-close',
+        asReservationId('position-close'),
+        asOpportunityId('position-close'),
         capital.toString(),
       ),
     );
@@ -995,8 +1002,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     this.eventEmitter.emit(
       EVENT_NAMES.BUDGET_RELEASED,
       new BudgetReleasedEvent(
-        'partial-exit',
-        'partial-exit',
+        asReservationId('partial-exit'),
+        asOpportunityId('partial-exit'),
         capital.toString(),
       ),
     );

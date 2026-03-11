@@ -42,6 +42,12 @@ import { OrderRepository } from '../../persistence/repositories/order.repository
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import type { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-opportunity.type';
 import { FinancialMath } from '../../common/utils/financial-math';
+import {
+  asContractId,
+  asOrderId,
+  asPairId,
+  asPositionId,
+} from '../../common/types/branded.type';
 
 @Injectable()
 export class ExecutionService implements IExecutionEngine {
@@ -490,7 +496,7 @@ export class ExecutionService implements IExecutionEngine {
     let primaryOrder: OrderResult;
     try {
       primaryOrder = await primaryConnector.submitOrder({
-        contractId: primaryContractId,
+        contractId: asContractId(primaryContractId),
         side: primarySide,
         quantity: targetSize,
         price: targetPrice.toNumber(),
@@ -539,7 +545,7 @@ export class ExecutionService implements IExecutionEngine {
     let secondaryOrder: OrderResult;
     try {
       secondaryOrder = await secondaryConnector.submitOrder({
-        contractId: secondaryContractId,
+        contractId: asContractId(secondaryContractId),
         side: secondarySide,
         quantity: secondarySize,
         price: secondaryTargetPrice.toNumber(),
@@ -659,8 +665,8 @@ export class ExecutionService implements IExecutionEngine {
 
     try {
       const [primaryBook, secondaryBook] = await Promise.all([
-        primaryConnector.getOrderBook(primaryContractId),
-        secondaryConnector.getOrderBook(secondaryContractId),
+        primaryConnector.getOrderBook(asContractId(primaryContractId)),
+        secondaryConnector.getOrderBook(asContractId(secondaryContractId)),
       ]);
 
       // Primary leg close-side price
@@ -801,14 +807,14 @@ export class ExecutionService implements IExecutionEngine {
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
       new OrderFilledEvent(
-        primaryOrderRecord.orderId,
+        asOrderId(primaryOrderRecord.orderId),
         primaryPlatform,
         primarySide,
         targetPrice.toNumber(),
         targetSize,
         primaryOrder.filledPrice,
         primaryOrder.filledQuantity,
-        position.positionId,
+        asPositionId(position.positionId),
         undefined,
         isPaper,
         mixedMode,
@@ -817,14 +823,14 @@ export class ExecutionService implements IExecutionEngine {
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
       new OrderFilledEvent(
-        secondaryOrderRecord.orderId,
+        asOrderId(secondaryOrderRecord.orderId),
         secondaryPlatform,
         secondarySide,
         secondaryTargetPrice.toNumber(),
         secondarySize,
         secondaryOrder.filledPrice,
         secondaryOrder.filledQuantity,
-        position.positionId,
+        asPositionId(position.positionId),
         undefined,
         isPaper,
         mixedMode,
@@ -858,7 +864,7 @@ export class ExecutionService implements IExecutionEngine {
     return {
       success: true,
       partialFill: false,
-      positionId: position.positionId,
+      positionId: asPositionId(position.positionId),
       primaryOrder,
       secondaryOrder,
       actualCapitalUsed,
@@ -873,7 +879,7 @@ export class ExecutionService implements IExecutionEngine {
     platformId: PlatformId,
   ): Promise<number> {
     try {
-      const book = await connector.getOrderBook(contractId);
+      const book = await connector.getOrderBook(asContractId(contractId));
       const levels: PriceLevel[] = side === 'buy' ? book.asks : book.bids;
 
       let availableQty = new Decimal(0);
@@ -901,7 +907,7 @@ export class ExecutionService implements IExecutionEngine {
         EVENT_NAMES.DEPTH_CHECK_FAILED,
         new DepthCheckFailedEvent(
           platformId,
-          contractId,
+          asContractId(contractId),
           side,
           error instanceof Error ? error.constructor.name : 'Unknown',
           error instanceof Error ? error.message : String(error),
@@ -976,14 +982,14 @@ export class ExecutionService implements IExecutionEngine {
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
       new OrderFilledEvent(
-        primaryOrderId,
+        asOrderId(primaryOrderId),
         primaryPlatform,
         primarySide,
         primaryPrice.toNumber(),
         primarySize,
         primaryOrder.filledPrice,
         primaryOrder.filledQuantity,
-        position.positionId,
+        asPositionId(position.positionId),
         undefined,
         isPaper,
         mixedMode,
@@ -1016,11 +1022,15 @@ export class ExecutionService implements IExecutionEngine {
     const { pairConfig } = enriched.dislocation;
     const [kalshiBook, polymarketBook] = await Promise.all([
       withTimeout(
-        this.kalshiConnector.getOrderBook(pairConfig.kalshiContractId),
+        this.kalshiConnector.getOrderBook(
+          asContractId(pairConfig.kalshiContractId),
+        ),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),
       withTimeout(
-        this.polymarketConnector.getOrderBook(pairConfig.polymarketClobTokenId),
+        this.polymarketConnector.getOrderBook(
+          asContractId(pairConfig.polymarketClobTokenId),
+        ),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),
     ]);
@@ -1082,12 +1092,12 @@ export class ExecutionService implements IExecutionEngine {
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_EXPOSURE,
       new SingleLegExposureEvent(
-        position.positionId,
-        pairId,
+        asPositionId(position.positionId),
+        asPairId(pairId),
         enriched.netEdge.toNumber(),
         {
           platform: primaryPlatform,
-          orderId: primaryOrderId,
+          orderId: asOrderId(primaryOrderId),
           side: primarySide,
           price: primaryPrice.toNumber(),
           size: primarySize,
@@ -1128,7 +1138,7 @@ export class ExecutionService implements IExecutionEngine {
     return {
       success: false,
       partialFill: true,
-      positionId: position.positionId,
+      positionId: asPositionId(position.positionId),
       primaryOrder,
       error,
     };

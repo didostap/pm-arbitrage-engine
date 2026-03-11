@@ -8,6 +8,7 @@ import {
 } from '../../common/errors/system-health-error';
 import { EVENT_NAMES } from '../../common/events';
 import { ResolutionDivergedEvent } from '../../common/events/resolution-diverged.event';
+import { asMatchId } from '../../common/types/branded.type';
 
 @Injectable()
 export class KnowledgeBaseService {
@@ -119,7 +120,7 @@ export class KnowledgeBaseService {
         this.eventEmitter.emit(
           EVENT_NAMES.RESOLUTION_DIVERGED,
           new ResolutionDivergedEvent(
-            matchId,
+            asMatchId(matchId),
             polyNorm,
             kalshiNorm,
             notes ?? null,

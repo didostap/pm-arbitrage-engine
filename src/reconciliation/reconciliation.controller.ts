@@ -25,6 +25,7 @@ import {
   ReconciliationRunResponseDto,
   ReconciliationStatusResponseDto,
 } from './dto/reconciliation-response.dto';
+import { asPositionId } from '../common/types/branded.type';
 
 const DEBOUNCE_MS = 30_000;
 
@@ -53,9 +54,10 @@ export class ReconciliationController {
     @Body(new ValidationPipe({ whitelist: true }))
     dto: ResolveReconciliationDto,
   ): Promise<ResolveDiscrepancyResponseDto> {
+    const positionId = asPositionId(id);
     try {
       const result = await this.reconciliationService.resolveDiscrepancy(
-        id,
+        positionId,
         dto.action,
         dto.rationale,
       );
@@ -85,7 +87,7 @@ export class ReconciliationController {
 
       this.logger.error({
         message: 'Resolve discrepancy failed',
-        data: { positionId: id, error: message },
+        data: { positionId, error: message },
       });
       throw new HttpException(
         {

@@ -13,6 +13,13 @@ import {
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
+import {
+  asPositionId,
+  asOrderId,
+  asPairId,
+  asContractId,
+  asMatchId,
+} from '../../common/types/branded.type';
 import type { IPlatformConnector } from '../../common/interfaces/platform-connector.interface';
 import {
   createMockPlatformConnector,
@@ -25,10 +32,10 @@ vi.mock('../../common/services/correlation-context', () => ({
 
 function createMockPosition(overrides: Record<string, unknown> = {}) {
   return {
-    positionId: 'pos-1',
-    pairId: 'pair-1',
-    kalshiOrderId: 'order-kalshi-1',
-    polymarketOrderId: 'order-poly-1',
+    positionId: asPositionId('pos-1'),
+    pairId: asPairId('pair-1'),
+    kalshiOrderId: asOrderId('order-kalshi-1'),
+    polymarketOrderId: asOrderId('order-poly-1'),
     kalshiSide: 'buy',
     polymarketSide: 'sell',
     entryPrices: { kalshi: '0.62', polymarket: '0.65' },
@@ -36,15 +43,15 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
     expectedEdge: new Decimal('0.03'),
     status: 'OPEN',
     pair: {
-      matchId: 'pair-1',
-      kalshiContractId: 'kalshi-contract-1',
-      polymarketContractId: 'poly-contract-1',
+      matchId: asMatchId('pair-1'),
+      kalshiContractId: asContractId('kalshi-contract-1'),
+      polymarketContractId: asContractId('poly-contract-1'),
       polymarketClobTokenId: 'mock-clob-token-1',
       primaryLeg: 'kalshi',
       resolutionDate: null,
     },
     kalshiOrder: {
-      orderId: 'order-kalshi-1',
+      orderId: asOrderId('order-kalshi-1'),
       platform: 'KALSHI',
       side: 'buy',
       price: new Decimal('0.62'),
@@ -54,7 +61,7 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
       status: 'FILLED',
     },
     polymarketOrder: {
-      orderId: 'order-poly-1',
+      orderId: asOrderId('order-poly-1'),
       platform: 'POLYMARKET',
       side: 'sell',
       price: new Decimal('0.65'),
@@ -83,7 +90,7 @@ describe('ExitMonitorService', () => {
     let orderCounter = 0;
     orderRepository.create!.mockImplementation(
       (data: Record<string, unknown>) => ({
-        orderId: `exit-order-${++orderCounter}`,
+        orderId: asOrderId(`exit-order-${++orderCounter}`),
         ...data,
       }),
     );
@@ -98,7 +105,7 @@ describe('ExitMonitorService', () => {
 
     orderRepository = {
       create: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
-        orderId: `exit-order-${Date.now()}`,
+        orderId: asOrderId(`exit-order-${Date.now()}`),
         ...data,
       })),
       findById: vi.fn(),
@@ -108,7 +115,7 @@ describe('ExitMonitorService', () => {
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'kalshi-contract-1',
+        contractId: asContractId('kalshi-contract-1'),
         bids: [{ price: 0.66, quantity: 500 }],
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -120,7 +127,7 @@ describe('ExitMonitorService', () => {
         description: 'Kalshi fees',
       }),
       submitOrder: vi.fn().mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 100,
@@ -131,7 +138,7 @@ describe('ExitMonitorService', () => {
     polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
-        contractId: 'poly-contract-1',
+        contractId: asContractId('poly-contract-1'),
         bids: [{ price: 0.62, quantity: 500 }],
         asks: [{ price: 0.64, quantity: 500 }],
         timestamp: new Date(),
@@ -143,7 +150,7 @@ describe('ExitMonitorService', () => {
         description: 'Polymarket fees',
       }),
       submitOrder: vi.fn().mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 100,
@@ -228,7 +235,7 @@ describe('ExitMonitorService', () => {
     it('should skip evaluation when order fill data is missing', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -252,7 +259,7 @@ describe('ExitMonitorService', () => {
       // kalshi buy side → close by selling → need bids
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'kalshi-contract-1',
+        contractId: asContractId('kalshi-contract-1'),
         bids: [], // Empty
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -288,7 +295,7 @@ describe('ExitMonitorService', () => {
 
       // Position should be marked CLOSED
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
 
@@ -299,8 +306,8 @@ describe('ExitMonitorService', () => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.EXIT_TRIGGERED,
         expect.objectContaining({
-          positionId: 'pos-1',
-          pairId: 'pair-1',
+          positionId: asPositionId('pos-1'),
+          pairId: asPairId('pair-1'),
           exitType: 'take_profit',
         }),
       );
@@ -322,7 +329,7 @@ describe('ExitMonitorService', () => {
 
       // Primary (kalshi) fills, secondary (polymarket) fails
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 100,
@@ -333,7 +340,7 @@ describe('ExitMonitorService', () => {
       );
 
       orderRepository.create!.mockResolvedValue({
-        orderId: 'kalshi-exit-order-1',
+        orderId: asOrderId('kalshi-exit-order-1'),
         platform: 'KALSHI',
         price: new Decimal('0.66'),
         size: new Decimal('100'),
@@ -341,7 +348,7 @@ describe('ExitMonitorService', () => {
         fillSize: new Decimal('100'),
       });
       orderRepository.findById!.mockResolvedValue({
-        orderId: 'kalshi-exit-order-1',
+        orderId: asOrderId('kalshi-exit-order-1'),
         platform: 'KALSHI',
         price: new Decimal('0.66'),
         size: new Decimal('100'),
@@ -353,7 +360,7 @@ describe('ExitMonitorService', () => {
 
       // Position should be EXIT_PARTIAL
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
 
@@ -361,7 +368,7 @@ describe('ExitMonitorService', () => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         expect.objectContaining({
-          positionId: 'pos-1',
+          positionId: asPositionId('pos-1'),
         }),
       );
 
@@ -415,8 +422,8 @@ describe('ExitMonitorService', () => {
 
   describe('error isolation', () => {
     it('should continue evaluating other positions when one fails', async () => {
-      const pos1 = createMockPosition({ positionId: 'pos-1' });
-      const pos2 = createMockPosition({ positionId: 'pos-2' });
+      const pos1 = createMockPosition({ positionId: asPositionId('pos-1') });
+      const pos2 = createMockPosition({ positionId: asPositionId('pos-2') });
       positionRepository.findByStatusWithOrders!.mockResolvedValue([
         pos1,
         pos2,
@@ -427,7 +434,7 @@ describe('ExitMonitorService', () => {
         .mockRejectedValueOnce(new Error('First call fails'))
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 500 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -468,7 +475,7 @@ describe('ExitMonitorService', () => {
     it('should return best bid when original side is buy (selling to close)', async () => {
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
       );
       expect(price).toEqual(new Decimal(0.66));
@@ -477,7 +484,7 @@ describe('ExitMonitorService', () => {
     it('should return best ask when original side is sell (buying to close)', async () => {
       const price = await service.getClosePrice(
         polymarketConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'sell',
       );
       expect(price).toEqual(new Decimal(0.64));
@@ -486,7 +493,7 @@ describe('ExitMonitorService', () => {
     it('should return null when order book is empty on relevant side', async () => {
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'contract-1',
+        contractId: asContractId('contract-1'),
         bids: [],
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -494,7 +501,7 @@ describe('ExitMonitorService', () => {
 
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
       );
       expect(price).toBeNull();
@@ -726,7 +733,7 @@ describe('ExitMonitorService', () => {
 
         // Primary fills, secondary fails
         kalshiConnector.submitOrder.mockResolvedValue({
-          orderId: 'kalshi-exit-1',
+          orderId: asOrderId('kalshi-exit-1'),
           status: 'filled',
           filledPrice: 0.66,
           filledQuantity: 100,
@@ -737,7 +744,7 @@ describe('ExitMonitorService', () => {
         );
 
         orderRepository.create!.mockResolvedValue({
-          orderId: 'kalshi-exit-order-1',
+          orderId: asOrderId('kalshi-exit-order-1'),
           platform: 'KALSHI',
           price: new Decimal('0.66'),
           size: new Decimal('100'),
@@ -745,7 +752,7 @@ describe('ExitMonitorService', () => {
           fillSize: new Decimal('100'),
         });
         orderRepository.findById!.mockResolvedValue({
-          orderId: 'kalshi-exit-order-1',
+          orderId: asOrderId('kalshi-exit-order-1'),
           platform: 'KALSHI',
           price: new Decimal('0.66'),
           size: new Decimal('100'),
@@ -799,7 +806,7 @@ describe('ExitMonitorService', () => {
 
         // Secondary returns 'rejected' instead of throwing
         polymarketConnector.submitOrder.mockResolvedValue({
-          orderId: 'poly-exit-1',
+          orderId: asOrderId('poly-exit-1'),
           status: 'rejected',
           filledPrice: 0,
           filledQuantity: 0,
@@ -809,7 +816,7 @@ describe('ExitMonitorService', () => {
         await service.evaluatePositions();
 
         expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-          'pos-1',
+          asPositionId('pos-1'),
           'EXIT_PARTIAL',
         );
         expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -846,7 +853,7 @@ describe('ExitMonitorService', () => {
         expect(riskManager.closePosition).toHaveBeenCalledWith(
           expect.any(Decimal),
           expect.any(Decimal),
-          'pair-1',
+          asPairId('pair-1'),
         );
       });
     });
@@ -931,7 +938,7 @@ describe('ExitMonitorService', () => {
       // Entry: 400 contracts at 0.62 / 0.65
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -941,7 +948,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -955,14 +962,14 @@ describe('ExitMonitorService', () => {
 
       // Exit fills only 300 of 400 on both legs
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 300,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 300,
@@ -990,7 +997,7 @@ describe('ExitMonitorService', () => {
     it('should transition to EXIT_PARTIAL when exit fills less than entry', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -1000,7 +1007,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -1014,14 +1021,14 @@ describe('ExitMonitorService', () => {
 
       // Both legs only fill 300 of 400
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'partial',
         filledPrice: 0.66,
         filledQuantity: 300,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'partial',
         filledPrice: 0.62,
         filledQuantity: 300,
@@ -1031,7 +1038,7 @@ describe('ExitMonitorService', () => {
       await service.evaluatePositions();
 
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
     });
@@ -1039,7 +1046,7 @@ describe('ExitMonitorService', () => {
     it('should call releasePartialCapital (not closePosition) on partial fills', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -1049,7 +1056,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -1062,14 +1069,14 @@ describe('ExitMonitorService', () => {
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
 
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 300,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 300,
@@ -1085,7 +1092,7 @@ describe('ExitMonitorService', () => {
     it('should emit SingleLegExposureEvent with remainder details on partial fills', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -1095,7 +1102,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -1108,14 +1115,14 @@ describe('ExitMonitorService', () => {
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
 
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 300,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 300,
@@ -1127,7 +1134,7 @@ describe('ExitMonitorService', () => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         expect.objectContaining({
-          positionId: 'pos-1',
+          positionId: asPositionId('pos-1'),
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           filledLeg: expect.objectContaining({
             price: expect.any(Number) as number,
@@ -1162,14 +1169,14 @@ describe('ExitMonitorService', () => {
 
       // Full fill (100 = 100)
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 100,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 100,
@@ -1179,7 +1186,7 @@ describe('ExitMonitorService', () => {
       await service.evaluatePositions();
 
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
       expect(riskManager.closePosition).toHaveBeenCalled();
@@ -1188,7 +1195,7 @@ describe('ExitMonitorService', () => {
     it('should handle partial primary, full secondary as EXIT_PARTIAL', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -1198,7 +1205,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -1212,14 +1219,14 @@ describe('ExitMonitorService', () => {
 
       // Primary fills 150, secondary fills 200
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'partial',
         filledPrice: 0.66,
         filledQuantity: 150,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 200,
@@ -1229,7 +1236,7 @@ describe('ExitMonitorService', () => {
       await service.evaluatePositions();
 
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
       expect(riskManager.releasePartialCapital).toHaveBeenCalled();
@@ -1258,14 +1265,14 @@ describe('ExitMonitorService', () => {
       kalshiConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 500 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
         })
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -1288,14 +1295,14 @@ describe('ExitMonitorService', () => {
       polymarketConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
-          contractId: 'poly-contract-1',
+          contractId: asContractId('poly-contract-1'),
           bids: [{ price: 0.62, quantity: 500 }],
           asks: [{ price: 0.64, quantity: 500 }],
           timestamp: new Date(),
         })
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
-          contractId: 'poly-contract-1',
+          contractId: asContractId('poly-contract-1'),
           bids: [{ price: 0.62, quantity: 500 }],
           asks: [],
           timestamp: new Date(),
@@ -1312,7 +1319,7 @@ describe('ExitMonitorService', () => {
       // Entry: 200 contracts
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           side: 'buy',
           price: new Decimal('0.62'),
@@ -1322,7 +1329,7 @@ describe('ExitMonitorService', () => {
           status: 'FILLED',
         },
         polymarketOrder: {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           side: 'sell',
           price: new Decimal('0.65'),
@@ -1338,14 +1345,14 @@ describe('ExitMonitorService', () => {
       kalshiConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 500 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
         })
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 80 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -1355,28 +1362,28 @@ describe('ExitMonitorService', () => {
       polymarketConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
-          contractId: 'poly-contract-1',
+          contractId: asContractId('poly-contract-1'),
           bids: [{ price: 0.62, quantity: 500 }],
           asks: [{ price: 0.64, quantity: 500 }],
           timestamp: new Date(),
         })
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
-          contractId: 'poly-contract-1',
+          contractId: asContractId('poly-contract-1'),
           bids: [{ price: 0.62, quantity: 500 }],
           asks: [{ price: 0.64, quantity: 500 }],
           timestamp: new Date(),
         });
 
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 80,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 80,
@@ -1395,7 +1402,7 @@ describe('ExitMonitorService', () => {
 
       // 80 < 200 entry → EXIT_PARTIAL
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
     });
@@ -1409,7 +1416,7 @@ describe('ExitMonitorService', () => {
       kalshiConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 500 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -1428,7 +1435,7 @@ describe('ExitMonitorService', () => {
     it('should return top-of-book when no positionSize provided (backward compat)', async () => {
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
       );
       expect(price).toEqual(new Decimal(0.66));
@@ -1437,7 +1444,7 @@ describe('ExitMonitorService', () => {
     it('should return VWAP across multiple levels for buy side close', async () => {
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'contract-1',
+        contractId: asContractId('contract-1'),
         bids: [
           { price: 0.66, quantity: 60 },
           { price: 0.64, quantity: 40 },
@@ -1448,7 +1455,7 @@ describe('ExitMonitorService', () => {
 
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
         new Decimal(100),
       );
@@ -1460,7 +1467,7 @@ describe('ExitMonitorService', () => {
     it('should return VWAP of available depth when book cannot fill full position', async () => {
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'contract-1',
+        contractId: asContractId('contract-1'),
         bids: [{ price: 0.66, quantity: 50 }],
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -1468,7 +1475,7 @@ describe('ExitMonitorService', () => {
 
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
         new Decimal(200),
       );
@@ -1480,7 +1487,7 @@ describe('ExitMonitorService', () => {
     it('should return null when book has no levels on close side', async () => {
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'contract-1',
+        contractId: asContractId('contract-1'),
         bids: [],
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -1488,7 +1495,7 @@ describe('ExitMonitorService', () => {
 
       const price = await service.getClosePrice(
         kalshiConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'buy',
         new Decimal(100),
       );
@@ -1499,7 +1506,7 @@ describe('ExitMonitorService', () => {
     it('should compute VWAP for sell side close (using asks)', async () => {
       polymarketConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
-        contractId: 'contract-1',
+        contractId: asContractId('contract-1'),
         bids: [{ price: 0.6, quantity: 500 }],
         asks: [
           { price: 0.64, quantity: 30 },
@@ -1510,7 +1517,7 @@ describe('ExitMonitorService', () => {
 
       const price = await service.getClosePrice(
         polymarketConnector as unknown as IPlatformConnector,
-        'contract-1',
+        asContractId('contract-1'),
         'sell',
         new Decimal(100),
       );
@@ -1541,22 +1548,22 @@ describe('ExitMonitorService', () => {
       // Return entry orders + partial exit orders
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('30'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('30'),
         },
@@ -1581,22 +1588,22 @@ describe('ExitMonitorService', () => {
 
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -1605,7 +1612,7 @@ describe('ExitMonitorService', () => {
       // Multi-level order book to verify VWAP uses residual size (40)
       kalshiConnector.getOrderBook.mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'kalshi-contract-1',
+        contractId: asContractId('kalshi-contract-1'),
         bids: [
           { price: 0.66, quantity: 30 },
           { price: 0.64, quantity: 20 },
@@ -1629,22 +1636,22 @@ describe('ExitMonitorService', () => {
 
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -1661,14 +1668,14 @@ describe('ExitMonitorService', () => {
 
       // Exit fills for residual 40 on both legs
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-2',
+        orderId: asOrderId('kalshi-exit-2'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 40,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-2',
+        orderId: asOrderId('poly-exit-2'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 40,
@@ -1679,7 +1686,7 @@ describe('ExitMonitorService', () => {
 
       // Should transition to CLOSED (exit fills match residual of 40)
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
       // closePosition should be called (not releasePartialCapital)
@@ -1694,22 +1701,22 @@ describe('ExitMonitorService', () => {
 
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -1726,14 +1733,14 @@ describe('ExitMonitorService', () => {
 
       // Fills only 20 of residual 40
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-2',
+        orderId: asOrderId('kalshi-exit-2'),
         status: 'partial',
         filledPrice: 0.66,
         filledQuantity: 20,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-2',
+        orderId: asOrderId('poly-exit-2'),
         status: 'partial',
         filledPrice: 0.62,
         filledQuantity: 20,
@@ -1744,7 +1751,7 @@ describe('ExitMonitorService', () => {
 
       // Should stay EXIT_PARTIAL (not full residual)
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
       expect(riskManager.releasePartialCapital).toHaveBeenCalled();
@@ -1758,22 +1765,22 @@ describe('ExitMonitorService', () => {
 
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -1791,7 +1798,7 @@ describe('ExitMonitorService', () => {
         // First call: evaluatePosition close price
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [{ price: 0.66, quantity: 500 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -1799,7 +1806,7 @@ describe('ExitMonitorService', () => {
         // Second call: depth check — zero depth
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
-          contractId: 'kalshi-contract-1',
+          contractId: asContractId('kalshi-contract-1'),
           bids: [],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
@@ -1831,22 +1838,22 @@ describe('ExitMonitorService', () => {
       // Residual is 40 per leg
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -1862,14 +1869,14 @@ describe('ExitMonitorService', () => {
       setupOrderCreateMock();
 
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-2',
+        orderId: asOrderId('kalshi-exit-2'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 40,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-2',
+        orderId: asOrderId('poly-exit-2'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 40,
@@ -1921,22 +1928,22 @@ describe('ExitMonitorService', () => {
       // Exits fully match entry — zero residual
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
@@ -1946,13 +1953,13 @@ describe('ExitMonitorService', () => {
 
       // Should transition to CLOSED without submitting orders
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),
         new Decimal(0),
-        'pair-1',
+        asPairId('pair-1'),
       );
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
@@ -1964,22 +1971,22 @@ describe('ExitMonitorService', () => {
       // Kalshi fully exited, polymarket still has residual
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('50'),
         },
@@ -2003,22 +2010,22 @@ describe('ExitMonitorService', () => {
       // Asymmetric residuals: kalshi=70, polymarket=30
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('30'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('70'),
         },
@@ -2034,14 +2041,14 @@ describe('ExitMonitorService', () => {
 
       // Both connectors fill successfully
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-exit-1',
+        orderId: asOrderId('kalshi-exit-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 30,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-exit-1',
+        orderId: asOrderId('poly-exit-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 30,

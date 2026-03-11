@@ -2,11 +2,12 @@ import Decimal from 'decimal.js';
 import { BudgetReservation, RankedOpportunity } from '../types/risk.type.js';
 import { ExecutionError } from '../errors/execution-error.js';
 import { OrderResult } from '../types/platform.type.js';
+import type { PositionId } from '../types/branded.type.js';
 
 export interface ExecutionResult {
   success: boolean;
   partialFill: boolean;
-  positionId?: string;
+  positionId?: PositionId;
   primaryOrder?: OrderResult;
   secondaryOrder?: OrderResult;
   error?: ExecutionError;

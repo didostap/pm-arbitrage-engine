@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PositionRepository } from './position.repository';
 import { PrismaService } from '../../common/prisma.service';
+import { asPositionId } from '../../common/types/branded.type';
 
 describe('PositionRepository', () => {
   let repo: PositionRepository;
@@ -56,7 +57,7 @@ describe('PositionRepository', () => {
       positionId: 'pos-1',
     });
 
-    const result = await repo.findById('pos-1');
+    const result = await repo.findById(asPositionId('pos-1'));
 
     expect(mockPrisma.openPosition.findUnique).toHaveBeenCalledWith({
       where: { positionId: 'pos-1' },
@@ -83,7 +84,7 @@ describe('PositionRepository', () => {
       status: 'CLOSED',
     });
 
-    const result = await repo.updateStatus('pos-1', 'CLOSED');
+    const result = await repo.updateStatus(asPositionId('pos-1'), 'CLOSED');
 
     expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
       where: { positionId: 'pos-1' },

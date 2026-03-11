@@ -7,6 +7,7 @@ import {
   POLYMARKET_CONNECTOR_TOKEN,
 } from '../../connectors/connector.constants.js';
 import { FinancialMath } from '../../common/utils/financial-math.js';
+import { asContractId } from '../../common/types/branded.type.js';
 
 @Injectable()
 export class PriceFeedService implements IPriceFeedService {
@@ -26,7 +27,7 @@ export class PriceFeedService implements IPriceFeedService {
   ): Promise<Decimal | null> {
     const connector = this.getConnector(platform);
     try {
-      const orderBook = await connector.getOrderBook(contractId);
+      const orderBook = await connector.getOrderBook(asContractId(contractId));
       if (side === 'buy') {
         // Selling to close → use best bid
         if (orderBook.bids.length === 0) return null;

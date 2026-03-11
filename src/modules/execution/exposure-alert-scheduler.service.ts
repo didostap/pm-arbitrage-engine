@@ -13,6 +13,11 @@ import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { SingleLegExposureEvent } from '../../common/events/execution.events';
 import { PlatformId } from '../../common/types/platform.type';
 import { SingleLegResolutionService } from './single-leg-resolution.service';
+import {
+  asPositionId,
+  asPairId,
+  asOrderId,
+} from '../../common/types/branded.type';
 
 const REMINDER_INTERVAL_MS = 60_000;
 const DEBOUNCE_MS = 55_000;
@@ -154,12 +159,12 @@ export class ExposureAlertScheduler {
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_EXPOSURE_REMINDER,
       new SingleLegExposureEvent(
-        position.positionId,
-        position.pairId,
+        asPositionId(position.positionId),
+        asPairId(position.pairId),
         expectedEdge,
         {
           platform: filledPlatform,
-          orderId: filledOrderId,
+          orderId: asOrderId(filledOrderId),
           side: filledSide,
           price: new Decimal(filledOrder.price.toString()).toNumber(),
           size: new Decimal(filledOrder.size.toString()).toNumber(),

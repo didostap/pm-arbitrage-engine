@@ -5,6 +5,11 @@ import {
   RiskDecision,
   RiskExposure,
 } from '../types/risk.type.js';
+import type {
+  OpportunityId,
+  PairId,
+  ReservationId,
+} from '../types/branded.type.js';
 
 export interface IRiskManager {
   /**
@@ -49,7 +54,7 @@ export interface IRiskManager {
    * @param rationale - Operator's reason for the override (min 10 chars)
    */
   processOverride(
-    opportunityId: string,
+    opportunityId: OpportunityId,
     rationale: string,
   ): Promise<RiskDecision>;
   /**
@@ -59,17 +64,17 @@ export interface IRiskManager {
   /**
    * Commit a reservation — budget permanently allocated to new position.
    */
-  commitReservation(reservationId: string): Promise<void>;
+  commitReservation(reservationId: ReservationId): Promise<void>;
   /**
    * Release a reservation — budget returned to available pool.
    */
-  releaseReservation(reservationId: string): Promise<void>;
+  releaseReservation(reservationId: ReservationId): Promise<void>;
   /**
    * Adjust a reservation's capital downward (depth-aware sizing).
    * No-op if newCapitalUsd >= current reserved amount.
    */
   adjustReservation(
-    reservationId: string,
+    reservationId: ReservationId,
     newCapitalUsd: Decimal,
   ): Promise<void>;
   /**
@@ -82,7 +87,7 @@ export interface IRiskManager {
   closePosition(
     capitalReturned: unknown,
     pnlDelta: unknown,
-    pairId?: string,
+    pairId?: PairId,
   ): Promise<void>;
   /**
    * Release capital for a partial exit — reduces deployed capital and updates P&L
@@ -95,6 +100,6 @@ export interface IRiskManager {
   releasePartialCapital(
     capitalReleased: unknown,
     realizedPnl: unknown,
-    pairId?: string,
+    pairId?: PairId,
   ): Promise<void>;
 }

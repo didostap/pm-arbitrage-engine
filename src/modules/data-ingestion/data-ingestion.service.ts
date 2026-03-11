@@ -13,6 +13,7 @@ import {
 import { PlatformId } from '../../common/types/platform.type';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
+import { asContractId } from '../../common/types/branded.type';
 import { SystemHealthError } from '../../common/errors';
 import { toPlatformEnum } from '../../common/utils';
 import { DegradationProtocolService } from './degradation-protocol.service';
@@ -148,7 +149,9 @@ export class DataIngestionService implements OnModuleInit {
 
           try {
             // Connector returns already normalized data
-            const normalized = await this.kalshiConnector.getOrderBook(ticker);
+            const normalized = await this.kalshiConnector.getOrderBook(
+              asContractId(ticker),
+            );
 
             await this.persistSnapshot(normalized, correlationId);
 
@@ -331,7 +334,7 @@ export class DataIngestionService implements OnModuleInit {
       for (const contractId of contracts) {
         try {
           const startTime = Date.now();
-          const book = await connector.getOrderBook(contractId);
+          const book = await connector.getOrderBook(asContractId(contractId));
           book.platformHealth = 'degraded';
           await this.persistSnapshot(book, correlationId);
           this.eventEmitter.emit(

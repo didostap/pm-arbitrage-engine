@@ -16,6 +16,7 @@ import {
 } from '../connectors/connector.constants';
 import { createMockPlatformConnector } from '../test/mock-factories';
 import { PlatformId } from '../common/types/platform.type';
+import { asMatchId } from '../common/types/branded.type';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
@@ -296,7 +297,7 @@ describe('TradingEngineService', () => {
           pairConfig: {
             polymarketContractId: 'poly-1',
             kalshiContractId: 'kalshi-1',
-            matchId: 'match-uuid-1',
+            matchId: asMatchId('match-uuid-1'),
           },
         },
         netEdge: new FinancialDecimal(0.05),
@@ -323,7 +324,7 @@ describe('TradingEngineService', () => {
           pairConfig: {
             polymarketContractId: 'poly-1',
             kalshiContractId: 'kalshi-1',
-            matchId: 'match-uuid-1',
+            matchId: asMatchId('match-uuid-1'),
           },
         },
         netEdge: new FinancialDecimal(0.05),
@@ -363,7 +364,7 @@ describe('TradingEngineService', () => {
         pairConfig: {
           polymarketContractId: 'poly-1',
           kalshiContractId: 'kalshi-1',
-          matchId: 'match-uuid-1',
+          matchId: asMatchId('match-uuid-1'),
         },
       },
       netEdge: new FinancialDecimal(0.05),

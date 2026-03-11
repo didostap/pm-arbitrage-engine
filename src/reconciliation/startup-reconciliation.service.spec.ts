@@ -15,16 +15,23 @@ import { OrderRepository } from '../persistence/repositories/order.repository';
 import { EVENT_NAMES } from '../common/events';
 import { PlatformId } from '../common/types/platform.type';
 import {
+  asPositionId,
+  asOrderId,
+  asPairId,
+  asContractId,
+  asMatchId,
+} from '../common/types/branded.type';
+import {
   createMockPlatformConnector,
   createMockRiskManager,
 } from '../test/mock-factories.js';
 import { AuditLogService } from '../modules/monitoring/audit-log.service';
 
 const createMockOrder = (overrides: Record<string, unknown> = {}) => ({
-  orderId: 'order-1',
+  orderId: asOrderId('order-1'),
   platform: 'KALSHI' as const,
-  contractId: 'contract-1',
-  pairId: 'pair-1',
+  contractId: asContractId('contract-1'),
+  pairId: asPairId('pair-1'),
   side: 'buy',
   price: new Decimal('0.45'),
   size: new Decimal('100'),
@@ -37,10 +44,10 @@ const createMockOrder = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const createMockPosition = (overrides: Record<string, unknown> = {}) => ({
-  positionId: 'pos-1',
-  pairId: 'pair-1',
-  polymarketOrderId: 'order-pm-1',
-  kalshiOrderId: 'order-k-1',
+  positionId: asPositionId('pos-1'),
+  pairId: asPairId('pair-1'),
+  polymarketOrderId: asOrderId('order-pm-1'),
+  kalshiOrderId: asOrderId('order-k-1'),
   polymarketSide: 'buy',
   kalshiSide: 'sell',
   entryPrices: { polymarket: '0.55', kalshi: '0.45' },
@@ -50,16 +57,16 @@ const createMockPosition = (overrides: Record<string, unknown> = {}) => ({
   reconciliationContext: null,
   createdAt: new Date(),
   updatedAt: new Date(),
-  pair: { matchId: 'pair-1' },
+  pair: { matchId: asMatchId('pair-1') },
   kalshiOrder: {
-    orderId: 'order-k-1',
+    orderId: asOrderId('order-k-1'),
     platform: 'KALSHI',
     status: 'FILLED',
     fillPrice: new Decimal('0.45'),
     fillSize: new Decimal('100'),
   },
   polymarketOrder: {
-    orderId: 'order-pm-1',
+    orderId: asOrderId('order-pm-1'),
     platform: 'POLYMARKET',
     status: 'FILLED',
     fillPrice: new Decimal('0.55'),
@@ -95,7 +102,7 @@ describe('StartupReconciliationService', () => {
   beforeEach(async () => {
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getOrder: vi.fn().mockResolvedValue({
-        orderId: 'order-1',
+        orderId: asOrderId('order-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
@@ -103,7 +110,7 @@ describe('StartupReconciliationService', () => {
     });
     polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getOrder: vi.fn().mockResolvedValue({
-        orderId: 'order-1',
+        orderId: asOrderId('order-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
@@ -183,13 +190,13 @@ describe('StartupReconciliationService', () => {
 
       // Make getOrder return filled for both
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -217,13 +224,13 @@ describe('StartupReconciliationService', () => {
   describe('reconcile() — pending order resolved', () => {
     it('should update PENDING order to FILLED when platform confirms fill', async () => {
       const pendingOrder = createMockOrder({
-        orderId: 'order-pending-1',
+        orderId: asOrderId('order-pending-1'),
         platform: 'KALSHI',
         status: 'PENDING',
       });
       orderRepository.findPendingOrders.mockResolvedValue([pendingOrder]);
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pending-1',
+        orderId: asOrderId('order-pending-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
@@ -233,7 +240,7 @@ describe('StartupReconciliationService', () => {
       const result = await service.reconcile();
 
       expect(orderRepository.updateOrderStatus).toHaveBeenCalledWith(
-        'order-pending-1',
+        asOrderId('order-pending-1'),
         'FILLED',
         0.45,
         100,
@@ -243,14 +250,14 @@ describe('StartupReconciliationService', () => {
 
     it('should transition SINGLE_LEG_EXPOSED position to OPEN when pending order fills', async () => {
       const pendingOrder = createMockOrder({
-        orderId: 'order-pm-pending',
+        orderId: asOrderId('order-pm-pending'),
         platform: 'POLYMARKET',
-        pairId: 'pair-1',
+        pairId: asPairId('pair-1'),
         status: 'PENDING',
       });
       orderRepository.findPendingOrders.mockResolvedValue([pendingOrder]);
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-pending',
+        orderId: asOrderId('order-pm-pending'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -258,8 +265,8 @@ describe('StartupReconciliationService', () => {
 
       // Position with missing polymarket order
       const singleLegPosition = createMockPosition({
-        positionId: 'pos-single',
-        pairId: 'pair-1',
+        positionId: asPositionId('pos-single'),
+        pairId: asPairId('pair-1'),
         status: 'SINGLE_LEG_EXPOSED',
         polymarketOrderId: null,
         polymarketOrder: null,
@@ -269,10 +276,10 @@ describe('StartupReconciliationService', () => {
       await service.reconcile();
 
       expect(positionRepository.updateWithOrder).toHaveBeenCalledWith(
-        'pos-single',
+        asPositionId('pos-single'),
         expect.objectContaining({
           polymarketOrder: {
-            connect: { orderId: 'order-pm-pending' },
+            connect: { orderId: asOrderId('order-pm-pending') },
           },
           status: 'OPEN',
         }),
@@ -281,35 +288,35 @@ describe('StartupReconciliationService', () => {
 
     it('should update PENDING order to CANCELLED when platform confirms cancel', async () => {
       const pendingOrder = createMockOrder({
-        orderId: 'order-cancel',
+        orderId: asOrderId('order-cancel'),
         platform: 'POLYMARKET',
         status: 'PENDING',
       });
       orderRepository.findPendingOrders.mockResolvedValue([pendingOrder]);
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-cancel',
+        orderId: asOrderId('order-cancel'),
         status: 'cancelled',
       });
 
       await service.reconcile();
 
       expect(orderRepository.updateOrderStatus).toHaveBeenCalledWith(
-        'order-cancel',
+        asOrderId('order-cancel'),
         'CANCELLED',
       );
     });
 
     it('should emit OrderFilledEvent when pending order is now filled', async () => {
       const pendingOrder = createMockOrder({
-        orderId: 'order-fill',
+        orderId: asOrderId('order-fill'),
         platform: 'KALSHI',
-        pairId: 'pair-1',
+        pairId: asPairId('pair-1'),
         side: 'buy',
         status: 'PENDING',
       });
       orderRepository.findPendingOrders.mockResolvedValue([pendingOrder]);
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-fill',
+        orderId: asOrderId('order-fill'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
@@ -317,8 +324,8 @@ describe('StartupReconciliationService', () => {
 
       // A single-leg position that matches
       const singleLeg = createMockPosition({
-        positionId: 'pos-sl',
-        pairId: 'pair-1',
+        positionId: asPositionId('pos-sl'),
+        pairId: asPairId('pair-1'),
         status: 'SINGLE_LEG_EXPOSED',
         kalshiOrderId: null,
         kalshiOrder: null,
@@ -330,7 +337,7 @@ describe('StartupReconciliationService', () => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.ORDER_FILLED,
         expect.objectContaining({
-          orderId: 'order-fill',
+          orderId: asOrderId('order-fill'),
           platform: PlatformId.KALSHI,
         }),
       );
@@ -341,7 +348,7 @@ describe('StartupReconciliationService', () => {
     it('should flag position as RECONCILIATION_REQUIRED on order status mismatch', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-k-1',
+          orderId: asOrderId('order-k-1'),
           platform: 'KALSHI',
           status: 'FILLED',
           fillPrice: new Decimal('0.45'),
@@ -350,11 +357,11 @@ describe('StartupReconciliationService', () => {
       });
       positionRepository.findActivePositions.mockResolvedValue([position]);
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'cancelled',
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -365,7 +372,7 @@ describe('StartupReconciliationService', () => {
       expect(result.discrepanciesFound).toBeGreaterThan(0);
       expect(mockPrisma.openPosition.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { positionId: 'pos-1' },
+          where: { positionId: asPositionId('pos-1') },
           data: expect.objectContaining({
             status: 'RECONCILIATION_REQUIRED',
           }),
@@ -377,11 +384,11 @@ describe('StartupReconciliationService', () => {
       const position = createMockPosition();
       positionRepository.findActivePositions.mockResolvedValue([position]);
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'not_found',
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -398,11 +405,11 @@ describe('StartupReconciliationService', () => {
       const position = createMockPosition();
       positionRepository.findActivePositions.mockResolvedValue([position]);
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'not_found',
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -413,7 +420,7 @@ describe('StartupReconciliationService', () => {
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.RECONCILIATION_DISCREPANCY,
         expect.objectContaining({
-          positionId: 'pos-1',
+          positionId: asPositionId('pos-1'),
           discrepancyType: 'order_not_found',
         }),
       );
@@ -466,13 +473,13 @@ describe('StartupReconciliationService', () => {
       });
 
       const pendingPmOrder = createMockOrder({
-        orderId: 'order-pm-2',
+        orderId: asOrderId('order-pm-2'),
         platform: 'POLYMARKET',
         status: 'PENDING',
       });
       orderRepository.findPendingOrders.mockResolvedValue([pendingPmOrder]);
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-2',
+        orderId: asOrderId('order-pm-2'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -515,14 +522,14 @@ describe('StartupReconciliationService', () => {
     it('should calculate capital deployed using Decimal from order fill data', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-k-1',
+          orderId: asOrderId('order-k-1'),
           platform: 'KALSHI',
           status: 'FILLED',
           fillPrice: new Decimal('0.45'),
           fillSize: new Decimal('100'),
         },
         polymarketOrder: {
-          orderId: 'order-pm-1',
+          orderId: asOrderId('order-pm-1'),
           platform: 'POLYMARKET',
           status: 'FILLED',
           fillPrice: new Decimal('0.55'),
@@ -532,13 +539,13 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([position]);
 
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -555,11 +562,11 @@ describe('StartupReconciliationService', () => {
 
     it('should exclude RECONCILIATION_REQUIRED from openCount but include in capital', async () => {
       const openPosition = createMockPosition({
-        positionId: 'pos-open',
+        positionId: asPositionId('pos-open'),
         status: 'OPEN',
       });
       const reconPosition = createMockPosition({
-        positionId: 'pos-recon',
+        positionId: asPositionId('pos-recon'),
         status: 'RECONCILIATION_REQUIRED',
       });
       // For the recalculation call, findActivePositions is called separately
@@ -568,13 +575,13 @@ describe('StartupReconciliationService', () => {
         .mockResolvedValueOnce([openPosition, reconPosition]); // recalculation
 
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -594,7 +601,7 @@ describe('StartupReconciliationService', () => {
   describe('resolveDiscrepancy()', () => {
     it('should acknowledge discrepancy and update to recommended status', async () => {
       const position = createMockPosition({
-        positionId: 'pos-recon',
+        positionId: asPositionId('pos-recon'),
         status: 'RECONCILIATION_REQUIRED',
         reconciliationContext: {
           recommendedStatus: 'OPEN',
@@ -608,7 +615,7 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([]);
 
       const result = await service.resolveDiscrepancy(
-        'pos-recon',
+        asPositionId('pos-recon'),
         'acknowledge',
         'Verified fill on Kalshi dashboard',
       );
@@ -617,7 +624,7 @@ describe('StartupReconciliationService', () => {
       expect(result.newStatus).toBe('OPEN');
       expect(mockPrisma.openPosition.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { positionId: 'pos-recon' },
+          where: { positionId: asPositionId('pos-recon') },
           data: expect.objectContaining({
             status: 'OPEN',
             reconciliationContext: undefined,
@@ -628,7 +635,7 @@ describe('StartupReconciliationService', () => {
 
     it('should force close position and call riskManager.closePosition', async () => {
       const position = createMockPosition({
-        positionId: 'pos-force',
+        positionId: asPositionId('pos-force'),
         status: 'RECONCILIATION_REQUIRED',
         reconciliationContext: {
           recommendedStatus: 'CLOSED',
@@ -642,7 +649,7 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([]);
 
       const result = await service.resolveDiscrepancy(
-        'pos-force',
+        asPositionId('pos-force'),
         'force_close',
         'Operator confirmed position should be closed',
       );
@@ -652,13 +659,13 @@ describe('StartupReconciliationService', () => {
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),
         new Decimal(0),
-        'pair-1',
+        asPairId('pair-1'),
       );
     });
 
     it('should resume trading when last discrepancy is resolved', async () => {
       const position = createMockPosition({
-        positionId: 'pos-last',
+        positionId: asPositionId('pos-last'),
         status: 'RECONCILIATION_REQUIRED',
         reconciliationContext: {
           recommendedStatus: 'OPEN',
@@ -672,7 +679,7 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([]);
 
       await service.resolveDiscrepancy(
-        'pos-last',
+        asPositionId('pos-last'),
         'acknowledge',
         'Platform recovered, fills confirmed',
       );
@@ -684,7 +691,7 @@ describe('StartupReconciliationService', () => {
 
     it('should not resume trading when other discrepancies remain', async () => {
       const position = createMockPosition({
-        positionId: 'pos-one',
+        positionId: asPositionId('pos-one'),
         status: 'RECONCILIATION_REQUIRED',
         reconciliationContext: {
           recommendedStatus: 'OPEN',
@@ -696,14 +703,14 @@ describe('StartupReconciliationService', () => {
       positionRepository.findById.mockResolvedValue(position);
       positionRepository.findByStatus.mockResolvedValue([
         createMockPosition({
-          positionId: 'pos-two',
+          positionId: asPositionId('pos-two'),
           status: 'RECONCILIATION_REQUIRED',
         }),
       ]);
       positionRepository.findActivePositions.mockResolvedValue([]);
 
       const result = await service.resolveDiscrepancy(
-        'pos-one',
+        asPositionId('pos-one'),
         'acknowledge',
         'Verified one position',
       );
@@ -716,7 +723,11 @@ describe('StartupReconciliationService', () => {
       positionRepository.findById.mockResolvedValue(null);
 
       await expect(
-        service.resolveDiscrepancy('pos-nonexistent', 'acknowledge', 'reason'),
+        service.resolveDiscrepancy(
+          asPositionId('pos-nonexistent'),
+          'acknowledge',
+          'reason',
+        ),
       ).rejects.toThrow('Position not found');
     });
 
@@ -726,7 +737,11 @@ describe('StartupReconciliationService', () => {
       );
 
       await expect(
-        service.resolveDiscrepancy('pos-1', 'acknowledge', 'reason'),
+        service.resolveDiscrepancy(
+          asPositionId('pos-1'),
+          'acknowledge',
+          'reason',
+        ),
       ).rejects.toThrow('not in RECONCILIATION_REQUIRED state');
     });
   });
@@ -763,7 +778,7 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([position]);
 
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
@@ -772,7 +787,9 @@ describe('StartupReconciliationService', () => {
       const result = await service.reconcile();
 
       // Should only verify the Kalshi order, not the missing Polymarket order
-      expect(kalshiConnector.getOrder).toHaveBeenCalledWith('order-k-1');
+      expect(kalshiConnector.getOrder).toHaveBeenCalledWith(
+        asOrderId('order-k-1'),
+      );
       expect(polymarketConnector.getOrder).not.toHaveBeenCalled();
       expect(result.positionsChecked).toBe(1);
     });
@@ -780,7 +797,7 @@ describe('StartupReconciliationService', () => {
     it('should detect pending_filled discrepancy during position verification', async () => {
       const position = createMockPosition({
         kalshiOrder: {
-          orderId: 'order-k-1',
+          orderId: asOrderId('order-k-1'),
           platform: 'KALSHI',
           status: 'PENDING',
           fillPrice: null,
@@ -790,13 +807,13 @@ describe('StartupReconciliationService', () => {
       positionRepository.findActivePositions.mockResolvedValue([position]);
 
       kalshiConnector.getOrder.mockResolvedValue({
-        orderId: 'order-k-1',
+        orderId: asOrderId('order-k-1'),
         status: 'filled',
         fillPrice: 0.45,
         fillSize: 100,
       });
       polymarketConnector.getOrder.mockResolvedValue({
-        orderId: 'order-pm-1',
+        orderId: asOrderId('order-pm-1'),
         status: 'filled',
         fillPrice: 0.55,
         fillSize: 100,
@@ -865,7 +882,7 @@ describe('StartupReconciliationService', () => {
       positionRepository.findByStatus.mockResolvedValue([]);
 
       await auditService.resolveDiscrepancy(
-        'pos-1',
+        asPositionId('pos-1'),
         'force_close',
         'Test resolution',
       );
@@ -877,7 +894,7 @@ describe('StartupReconciliationService', () => {
           eventType: 'reconciliation.discrepancy_resolved',
           module: 'reconciliation',
           details: expect.objectContaining({
-            positionId: 'pos-1',
+            positionId: asPositionId('pos-1'),
             action: 'force_close',
             rationale: 'Test resolution',
           }),

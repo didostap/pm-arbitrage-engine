@@ -18,6 +18,7 @@ import { MatchApprovedEvent } from '../../common/events/match-approved.event.js'
 import { MatchAutoApprovedEvent } from '../../common/events/match-auto-approved.event.js';
 import { MatchPendingReviewEvent } from '../../common/events/match-pending-review.event.js';
 import { KnowledgeBaseService } from './knowledge-base.service.js';
+import { asMatchId, asContractId } from '../../common/types/branded.type.js';
 
 @Injectable()
 export class ConfidenceScorerService {
@@ -129,9 +130,9 @@ export class ConfidenceScorerService {
       this.eventEmitter.emit(
         EVENT_NAMES.MATCH_APPROVED,
         new MatchApprovedEvent(
-          matchId,
-          match.polymarketContractId,
-          match.kalshiContractId,
+          asMatchId(matchId),
+          asContractId(match.polymarketContractId),
+          asContractId(match.kalshiContractId),
           rationale,
         ),
       );
@@ -139,7 +140,7 @@ export class ConfidenceScorerService {
       this.eventEmitter.emit(
         EVENT_NAMES.MATCH_AUTO_APPROVED,
         new MatchAutoApprovedEvent(
-          matchId,
+          asMatchId(matchId),
           result.score,
           result.model,
           result.escalated,
@@ -159,7 +160,7 @@ export class ConfidenceScorerService {
       this.eventEmitter.emit(
         EVENT_NAMES.MATCH_PENDING_REVIEW,
         new MatchPendingReviewEvent(
-          matchId,
+          asMatchId(matchId),
           result.score,
           result.model,
           result.escalated,

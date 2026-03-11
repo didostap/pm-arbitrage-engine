@@ -22,6 +22,12 @@ import {
 } from '../../common/errors/execution-error';
 import { PlatformId } from '../../common/types/platform.type';
 import {
+  asContractId,
+  asOrderId,
+  asPairId,
+  asPositionId,
+} from '../../common/types/branded.type';
+import {
   calculateSingleLegPnlScenarios,
   buildRecommendedActions,
 } from './single-leg-pnl.util';
@@ -106,7 +112,7 @@ export class SingleLegResolutionService {
     let orderResult;
     try {
       orderResult = await connector.submitOrder({
-        contractId,
+        contractId: asContractId(contractId),
         side,
         quantity: size,
         price: retryPrice,
@@ -160,14 +166,14 @@ export class SingleLegResolutionService {
       this.eventEmitter.emit(
         EVENT_NAMES.ORDER_FILLED,
         new OrderFilledEvent(
-          newOrder.orderId,
+          asOrderId(newOrder.orderId),
           failedPlatform,
           side,
           retryPrice,
           size,
           orderResult.filledPrice,
           orderResult.filledQuantity,
-          positionId,
+          asPositionId(positionId),
           undefined,
           isPaper,
           mixedMode,
@@ -177,11 +183,11 @@ export class SingleLegResolutionService {
       this.eventEmitter.emit(
         EVENT_NAMES.SINGLE_LEG_RESOLVED,
         new SingleLegResolvedEvent(
-          positionId,
-          position.pairId,
+          asPositionId(positionId),
+          asPairId(position.pairId),
           'retried',
           {
-            orderId: newOrder.orderId,
+            orderId: asOrderId(newOrder.orderId),
             platform: failedPlatform,
             status: orderResult.status,
             filledPrice: orderResult.filledPrice,
@@ -291,7 +297,7 @@ export class SingleLegResolutionService {
     // Get current order book for close price
     let orderBook;
     try {
-      orderBook = await connector.getOrderBook(contractId);
+      orderBook = await connector.getOrderBook(asContractId(contractId));
     } catch (error) {
       throw new ExecutionError(
         EXECUTION_ERROR_CODES.CLOSE_FAILED,
@@ -330,7 +336,7 @@ export class SingleLegResolutionService {
     let closeOrderResult;
     try {
       closeOrderResult = await connector.submitOrder({
-        contractId,
+        contractId: asContractId(contractId),
         side: opposingSide,
         quantity: fillSize,
         price: closePrice,
@@ -398,17 +404,17 @@ export class SingleLegResolutionService {
     await this.riskManager.closePosition(
       capitalReturned,
       realizedPnl,
-      position.pairId,
+      asPairId(position.pairId),
     );
 
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_RESOLVED,
       new SingleLegResolvedEvent(
-        positionId,
-        position.pairId,
+        asPositionId(positionId),
+        asPairId(position.pairId),
         'closed',
         {
-          orderId: closeOrder.orderId,
+          orderId: asOrderId(closeOrder.orderId),
           platform: filledPlatform,
           status: closeOrderResult.status,
           filledPrice: closeOrderResult.filledPrice,
@@ -533,12 +539,14 @@ export class SingleLegResolutionService {
 
     const [kalshiBook, polymarketBook] = await Promise.all([
       withTimeout(
-        this.kalshiConnector.getOrderBook(position.pair.kalshiContractId),
+        this.kalshiConnector.getOrderBook(
+          asContractId(position.pair.kalshiContractId),
+        ),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),
       withTimeout(
         this.polymarketConnector.getOrderBook(
-          position.pair.polymarketClobTokenId!,
+          asContractId(position.pair.polymarketClobTokenId!),
         ),
         ORDERBOOK_FETCH_TIMEOUT_MS,
       ).catch(() => null),

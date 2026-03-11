@@ -23,6 +23,7 @@ import {
   POLYMARKET_CONNECTOR_TOKEN,
 } from '../connectors/connector.constants';
 import type { IPlatformConnector } from '../common/interfaces/platform-connector.interface';
+import { asOpportunityId, asPairId } from '../common/types/branded.type';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -193,11 +194,13 @@ export class TradingEngineService {
               opportunity,
               netEdge: opportunity.netEdge,
               reservationRequest: {
-                opportunityId: `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}:${Date.now()}`,
+                opportunityId: asOpportunityId(
+                  `${opportunity.dislocation.pairConfig.polymarketContractId}:${opportunity.dislocation.pairConfig.kalshiContractId}:${Date.now()}`,
+                ),
                 recommendedPositionSizeUsd: new FinancialDecimal(
                   decision.maxPositionSizeUsd,
                 ),
-                pairId: matchId,
+                pairId: asPairId(matchId),
                 isPaper:
                   this.kalshiConnector.getHealth().mode === 'paper' ||
                   this.polymarketConnector.getHealth().mode === 'paper',

@@ -5,6 +5,8 @@ import {
   CancelResult,
   OrderStatusResult,
 } from '../../common/types/platform.type';
+import { asOrderId } from '../../common/types/branded.type';
+import type { OrderId } from '../../common/types/branded.type';
 import {
   PaperTradingConfig,
   SimulatedOrder,
@@ -28,7 +30,7 @@ export class FillSimulatorService {
     }
 
     const filledPrice = this.applySlippage(params.price, params.side);
-    const orderId = crypto.randomUUID();
+    const orderId = asOrderId(crypto.randomUUID());
 
     const order: SimulatedOrder = {
       orderId,
@@ -55,7 +57,7 @@ export class FillSimulatorService {
     };
   }
 
-  getOrder(orderId: string): OrderStatusResult {
+  getOrder(orderId: OrderId): OrderStatusResult {
     const order = this.orderMap.get(orderId);
     if (!order) {
       return { orderId, status: 'not_found' };
@@ -68,7 +70,7 @@ export class FillSimulatorService {
     };
   }
 
-  cancelOrder(orderId: string): CancelResult {
+  cancelOrder(orderId: OrderId): CancelResult {
     const order = this.orderMap.get(orderId);
     if (!order) {
       return { orderId, status: 'not_found' };

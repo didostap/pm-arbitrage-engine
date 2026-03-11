@@ -27,6 +27,7 @@ import {
   ExecutionError,
   EXECUTION_ERROR_CODES,
 } from '../../common/errors/execution-error';
+import { asPositionId } from '../../common/types/branded.type';
 
 @ApiTags('Positions')
 @ApiBearerAuth()
@@ -43,9 +44,10 @@ export class SingleLegResolutionController {
   @ApiResponse({ status: 409, description: 'Invalid position state' })
   @ApiResponse({ status: 502, description: 'Platform connector failure' })
   async retryLeg(
-    @Param('id') positionId: string,
+    @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: RetryLegDto,
   ): Promise<RetryLegResponseDto> {
+    const positionId = asPositionId(id);
     try {
       const result = await this.resolutionService.retryLeg(
         positionId,
@@ -63,9 +65,10 @@ export class SingleLegResolutionController {
   @ApiResponse({ status: 409, description: 'Invalid position state' })
   @ApiResponse({ status: 422, description: 'Cannot determine close price' })
   async closeLeg(
-    @Param('id') positionId: string,
+    @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: CloseLegDto,
   ): Promise<CloseLegResponseDto> {
+    const positionId = asPositionId(id);
     try {
       const result = await this.resolutionService.closeLeg(
         positionId,

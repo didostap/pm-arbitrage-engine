@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
+import { type OrderId, type PairId } from '../../common/types/branded.type';
 
 @Injectable()
 export class OrderRepository {
@@ -10,16 +11,16 @@ export class OrderRepository {
     return this.prisma.order.create({ data });
   }
 
-  async findById(orderId: string) {
+  async findById(orderId: OrderId | string) {
     return this.prisma.order.findUnique({ where: { orderId } });
   }
 
-  async findByPairId(pairId: string) {
+  async findByPairId(pairId: PairId | string) {
     return this.prisma.order.findMany({ where: { pairId } });
   }
 
   async updateStatus(
-    orderId: string,
+    orderId: OrderId | string,
     status: Prisma.OrderUpdateInput['status'],
   ) {
     return this.prisma.order.update({
@@ -37,7 +38,7 @@ export class OrderRepository {
 
   /** Updates order status with optional fill data. */
   async updateOrderStatus(
-    orderId: string,
+    orderId: OrderId | string,
     status: Prisma.OrderUpdateInput['status'],
     fillPrice?: Prisma.OrderUpdateInput['fillPrice'],
     fillSize?: Prisma.OrderUpdateInput['fillSize'],

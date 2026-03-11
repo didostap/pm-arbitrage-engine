@@ -23,6 +23,7 @@ import {
 import { AuthTokenGuard } from '../common/guards/auth-token.guard';
 import { ClosePositionDto } from './dto/close-position.dto';
 import { CloseAllPositionsDto } from './dto/close-all-positions.dto';
+import { asPositionId } from '../common/types/branded.type';
 
 @ApiTags('Position Management')
 @ApiBearerAuth()
@@ -57,9 +58,10 @@ export class PositionManagementController {
     description: 'Position is not in a closeable state',
   })
   async closePosition(
-    @Param('id') positionId: string,
+    @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: ClosePositionDto,
   ) {
+    const positionId = asPositionId(id);
     const result = await this.closeService.closePosition(
       positionId,
       dto.rationale,

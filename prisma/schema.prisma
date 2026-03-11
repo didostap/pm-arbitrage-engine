@@ -227,3 +227,21 @@ model RiskOverrideLog {
 
   @@map("risk_override_logs")
 }
+
+// Calibration run history for threshold analysis and audit trail
+model CalibrationRun {
+  id                          String   @id @default(cuid())
+  timestamp                   DateTime @db.Timestamptz
+  totalResolvedMatches        Int      @map("total_resolved_matches")
+  tiers                       Json     // { autoApprove: CalibrationBand, pendingReview: CalibrationBand, autoReject: CalibrationBand }
+  boundaryAnalysis            Json     @map("boundary_analysis") // BoundaryAnalysisEntry[]
+  currentAutoApproveThreshold Int      @map("current_auto_approve_threshold")
+  currentMinReviewThreshold   Int      @map("current_min_review_threshold")
+  recommendations             Json     // string[]
+  minimumDataMet              Boolean  @map("minimum_data_met")
+  triggeredBy                 String   @map("triggered_by") // "cron" | "operator"
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([timestamp])
+  @@map("calibration_runs")
+}

@@ -1,4 +1,5 @@
 import { BaseEvent } from './base.event';
+import type { OpportunityId, ReservationId } from '../types/branded.type';
 
 export class LimitApproachedEvent extends BaseEvent {
   constructor(
@@ -25,7 +26,7 @@ export class LimitBreachedEvent extends BaseEvent {
 
 export class OverrideAppliedEvent extends BaseEvent {
   constructor(
-    public readonly opportunityId: string,
+    public readonly opportunityId: OpportunityId,
     public readonly rationale: string,
     public readonly originalRejectionReason: string,
     public readonly overrideAmountUsd: number,
@@ -37,7 +38,7 @@ export class OverrideAppliedEvent extends BaseEvent {
 
 export class OverrideDeniedEvent extends BaseEvent {
   constructor(
-    public readonly opportunityId: string,
+    public readonly opportunityId: OpportunityId,
     public readonly rationale: string,
     public readonly denialReason: string,
     correlationId?: string,
@@ -48,8 +49,8 @@ export class OverrideDeniedEvent extends BaseEvent {
 
 export class BudgetReservedEvent extends BaseEvent {
   constructor(
-    public readonly reservationId: string,
-    public readonly opportunityId: string,
+    public readonly reservationId: ReservationId,
+    public readonly opportunityId: OpportunityId,
     public readonly reservedCapitalUsd: string,
     correlationId?: string,
   ) {
@@ -59,8 +60,8 @@ export class BudgetReservedEvent extends BaseEvent {
 
 export class BudgetCommittedEvent extends BaseEvent {
   constructor(
-    public readonly reservationId: string,
-    public readonly opportunityId: string,
+    public readonly reservationId: ReservationId,
+    public readonly opportunityId: OpportunityId,
     public readonly committedCapitalUsd: string,
     correlationId?: string,
   ) {
@@ -70,8 +71,8 @@ export class BudgetCommittedEvent extends BaseEvent {
 
 export class BudgetReleasedEvent extends BaseEvent {
   constructor(
-    public readonly reservationId: string,
-    public readonly opportunityId: string,
+    public readonly reservationId: ReservationId,
+    public readonly opportunityId: OpportunityId,
     public readonly releasedCapitalUsd: string,
     correlationId?: string,
   ) {

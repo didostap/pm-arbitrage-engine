@@ -24,7 +24,13 @@ import {
   SingleLegExposureEvent,
 } from '../../common/events/execution.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
-import { PlatformId } from '../../common/types';
+import {
+  PlatformId,
+  asContractId,
+  asOrderId,
+  asPairId,
+  asPositionId,
+} from '../../common/types';
 
 const EXIT_POLL_INTERVAL_MS = 30_000;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -221,7 +227,7 @@ export class ExitMonitorService {
         await this.riskManager.closePosition(
           new Decimal(0),
           new Decimal(0),
-          position.pairId,
+          asPairId(position.pairId),
         );
         return;
       }
@@ -483,7 +489,7 @@ export class ExitMonitorService {
     let primaryResult;
     try {
       primaryResult = await primaryConnector.submitOrder({
-        contractId: primaryContractId,
+        contractId: asContractId(primaryContractId),
         side: primaryCloseSide,
         quantity: exitSize.toNumber(),
         price: primaryClosePrice.toNumber(),
@@ -534,7 +540,7 @@ export class ExitMonitorService {
     let secondaryResult;
     try {
       secondaryResult = await secondaryConnector.submitOrder({
-        contractId: secondaryContractId,
+        contractId: asContractId(secondaryContractId),
         side: secondaryCloseSide,
         quantity: exitSize.toNumber(),
         price: secondaryClosePrice.toNumber(),
@@ -661,12 +667,12 @@ export class ExitMonitorService {
       polymarketExitFillSize.round().gte(polymarketFillSize.round());
 
     // Determine which order is kalshi and which is polymarket
-    const kalshiCloseOrderId = isPrimaryKalshi
-      ? primaryExitOrder.orderId
-      : secondaryExitOrder.orderId;
-    const polymarketCloseOrderId = isPrimaryKalshi
-      ? secondaryExitOrder.orderId
-      : primaryExitOrder.orderId;
+    const kalshiCloseOrderId = asOrderId(
+      isPrimaryKalshi ? primaryExitOrder.orderId : secondaryExitOrder.orderId,
+    );
+    const polymarketCloseOrderId = asOrderId(
+      isPrimaryKalshi ? secondaryExitOrder.orderId : primaryExitOrder.orderId,
+    );
 
     if (isFullExit) {
       // Full exit → CLOSED
@@ -675,14 +681,14 @@ export class ExitMonitorService {
       await this.riskManager.closePosition(
         capitalReturned,
         realizedPnl,
-        position.pairId,
+        asPairId(position.pairId),
       );
 
       this.eventEmitter.emit(
         EVENT_NAMES.EXIT_TRIGGERED,
         new ExitTriggeredEvent(
-          position.positionId,
-          position.pairId,
+          asPositionId(position.positionId),
+          asPairId(position.pairId),
           evalResult.type!,
           new Decimal(position.expectedEdge.toString()).toFixed(8),
           evalResult.currentEdge.toFixed(8),
@@ -716,7 +722,7 @@ export class ExitMonitorService {
       await this.riskManager.releasePartialCapital(
         exitedEntryCapital.plus(realizedPnl),
         realizedPnl,
-        position.pairId,
+        asPairId(position.pairId),
       );
 
       // Overloaded: partial exit remainder, not single-leg failure
@@ -746,12 +752,12 @@ export class ExitMonitorService {
       this.eventEmitter.emit(
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         new SingleLegExposureEvent(
-          position.positionId,
-          position.pairId,
+          asPositionId(position.positionId),
+          asPairId(position.pairId),
           new Decimal(position.expectedEdge.toString()).toNumber(),
           {
             platform: filledPlatformId,
-            orderId: filledOrder.orderId,
+            orderId: asOrderId(filledOrder.orderId),
             side: filledSide,
             price: (filledLegIsPrimary
               ? primaryClosePrice
@@ -821,7 +827,7 @@ export class ExitMonitorService {
     closeSide: 'buy' | 'sell',
     closePrice: Decimal,
   ): Promise<Decimal> {
-    const book = await connector.getOrderBook(contractId);
+    const book = await connector.getOrderBook(asContractId(contractId));
     // Close side buy → consume asks at closePrice or lower
     // Close side sell → consume bids at closePrice or higher
     const levels = closeSide === 'buy' ? book.asks : book.bids;
@@ -873,12 +879,12 @@ export class ExitMonitorService {
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_EXPOSURE,
       new SingleLegExposureEvent(
-        position.positionId,
-        position.pairId,
+        asPositionId(position.positionId),
+        asPairId(position.pairId),
         new Decimal(position.expectedEdge.toString()).toNumber(),
         {
           platform: filledPlatformId,
-          orderId: filledExitOrderId,
+          orderId: asOrderId(filledExitOrderId),
           side:
             filledPlatformId === PlatformId.KALSHI
               ? position.kalshiSide === 'buy'
@@ -948,7 +954,7 @@ export class ExitMonitorService {
     originalSide: string,
     positionSize?: Decimal,
   ): Promise<Decimal | null> {
-    const orderBook = await connector.getOrderBook(contractId);
+    const orderBook = await connector.getOrderBook(asContractId(contractId));
     const levels = originalSide === 'buy' ? orderBook.bids : orderBook.asks;
 
     if (levels.length === 0) return null;

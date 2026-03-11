@@ -12,6 +12,13 @@ import {
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { PlatformId } from '../../common/types/platform.type';
+import {
+  asPositionId,
+  asOrderId,
+  asPairId,
+  asContractId,
+  asMatchId,
+} from '../../common/types/branded.type';
 import { PlatformApiError } from '../../common/errors/platform-api-error';
 import { KALSHI_ERROR_CODES } from '../../common/errors/platform-api-error';
 import { ExecutionLockService } from './execution-lock.service';
@@ -25,10 +32,10 @@ vi.mock('../../common/services/correlation-context', () => ({
 
 function createMockPosition(overrides: Record<string, unknown> = {}) {
   return {
-    positionId: 'pos-1',
-    pairId: 'pair-1',
-    kalshiOrderId: 'order-kalshi-1',
-    polymarketOrderId: 'order-poly-1',
+    positionId: asPositionId('pos-1'),
+    pairId: asPairId('pair-1'),
+    kalshiOrderId: asOrderId('order-kalshi-1'),
+    polymarketOrderId: asOrderId('order-poly-1'),
     kalshiSide: 'buy',
     polymarketSide: 'sell',
     entryPrices: { kalshi: '0.62', polymarket: '0.65' },
@@ -37,15 +44,15 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
     status: 'OPEN',
     isPaper: false,
     pair: {
-      matchId: 'pair-1',
-      kalshiContractId: 'kalshi-contract-1',
-      polymarketContractId: 'poly-contract-1',
+      matchId: asMatchId('pair-1'),
+      kalshiContractId: asContractId('kalshi-contract-1'),
+      polymarketContractId: asContractId('poly-contract-1'),
       polymarketClobTokenId: 'mock-clob-token-1',
       primaryLeg: 'kalshi',
       resolutionDate: null,
     },
     kalshiOrder: {
-      orderId: 'order-kalshi-1',
+      orderId: asOrderId('order-kalshi-1'),
       platform: 'KALSHI',
       side: 'buy',
       price: new Decimal('0.62'),
@@ -55,7 +62,7 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
       status: 'FILLED',
     },
     polymarketOrder: {
-      orderId: 'order-poly-1',
+      orderId: asOrderId('order-poly-1'),
       platform: 'POLYMARKET',
       side: 'sell',
       price: new Decimal('0.65'),
@@ -89,7 +96,7 @@ describe('PositionCloseService', () => {
     let orderCounter = 0;
     orderRepository = {
       create: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
-        orderId: `close-order-${++orderCounter}`,
+        orderId: asOrderId(`close-order-${++orderCounter}`),
         ...data,
       })),
       findById: vi.fn().mockResolvedValue(null),
@@ -99,7 +106,7 @@ describe('PositionCloseService', () => {
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.KALSHI,
-        contractId: 'kalshi-contract-1',
+        contractId: asContractId('kalshi-contract-1'),
         bids: [{ price: 0.66, quantity: 500 }],
         asks: [{ price: 0.68, quantity: 500 }],
         timestamp: new Date(),
@@ -111,7 +118,7 @@ describe('PositionCloseService', () => {
         description: 'Kalshi fees',
       }),
       submitOrder: vi.fn().mockResolvedValue({
-        orderId: 'kalshi-close-1',
+        orderId: asOrderId('kalshi-close-1'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 100,
@@ -122,7 +129,7 @@ describe('PositionCloseService', () => {
     polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET, {
       getOrderBook: vi.fn().mockResolvedValue({
         platformId: PlatformId.POLYMARKET,
-        contractId: 'poly-contract-1',
+        contractId: asContractId('poly-contract-1'),
         bids: [{ price: 0.62, quantity: 500 }],
         asks: [{ price: 0.64, quantity: 500 }],
         timestamp: new Date(),
@@ -134,7 +141,7 @@ describe('PositionCloseService', () => {
         description: 'Polymarket fees',
       }),
       submitOrder: vi.fn().mockResolvedValue({
-        orderId: 'poly-close-1',
+        orderId: asOrderId('poly-close-1'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 100,
@@ -176,12 +183,15 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position) // first read before lock
         .mockResolvedValueOnce(position); // re-read after lock
 
-      const result = await service.closePosition('pos-1', 'Manual close test');
+      const result = await service.closePosition(
+        asPositionId('pos-1'),
+        'Manual close test',
+      );
 
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBeDefined();
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
       expect(riskManager.closePosition).toHaveBeenCalled();
@@ -189,7 +199,7 @@ describe('PositionCloseService', () => {
         EVENT_NAMES.EXIT_TRIGGERED,
         expect.objectContaining({
           exitType: 'manual',
-          positionId: 'pos-1',
+          positionId: asPositionId('pos-1'),
         }),
       );
     });
@@ -200,7 +210,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position)
         .mockResolvedValueOnce(position);
 
-      await service.closePosition('pos-1');
+      await service.closePosition(asPositionId('pos-1'));
 
       expect(executionLockService.acquire).toHaveBeenCalled();
       expect(executionLockService.release).toHaveBeenCalled();
@@ -217,22 +227,22 @@ describe('PositionCloseService', () => {
       // Entry + prior partial exit orders
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('60'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('60'),
         },
@@ -240,21 +250,21 @@ describe('PositionCloseService', () => {
 
       // Orders fill for residual 40
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-close-2',
+        orderId: asOrderId('kalshi-close-2'),
         status: 'filled',
         filledPrice: 0.66,
         filledQuantity: 40,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-close-2',
+        orderId: asOrderId('poly-close-2'),
         status: 'filled',
         filledPrice: 0.62,
         filledQuantity: 40,
         timestamp: new Date(),
       });
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(true);
       // Should submit orders for residual size (40), not entry size (100)
@@ -278,17 +288,17 @@ describe('PositionCloseService', () => {
         new Error('Order rejected'),
       );
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'SINGLE_LEG_EXPOSED',
       );
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         expect.objectContaining({
-          positionId: 'pos-1',
+          positionId: asPositionId('pos-1'),
           origin: 'manual_close',
         }),
       );
@@ -302,7 +312,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position)
         .mockResolvedValueOnce(position);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not in a closeable state');
@@ -317,7 +327,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position)
         .mockResolvedValueOnce(position);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not in a closeable state');
@@ -331,7 +341,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position)
         .mockResolvedValueOnce(position);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not in a closeable state');
@@ -340,7 +350,7 @@ describe('PositionCloseService', () => {
     it('should return not found when position does not exist', async () => {
       positionRepository.findByIdWithOrders!.mockResolvedValue(null);
 
-      const result = await service.closePosition('nonexistent');
+      const result = await service.closePosition(asPositionId('nonexistent'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
@@ -356,7 +366,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position) // pre-lock read: OPEN
         .mockResolvedValueOnce(closedPosition); // post-lock re-read: CLOSED
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('already transitioning');
@@ -373,7 +383,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position) // pre-lock: found
         .mockRejectedValueOnce(new Error('DB error')); // post-lock re-read: fails
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(executionLockService.release).toHaveBeenCalled();
@@ -389,27 +399,27 @@ describe('PositionCloseService', () => {
 
       // Both legs only partially fill (50 of 100)
       kalshiConnector.submitOrder.mockResolvedValue({
-        orderId: 'kalshi-close-1',
+        orderId: asOrderId('kalshi-close-1'),
         status: 'partial',
         filledPrice: 0.66,
         filledQuantity: 50,
         timestamp: new Date(),
       });
       polymarketConnector.submitOrder.mockResolvedValue({
-        orderId: 'poly-close-1',
+        orderId: asOrderId('poly-close-1'),
         status: 'partial',
         filledPrice: 0.62,
         filledQuantity: 50,
         timestamp: new Date(),
       });
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBeDefined();
       expect(result.error).toContain('Partial fill');
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'EXIT_PARTIAL',
       );
       expect(riskManager.releasePartialCapital).toHaveBeenCalled();
@@ -428,39 +438,39 @@ describe('PositionCloseService', () => {
       // Exits fully match entry — zero residual
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
       ]);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBe('0.00000000');
       expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        'pos-1',
+        asPositionId('pos-1'),
         'CLOSED',
       );
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),
         new Decimal(0),
-        'pair-1',
+        asPairId('pair-1'),
       );
       // Should NOT submit any orders
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
@@ -477,28 +487,28 @@ describe('PositionCloseService', () => {
       // Kalshi fully exited, polymarket still has residual
       orderRepository.findByPairId!.mockResolvedValue([
         {
-          orderId: 'order-kalshi-1',
+          orderId: asOrderId('order-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'order-poly-1',
+          orderId: asOrderId('order-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-kalshi-1',
+          orderId: asOrderId('exit-kalshi-1'),
           platform: 'KALSHI',
           fillSize: new Decimal('100'),
         },
         {
-          orderId: 'exit-poly-1',
+          orderId: asOrderId('exit-poly-1'),
           platform: 'POLYMARKET',
           fillSize: new Decimal('50'),
         },
       ]);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('zero residual');
@@ -515,7 +525,7 @@ describe('PositionCloseService', () => {
         .findByIdWithOrders!.mockResolvedValueOnce(position)
         .mockResolvedValueOnce(position);
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(true);
       // Secondary connector should have getOrderBook called twice:
@@ -541,7 +551,7 @@ describe('PositionCloseService', () => {
         ),
       );
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('RATE_LIMITED');
@@ -562,7 +572,7 @@ describe('PositionCloseService', () => {
         ),
       );
 
-      const result = await service.closePosition('pos-1');
+      const result = await service.closePosition(asPositionId('pos-1'));
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('EXECUTION_FAILED');
@@ -575,14 +585,14 @@ describe('PositionCloseService', () => {
       overrides: Record<string, unknown> = {},
     ) {
       return {
-        positionId: id,
-        pairId: `pair-${id}`,
+        positionId: asPositionId(id),
+        pairId: asPairId(`pair-${id}`),
         status: 'OPEN',
         isPaper: false,
         pair: {
-          matchId: `pair-${id}`,
-          kalshiContractId: `kalshi-${id}`,
-          polymarketContractId: `poly-${id}`,
+          matchId: asMatchId(`pair-${id}`),
+          kalshiContractId: asContractId(`kalshi-${id}`),
+          polymarketContractId: asContractId(`poly-${id}`),
           polymarketClobTokenId: `mock-clob-${id}`,
           pairName: `Pair ${id}`,
           primaryLeg: 'kalshi',
@@ -762,10 +772,13 @@ describe('PositionCloseService', () => {
       // Pre-lock check: OPEN, post-lock re-read: CLOSED (exit monitor closed it)
       positionRepository
         .findByIdWithOrders!.mockResolvedValueOnce(
-          createMockPosition({ positionId: '1', status: 'OPEN' }),
+          createMockPosition({ positionId: asPositionId('1'), status: 'OPEN' }),
         )
         .mockResolvedValueOnce(
-          createMockPosition({ positionId: '1', status: 'CLOSED' }),
+          createMockPosition({
+            positionId: asPositionId('1'),
+            status: 'CLOSED',
+          }),
         );
 
       await service.closeAllPositions();

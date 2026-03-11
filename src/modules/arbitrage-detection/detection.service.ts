@@ -9,6 +9,7 @@ import { PlatformId, NormalizedOrderBook } from '../../common/types';
 import { ContractPairConfig } from '../contract-matching/types';
 import { getCorrelationId } from '../../common/services/correlation-context';
 import { RawDislocation, DetectionCycleResult } from './types';
+import { asContractId } from '../../common/types/branded.type';
 
 @Injectable()
 export class DetectionService {
@@ -67,7 +68,7 @@ export class DetectionService {
 
       try {
         kalshiOrderBook = await this.kalshiConnector.getOrderBook(
-          pair.kalshiContractId,
+          asContractId(pair.kalshiContractId),
         );
       } catch (error) {
         this.logger.error({
@@ -86,7 +87,7 @@ export class DetectionService {
 
       try {
         polymarketOrderBook = await this.polymarketConnector.getOrderBook(
-          pair.polymarketClobTokenId,
+          asContractId(pair.polymarketClobTokenId),
         );
       } catch (error) {
         this.logger.error({

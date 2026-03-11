@@ -21,6 +21,7 @@ import type {
   AuditEventDto,
 } from './dto/position-detail.dto';
 import { PositionEnrichmentService } from './position-enrichment.service';
+import type { PositionId } from '../common/types/branded.type';
 
 @Injectable()
 export class DashboardService {
@@ -82,7 +83,7 @@ export class DashboardService {
           : 0;
 
       // Balance computation
-      const bankrollStr = this.configService.get<string>('BANKROLL_USD');
+      const bankrollStr = this.configService.get<string>('RISK_BANKROLL_USD');
       let totalBankroll: string | null = null;
       let deployedCapital: string | null = null;
       let availableCapital: string | null = null;
@@ -392,7 +393,7 @@ export class DashboardService {
   }
 
   async getPositionById(
-    positionId: string,
+    positionId: PositionId | string,
   ): Promise<PositionSummaryDto | null> {
     try {
       const pos = await this.prisma.openPosition.findUnique({
@@ -457,7 +458,7 @@ export class DashboardService {
   ];
 
   async getPositionDetails(
-    positionId: string,
+    positionId: PositionId | string,
   ): Promise<PositionFullDetailDto | null> {
     try {
       const pos = await this.prisma.openPosition.findUnique({

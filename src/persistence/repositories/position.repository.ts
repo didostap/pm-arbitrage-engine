@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, Platform } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
+import type { PositionId, PairId } from '../../common/types/branded.type';
 
 @Injectable()
 export class PositionRepository {
@@ -10,11 +11,11 @@ export class PositionRepository {
     return this.prisma.openPosition.create({ data });
   }
 
-  async findById(positionId: string) {
+  async findById(positionId: PositionId | string) {
     return this.prisma.openPosition.findUnique({ where: { positionId } });
   }
 
-  async findByPairId(pairId: string) {
+  async findByPairId(pairId: PairId | string) {
     return this.prisma.openPosition.findMany({ where: { pairId } });
   }
 
@@ -51,7 +52,7 @@ export class PositionRepository {
   }
 
   async updateStatus(
-    positionId: string,
+    positionId: PositionId | string,
     status: Prisma.OpenPositionUpdateInput['status'],
   ) {
     return this.prisma.openPosition.update({
@@ -61,7 +62,7 @@ export class PositionRepository {
   }
 
   /** Fetches position with its associated ContractMatch for contract ID resolution. */
-  async findByIdWithPair(positionId: string) {
+  async findByIdWithPair(positionId: PositionId | string) {
     return this.prisma.openPosition.findUnique({
       where: { positionId },
       include: { pair: true },
@@ -69,7 +70,7 @@ export class PositionRepository {
   }
 
   /** Fetches position with pair + both entry orders for close/P&L operations. */
-  async findByIdWithOrders(positionId: string) {
+  async findByIdWithOrders(positionId: PositionId | string) {
     return this.prisma.openPosition.findUnique({
       where: { positionId },
       include: { pair: true, kalshiOrder: true, polymarketOrder: true },
@@ -135,7 +136,7 @@ export class PositionRepository {
   }
 
   async updateWithOrder(
-    positionId: string,
+    positionId: PositionId | string,
     data: Prisma.OpenPositionUpdateInput,
   ) {
     return this.prisma.openPosition.update({

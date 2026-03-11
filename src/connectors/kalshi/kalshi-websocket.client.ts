@@ -1,7 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { createSign, constants as cryptoConstants } from 'crypto';
 import WebSocket from 'ws';
-import { NormalizedOrderBook, PlatformId } from '../../common/types/index.js';
+import {
+  NormalizedOrderBook,
+  PlatformId,
+  asContractId,
+} from '../../common/types/index.js';
 import { RETRY_STRATEGIES } from '../../common/errors/index.js';
 import { normalizeKalshiLevels } from '../../common/utils/index.js';
 import type {
@@ -307,7 +311,7 @@ export class KalshiWebSocketClient {
 
     const normalized: NormalizedOrderBook = {
       platformId: PlatformId.KALSHI,
-      contractId: ticker,
+      contractId: asContractId(ticker),
       bids,
       asks,
       timestamp: new Date(),

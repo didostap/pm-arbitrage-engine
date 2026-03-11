@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrderRepository } from './order.repository';
 import { PrismaService } from '../../common/prisma.service';
+import { asOrderId, asPairId } from '../../common/types/branded.type';
 
 describe('OrderRepository', () => {
   let repo: OrderRepository;
@@ -50,7 +51,7 @@ describe('OrderRepository', () => {
   it('should find order by ID', async () => {
     mockPrisma.order.findUnique.mockResolvedValue({ orderId: 'order-1' });
 
-    const result = await repo.findById('order-1');
+    const result = await repo.findById(asOrderId('order-1'));
 
     expect(mockPrisma.order.findUnique).toHaveBeenCalledWith({
       where: { orderId: 'order-1' },
@@ -61,7 +62,7 @@ describe('OrderRepository', () => {
   it('should find orders by pair ID', async () => {
     mockPrisma.order.findMany.mockResolvedValue([{ orderId: 'order-1' }]);
 
-    const result = await repo.findByPairId('pair-1');
+    const result = await repo.findByPairId(asPairId('pair-1'));
 
     expect(mockPrisma.order.findMany).toHaveBeenCalledWith({
       where: { pairId: 'pair-1' },
@@ -75,7 +76,7 @@ describe('OrderRepository', () => {
       status: 'CANCELLED',
     });
 
-    const result = await repo.updateStatus('order-1', 'CANCELLED');
+    const result = await repo.updateStatus(asOrderId('order-1'), 'CANCELLED');
 
     expect(mockPrisma.order.update).toHaveBeenCalledWith({
       where: { orderId: 'order-1' },

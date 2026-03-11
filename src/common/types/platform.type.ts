@@ -1,3 +1,5 @@
+import type { ContractId, OrderId } from './branded.type.js';
+
 export enum PlatformId {
   KALSHI = 'kalshi',
   POLYMARKET = 'polymarket',
@@ -13,7 +15,7 @@ export interface PlatformHealth {
 }
 
 export interface OrderParams {
-  contractId: string;
+  contractId: ContractId;
   side: 'buy' | 'sell';
   quantity: number;
   price: number;
@@ -21,7 +23,7 @@ export interface OrderParams {
 }
 
 export interface OrderResult {
-  orderId: string;
+  orderId: OrderId;
   platformId: PlatformId;
   status: 'filled' | 'partial' | 'pending' | 'rejected';
   filledQuantity: number;
@@ -30,12 +32,12 @@ export interface OrderResult {
 }
 
 export interface CancelResult {
-  orderId: string;
+  orderId: OrderId;
   status: 'cancelled' | 'not_found' | 'already_filled';
 }
 
 export interface Position {
-  contractId: string;
+  contractId: ContractId;
   platformId: PlatformId;
   side: 'yes' | 'no';
   quantity: number;
@@ -48,7 +50,7 @@ export interface Position {
  * Used by reconciliation to verify order states without throwing on not-found.
  */
 export interface OrderStatusResult {
-  orderId: string;
+  orderId: OrderId;
   status:
     | 'filled'
     | 'pending'

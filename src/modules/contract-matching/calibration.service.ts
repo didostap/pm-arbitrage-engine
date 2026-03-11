@@ -39,7 +39,10 @@ export class CalibrationService {
     );
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    // Load latest calibration result from DB (survives restarts)
+    await this.loadLatestFromDb();
+
     const enabled = this.configService.get<string>(
       'CALIBRATION_ENABLED',
       'true',
@@ -53,7 +56,7 @@ export class CalibrationService {
       '0 0 7 1 */3 *',
     );
     const job = new CronJob(cronExpr, () => {
-      void this.runCalibration();
+      void this.runCalibration('cron');
     });
     this.schedulerRegistry.addCronJob('calibration', job);
     job.start();
@@ -67,7 +70,37 @@ export class CalibrationService {
     return this.latestResult;
   }
 
-  async runCalibration(): Promise<CalibrationResult> {
+  async getCalibrationHistory(
+    limit: number,
+  ): Promise<{ data: CalibrationRunSummary[]; count: number }> {
+    const [runs, totalCount] = await Promise.all([
+      this.prisma.calibrationRun.findMany({
+        orderBy: { timestamp: 'desc' },
+        take: limit,
+      }),
+      this.prisma.calibrationRun.count(),
+    ]);
+
+    const data: CalibrationRunSummary[] = runs.map((run) => ({
+      id: run.id,
+      timestamp: run.timestamp,
+      totalResolvedMatches: run.totalResolvedMatches,
+      tiers: run.tiers as unknown as CalibrationResult['tiers'],
+      boundaryAnalysis:
+        run.boundaryAnalysis as unknown as BoundaryAnalysisEntry[],
+      currentAutoApproveThreshold: run.currentAutoApproveThreshold,
+      currentMinReviewThreshold: run.currentMinReviewThreshold,
+      recommendations: run.recommendations as unknown as string[],
+      minimumDataMet: run.minimumDataMet,
+      triggeredBy: run.triggeredBy,
+    }));
+
+    return { data, count: totalCount };
+  }
+
+  async runCalibration(
+    triggeredBy: 'cron' | 'operator' = 'cron',
+  ): Promise<CalibrationResult> {
     if (this.isRunning) {
       this.logger.warn({
         message: 'Calibration already running, skipping',
@@ -124,6 +157,7 @@ export class CalibrationService {
           `Insufficient data for calibration (${matches.length}/10 required)`,
         );
         this.latestResult = result;
+        await this.persistCalibrationRun(result, triggeredBy);
         this.emitAndLog(result);
         return result;
       }
@@ -200,6 +234,7 @@ export class CalibrationService {
       }
 
       this.latestResult = result;
+      await this.persistCalibrationRun(result, triggeredBy);
       this.emitAndLog(result);
       return result;
     } catch (error) {
@@ -215,6 +250,71 @@ export class CalibrationService {
       );
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  private async loadLatestFromDb(): Promise<void> {
+    try {
+      const dbResult = await this.prisma.calibrationRun.findFirst({
+        orderBy: { timestamp: 'desc' },
+      });
+      if (dbResult) {
+        this.latestResult = {
+          timestamp: dbResult.timestamp,
+          totalResolvedMatches: dbResult.totalResolvedMatches,
+          tiers: dbResult.tiers as unknown as CalibrationResult['tiers'],
+          boundaryAnalysis:
+            dbResult.boundaryAnalysis as unknown as BoundaryAnalysisEntry[],
+          currentAutoApproveThreshold: dbResult.currentAutoApproveThreshold,
+          currentMinReviewThreshold: dbResult.currentMinReviewThreshold,
+          recommendations: dbResult.recommendations as string[],
+          minimumDataMet: dbResult.minimumDataMet,
+        };
+        this.logger.log({
+          message: 'Loaded latest calibration result from database',
+          data: {
+            timestamp: dbResult.timestamp.toISOString(),
+            totalResolvedMatches: dbResult.totalResolvedMatches,
+          },
+        });
+      }
+    } catch (error) {
+      this.logger.warn({
+        message: 'Failed to load calibration result from database',
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async persistCalibrationRun(
+    result: CalibrationResult,
+    triggeredBy: 'cron' | 'operator',
+  ): Promise<void> {
+    try {
+      await this.prisma.calibrationRun.create({
+        data: {
+          timestamp: result.timestamp,
+          totalResolvedMatches: result.totalResolvedMatches,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          tiers: JSON.parse(JSON.stringify(result.tiers)),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          boundaryAnalysis: JSON.parse(JSON.stringify(result.boundaryAnalysis)),
+          currentAutoApproveThreshold: result.currentAutoApproveThreshold,
+          currentMinReviewThreshold: result.currentMinReviewThreshold,
+          recommendations: result.recommendations,
+          minimumDataMet: result.minimumDataMet,
+          triggeredBy,
+        },
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to persist calibration run',
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 
@@ -260,4 +360,17 @@ export class CalibrationService {
       data: result,
     });
   }
+}
+
+export interface CalibrationRunSummary {
+  id: string;
+  timestamp: Date;
+  totalResolvedMatches: number;
+  tiers: CalibrationResult['tiers'];
+  boundaryAnalysis: BoundaryAnalysisEntry[];
+  currentAutoApproveThreshold: number;
+  currentMinReviewThreshold: number;
+  recommendations: string[];
+  minimumDataMet: boolean;
+  triggeredBy: string;
 }

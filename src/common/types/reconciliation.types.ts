@@ -1,4 +1,5 @@
 import { PositionStatus } from '@prisma/client';
+import type { PairId, PositionId } from './branded.type.js';
 
 export interface ReconciliationContext {
   recommendedStatus: PositionStatus;
@@ -22,8 +23,8 @@ export interface ReconciliationResult {
 }
 
 export interface ReconciliationDiscrepancy {
-  positionId: string;
-  pairId: string;
+  positionId: PositionId;
+  pairId: PairId;
   discrepancyType: ReconciliationContext['discrepancyType'];
   localState: string;
   platformState: string;

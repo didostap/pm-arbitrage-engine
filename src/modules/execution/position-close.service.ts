@@ -28,7 +28,13 @@ import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import { PlatformApiError } from '../../common/errors/platform-api-error';
 import { KALSHI_ERROR_CODES } from '../../common/errors/platform-api-error';
 import { POLYMARKET_ERROR_CODES } from '../../connectors/polymarket/polymarket-error-codes';
-import { PlatformId } from '../../common/types';
+import {
+  PlatformId,
+  asContractId,
+  asOrderId,
+  asPairId,
+  asPositionId,
+} from '../../common/types';
 import { FinancialMath, getResidualSize } from '../../common/utils';
 import { getCorrelationId } from '../../common/services/correlation-context';
 
@@ -149,7 +155,7 @@ export class PositionCloseService implements IPositionCloseService {
           await this.riskManager.closePosition(
             new Decimal(0),
             new Decimal(0),
-            position.pairId,
+            asPairId(position.pairId),
           );
           this.logger.warn({
             message:
@@ -185,9 +191,11 @@ export class PositionCloseService implements IPositionCloseService {
 
       // Fetch fresh order books and compute VWAP close prices
       const [kalshiOrderBook, polymarketOrderBook] = await Promise.all([
-        this.kalshiConnector.getOrderBook(position.pair.kalshiContractId),
+        this.kalshiConnector.getOrderBook(
+          asContractId(position.pair.kalshiContractId),
+        ),
         this.polymarketConnector.getOrderBook(
-          position.pair.polymarketClobTokenId!,
+          asContractId(position.pair.polymarketClobTokenId!),
         ),
       ]);
 
@@ -260,7 +268,7 @@ export class PositionCloseService implements IPositionCloseService {
       let primaryResult;
       try {
         primaryResult = await primaryConnector.submitOrder({
-          contractId: primaryContractId,
+          contractId: asContractId(primaryContractId),
           side: primaryCloseSide,
           quantity: exitSize.toNumber(),
           price: primaryClosePrice.toNumber(),
@@ -302,8 +310,9 @@ export class PositionCloseService implements IPositionCloseService {
       // Re-fetch secondary order book after primary fills (price may have moved)
       let freshSecondaryClosePrice = secondaryClosePrice;
       try {
-        const freshSecondaryBook =
-          await secondaryConnector.getOrderBook(secondaryContractId);
+        const freshSecondaryBook = await secondaryConnector.getOrderBook(
+          asContractId(secondaryContractId),
+        );
         const freshSecondaryLevels = isPrimaryKalshi
           ? position.polymarketSide === 'buy'
             ? freshSecondaryBook.bids
@@ -328,7 +337,7 @@ export class PositionCloseService implements IPositionCloseService {
       let secondaryResult;
       try {
         secondaryResult = await secondaryConnector.submitOrder({
-          contractId: secondaryContractId,
+          contractId: asContractId(secondaryContractId),
           side: secondaryCloseSide,
           quantity: exitSize.toNumber(),
           price: freshSecondaryClosePrice.toNumber(),
@@ -451,12 +460,16 @@ export class PositionCloseService implements IPositionCloseService {
         kalshiExitFillSize.round().gte(kalshiEffectiveSize.round()) &&
         polymarketExitFillSize.round().gte(polymarketEffectiveSize.round());
 
-      const kalshiCloseOrderId = isPrimaryKalshi
-        ? primaryCloseOrder.orderId
-        : secondaryCloseOrder.orderId;
-      const polymarketCloseOrderId = isPrimaryKalshi
-        ? secondaryCloseOrder.orderId
-        : primaryCloseOrder.orderId;
+      const kalshiCloseOrderId = asOrderId(
+        isPrimaryKalshi
+          ? primaryCloseOrder.orderId
+          : secondaryCloseOrder.orderId,
+      );
+      const polymarketCloseOrderId = asOrderId(
+        isPrimaryKalshi
+          ? secondaryCloseOrder.orderId
+          : primaryCloseOrder.orderId,
+      );
 
       if (isFullExit) {
         // Full exit → CLOSED
@@ -467,14 +480,14 @@ export class PositionCloseService implements IPositionCloseService {
         await this.riskManager.closePosition(
           capitalReturned,
           realizedPnl,
-          position.pairId,
+          asPairId(position.pairId),
         );
 
         this.eventEmitter.emit(
           EVENT_NAMES.EXIT_TRIGGERED,
           new ExitTriggeredEvent(
-            position.positionId,
-            position.pairId,
+            asPositionId(position.positionId),
+            asPairId(position.pairId),
             'manual',
             new Decimal(position.expectedEdge.toString()).toFixed(8),
             '0',
@@ -511,7 +524,7 @@ export class PositionCloseService implements IPositionCloseService {
         await this.riskManager.releasePartialCapital(
           exitedEntryCapital.plus(realizedPnl),
           realizedPnl,
-          position.pairId,
+          asPairId(position.pairId),
         );
 
         this.logger.warn({
@@ -587,12 +600,12 @@ export class PositionCloseService implements IPositionCloseService {
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_EXPOSURE,
       new SingleLegExposureEvent(
-        position.positionId,
-        position.pairId,
+        asPositionId(position.positionId),
+        asPairId(position.pairId),
         new Decimal(position.expectedEdge.toString()).toNumber(),
         {
           platform: filledPlatformId,
-          orderId: filledCloseOrderId,
+          orderId: asOrderId(filledCloseOrderId),
           side:
             filledPlatformId === PlatformId.KALSHI
               ? position.kalshiSide === 'buy'

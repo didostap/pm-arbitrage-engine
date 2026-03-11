@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { KalshiConnector } from './kalshi.connector.js';
 import { PlatformId } from '../../common/types/index.js';
+import { asContractId, asOrderId } from '../../common/types/branded.type.js';
 import { PlatformApiError } from '../../common/errors/index.js';
 
 const mockGetMarketOrderbook = vi.fn();
@@ -166,10 +167,12 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const orderbook = await connector.getOrderBook('CPI-22DEC-TN0.1');
+      const orderbook = await connector.getOrderBook(
+        asContractId('CPI-22DEC-TN0.1'),
+      );
 
       expect(orderbook.platformId).toBe(PlatformId.KALSHI);
-      expect(orderbook.contractId).toBe('CPI-22DEC-TN0.1');
+      expect(orderbook.contractId).toBe(asContractId('CPI-22DEC-TN0.1'));
       // YES bid 62¢ → 0.62
       expect(orderbook.bids).toEqual([{ price: 0.62, quantity: 1000 }]);
       // NO bid 38¢ → YES ask (1 - 0.38) = 0.62
@@ -181,9 +184,9 @@ describe('KalshiConnector', () => {
         new Error('API error: UNAUTHORIZED'),
       );
 
-      await expect(connector.getOrderBook('CPI-22DEC-TN0.1')).rejects.toThrow(
-        PlatformApiError,
-      );
+      await expect(
+        connector.getOrderBook(asContractId('CPI-22DEC-TN0.1')),
+      ).rejects.toThrow(PlatformApiError);
     });
 
     it('should handle empty orderbook', async () => {
@@ -196,7 +199,7 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const orderbook = await connector.getOrderBook('EMPTY');
+      const orderbook = await connector.getOrderBook(asContractId('EMPTY'));
       expect(orderbook.bids).toEqual([]);
       expect(orderbook.asks).toEqual([]);
     });
@@ -218,14 +221,14 @@ describe('KalshiConnector', () => {
       });
 
       const result = await connector.submitOrder({
-        contractId: 'CPI-22DEC-TN0.1',
+        contractId: asContractId('CPI-22DEC-TN0.1'),
         side: 'buy',
         quantity: 10,
         price: 0.45,
         type: 'limit',
       });
 
-      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.orderId).toBe(asOrderId('kalshi-order-1'));
       expect(result.status).toBe('filled');
       expect(result.filledQuantity).toBe(10);
       expect(result.filledPrice).toBe(0.45);
@@ -252,7 +255,7 @@ describe('KalshiConnector', () => {
       });
 
       const result = await connector.submitOrder({
-        contractId: 'CPI-22DEC-TN0.1',
+        contractId: asContractId('CPI-22DEC-TN0.1'),
         side: 'buy',
         quantity: 10,
         price: 0.45,
@@ -267,7 +270,7 @@ describe('KalshiConnector', () => {
 
       await expect(
         connector.submitOrder({
-          contractId: 'X',
+          contractId: asContractId('X'),
           side: 'buy',
           quantity: 1,
           price: 0.5,
@@ -279,7 +282,7 @@ describe('KalshiConnector', () => {
 
   describe('getOrder', () => {
     it('should throw PlatformApiError when not connected', async () => {
-      await expect(connector.getOrder('order-1')).rejects.toThrow(
+      await expect(connector.getOrder(asOrderId('order-1'))).rejects.toThrow(
         PlatformApiError,
       );
     });
@@ -299,9 +302,9 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.getOrder('kalshi-order-1');
+      const result = await connector.getOrder(asOrderId('kalshi-order-1'));
 
-      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.orderId).toBe(asOrderId('kalshi-order-1'));
       expect(result.status).toBe('filled');
       expect(result.fillPrice).toBe(0.45);
       expect(result.fillSize).toBe(10);
@@ -323,7 +326,7 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.getOrder('kalshi-order-2');
+      const result = await connector.getOrder(asOrderId('kalshi-order-2'));
 
       expect(result.status).toBe('partial');
       expect(result.fillSize).toBe(5);
@@ -344,7 +347,7 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.getOrder('kalshi-order-3');
+      const result = await connector.getOrder(asOrderId('kalshi-order-3'));
 
       expect(result.status).toBe('pending');
       expect(result.fillPrice).toBeUndefined();
@@ -366,7 +369,7 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.getOrder('kalshi-order-4');
+      const result = await connector.getOrder(asOrderId('kalshi-order-4'));
 
       expect(result.status).toBe('cancelled');
     });
@@ -376,9 +379,9 @@ describe('KalshiConnector', () => {
 
       mockGetOrder.mockRejectedValue(new Error('Order not found (404)'));
 
-      const result = await connector.getOrder('missing-order');
+      const result = await connector.getOrder(asOrderId('missing-order'));
 
-      expect(result.orderId).toBe('missing-order');
+      expect(result.orderId).toBe(asOrderId('missing-order'));
       expect(result.status).toBe('not_found');
     });
 
@@ -387,7 +390,7 @@ describe('KalshiConnector', () => {
 
       mockGetOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
 
-      await expect(connector.getOrder('order-1')).rejects.toThrow(
+      await expect(connector.getOrder(asOrderId('order-1'))).rejects.toThrow(
         PlatformApiError,
       );
     });
@@ -395,7 +398,7 @@ describe('KalshiConnector', () => {
 
   describe('cancelOrder', () => {
     it('should throw PlatformApiError when not connected', async () => {
-      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+      await expect(connector.cancelOrder(asOrderId('order-1'))).rejects.toThrow(
         PlatformApiError,
       );
     });
@@ -415,9 +418,9 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.cancelOrder('kalshi-order-1');
+      const result = await connector.cancelOrder(asOrderId('kalshi-order-1'));
 
-      expect(result.orderId).toBe('kalshi-order-1');
+      expect(result.orderId).toBe(asOrderId('kalshi-order-1'));
       expect(result.status).toBe('cancelled');
     });
 
@@ -436,9 +439,9 @@ describe('KalshiConnector', () => {
         },
       });
 
-      const result = await connector.cancelOrder('kalshi-order-2');
+      const result = await connector.cancelOrder(asOrderId('kalshi-order-2'));
 
-      expect(result.orderId).toBe('kalshi-order-2');
+      expect(result.orderId).toBe(asOrderId('kalshi-order-2'));
       expect(result.status).toBe('already_filled');
     });
 
@@ -447,9 +450,9 @@ describe('KalshiConnector', () => {
 
       mockCancelOrder.mockRejectedValue(new Error('Order not found (404)'));
 
-      const result = await connector.cancelOrder('missing-order');
+      const result = await connector.cancelOrder(asOrderId('missing-order'));
 
-      expect(result.orderId).toBe('missing-order');
+      expect(result.orderId).toBe(asOrderId('missing-order'));
       expect(result.status).toBe('not_found');
     });
 
@@ -458,7 +461,7 @@ describe('KalshiConnector', () => {
 
       mockCancelOrder.mockRejectedValue(new Error('UNAUTHORIZED'));
 
-      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+      await expect(connector.cancelOrder(asOrderId('order-1'))).rejects.toThrow(
         PlatformApiError,
       );
     });
@@ -478,7 +481,7 @@ describe('KalshiConnector', () => {
         },
       });
 
-      await expect(connector.cancelOrder('order-1')).rejects.toThrow(
+      await expect(connector.cancelOrder(asOrderId('order-1'))).rejects.toThrow(
         PlatformApiError,
       );
     });
@@ -502,7 +505,7 @@ describe('KalshiConnector', () => {
         'acquireWrite',
       );
 
-      await connector.cancelOrder('order-1');
+      await connector.cancelOrder(asOrderId('order-1'));
 
       expect(acquireWriteSpy).toHaveBeenCalledOnce();
     });

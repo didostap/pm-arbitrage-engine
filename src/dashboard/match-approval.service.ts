@@ -10,6 +10,7 @@ import { MatchApprovedEvent } from '../common/events/match-approved.event';
 import { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import type { MatchSummaryDto } from './dto/match-approval.dto';
 import type { ContractMatch } from '@prisma/client';
+import { asMatchId, asContractId } from '../common/types/branded.type';
 
 @Injectable()
 export class MatchApprovalService {
@@ -123,9 +124,9 @@ export class MatchApprovalService {
     this.eventEmitter.emit(
       EVENT_NAMES.MATCH_APPROVED,
       new MatchApprovedEvent(
-        matchId,
-        updated.polymarketContractId,
-        updated.kalshiContractId,
+        asMatchId(matchId),
+        asContractId(updated.polymarketContractId),
+        asContractId(updated.kalshiContractId),
         rationale,
       ),
     );
@@ -176,9 +177,9 @@ export class MatchApprovalService {
     this.eventEmitter.emit(
       EVENT_NAMES.MATCH_REJECTED,
       new MatchRejectedEvent(
-        matchId,
-        updated.polymarketContractId,
-        updated.kalshiContractId,
+        asMatchId(matchId),
+        asContractId(updated.polymarketContractId),
+        asContractId(updated.kalshiContractId),
         rationale,
       ),
     );

@@ -9,6 +9,7 @@ import {
   PlatformId,
   Position,
 } from '../types/index.js';
+import type { ContractId, OrderId } from '../types/branded.type.js';
 
 /**
  * Platform connector interface — the single abstraction boundary between
@@ -22,13 +23,13 @@ export interface IPlatformConnector {
   submitOrder(params: OrderParams): Promise<OrderResult>;
 
   /** Cancel an existing order by ID. */
-  cancelOrder(orderId: string): Promise<CancelResult>;
+  cancelOrder(orderId: OrderId): Promise<CancelResult>;
 
   /** Query the current status of an order. Returns 'not_found' status instead of throwing on missing orders. */
-  getOrder(orderId: string): Promise<OrderStatusResult>;
+  getOrder(orderId: OrderId): Promise<OrderStatusResult>;
 
   /** Fetch a point-in-time order book snapshot for a contract. */
-  getOrderBook(contractId: string): Promise<NormalizedOrderBook>;
+  getOrderBook(contractId: ContractId): Promise<NormalizedOrderBook>;
 
   /** Retrieve all open positions on this platform. */
   getPositions(): Promise<Position[]>;

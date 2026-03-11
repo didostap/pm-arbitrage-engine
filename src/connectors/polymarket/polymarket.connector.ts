@@ -21,7 +21,8 @@ import type {
   PlatformHealth,
   Position,
 } from '../../common/types/index.js';
-import { PlatformId } from '../../common/types/index.js';
+import { PlatformId, asOrderId } from '../../common/types/index.js';
+import type { ContractId, OrderId } from '../../common/types/index.js';
 import {
   PlatformApiError,
   RETRY_STRATEGIES,
@@ -217,7 +218,7 @@ export class PolymarketConnector
     return Promise.resolve();
   }
 
-  async getOrderBook(contractId: string): Promise<NormalizedOrderBook> {
+  async getOrderBook(contractId: ContractId): Promise<NormalizedOrderBook> {
     if (!this.clobClient) {
       throw new PlatformApiError(
         POLYMARKET_ERROR_CODES.UNAUTHORIZED,
@@ -483,10 +484,11 @@ export class PolymarketConnector
       this.lastHeartbeat = new Date();
 
       // Extract order ID from response
-      const orderId =
+      const orderId = asOrderId(
         (postResponse.orderID as string | undefined) ??
-        (postResponse.id as string | undefined) ??
-        `pm-${Date.now()}`;
+          (postResponse.id as string | undefined) ??
+          `pm-${Date.now()}`,
+      );
 
       // Check if order was immediately matched
       const status = postResponse.status as string | undefined;
@@ -575,7 +577,7 @@ export class PolymarketConnector
     }
   }
 
-  async cancelOrder(orderId: string): Promise<CancelResult> {
+  async cancelOrder(orderId: OrderId): Promise<CancelResult> {
     if (!this.connected || !this.clobClient) {
       throw new PlatformApiError(
         POLYMARKET_ERROR_CODES.NOT_CONNECTED,
@@ -619,7 +621,7 @@ export class PolymarketConnector
     }
   }
 
-  async getOrder(orderId: string): Promise<OrderStatusResult> {
+  async getOrder(orderId: OrderId): Promise<OrderStatusResult> {
     if (!this.connected || !this.clobClient) {
       throw new PlatformApiError(
         POLYMARKET_ERROR_CODES.NOT_CONNECTED,

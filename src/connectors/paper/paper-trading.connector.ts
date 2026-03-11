@@ -10,6 +10,7 @@ import {
   PlatformId,
   Position,
 } from '../../common/types/platform.type';
+import type { ContractId, OrderId } from '../../common/types/branded.type';
 import { FillSimulatorService } from './fill-simulator.service';
 import { PaperTradingConfig } from './paper-trading.types';
 
@@ -30,7 +31,7 @@ export class PaperTradingConnector implements IPlatformConnector {
 
   // --- Data method delegation (real market data) ---
 
-  getOrderBook(contractId: string): Promise<NormalizedOrderBook> {
+  getOrderBook(contractId: ContractId): Promise<NormalizedOrderBook> {
     return this.realConnector.getOrderBook(contractId);
   }
 
@@ -64,11 +65,11 @@ export class PaperTradingConnector implements IPlatformConnector {
     return this.fillSimulator.simulateFill(params);
   }
 
-  cancelOrder(orderId: string): Promise<CancelResult> {
+  cancelOrder(orderId: OrderId): Promise<CancelResult> {
     return Promise.resolve(this.fillSimulator.cancelOrder(orderId));
   }
 
-  getOrder(orderId: string): Promise<OrderStatusResult> {
+  getOrder(orderId: OrderId): Promise<OrderStatusResult> {
     return Promise.resolve(this.fillSimulator.getOrder(orderId));
   }
 

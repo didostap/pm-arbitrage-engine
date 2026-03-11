@@ -17,6 +17,13 @@ import { EVENT_NAMES } from '../../common/events';
 import { RiskLimitError, RISK_ERROR_CODES } from '../../common/errors';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PlatformId, NormalizedOrderBook } from '../../common/types';
+import {
+  asContractId,
+  asMatchId,
+  asOpportunityId,
+  asPairId,
+  asReservationId,
+} from '../../common/types/branded.type';
 import type { BudgetReservation } from '../../common/types/risk.type';
 import { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-opportunity.type';
 import { ContractPairConfig } from '../contract-matching/types';
@@ -28,7 +35,7 @@ function makePair(overrides?: Partial<ContractPairConfig>): ContractPairConfig {
     eventDescription: 'Test event',
     operatorVerificationTimestamp: new Date(),
     primaryLeg: 'kalshi',
-    matchId: 'match-uuid-1',
+    matchId: asMatchId('match-uuid-1'),
     ...overrides,
   };
 }
@@ -39,7 +46,7 @@ function makeOrderBook(
 ): NormalizedOrderBook {
   return {
     platformId,
-    contractId,
+    contractId: asContractId(contractId),
     bids: [{ price: 0.5, quantity: 100 }],
     asks: [{ price: 0.55, quantity: 100 }],
     timestamp: new Date(),
@@ -747,7 +754,7 @@ describe('RiskManagerService', () => {
   describe('processOverride', () => {
     it('should return approved decision when no halt active', async () => {
       const decision = await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(decision.approved).toBe(true);
@@ -760,7 +767,7 @@ describe('RiskManagerService', () => {
       expect(service.isTradingHalted()).toBe(true);
 
       const decision = await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(decision.approved).toBe(false);
@@ -769,13 +776,13 @@ describe('RiskManagerService', () => {
 
     it('should emit OverrideAppliedEvent on success', async () => {
       await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         'risk.override.applied',
         expect.objectContaining({
-          opportunityId: 'opp-123',
+          opportunityId: asOpportunityId('opp-123'),
           rationale: 'High conviction based on analysis',
         }),
       );
@@ -785,13 +792,13 @@ describe('RiskManagerService', () => {
       await (service as any).updateDailyPnl(new FinancialDecimal(-600));
 
       await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         'risk.override.denied',
         expect.objectContaining({
-          opportunityId: 'opp-123',
+          opportunityId: asOpportunityId('opp-123'),
           denialReason: 'Override denied: daily loss halt active',
         }),
       );
@@ -799,12 +806,12 @@ describe('RiskManagerService', () => {
 
     it('should persist override log to DB on success', async () => {
       await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          opportunityId: 'opp-123',
+          opportunityId: asOpportunityId('opp-123'),
           rationale: 'High conviction based on analysis',
           approved: true,
         }),
@@ -815,12 +822,12 @@ describe('RiskManagerService', () => {
       await (service as any).updateDailyPnl(new FinancialDecimal(-600));
 
       await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          opportunityId: 'opp-123',
+          opportunityId: asOpportunityId('opp-123'),
           approved: false,
           denialReason: 'Override denied: daily loss halt active',
         }),
@@ -829,7 +836,7 @@ describe('RiskManagerService', () => {
 
     it('should set overrideApplied: true in returned decision', async () => {
       const decision = await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(decision.overrideApplied).toBe(true);
@@ -837,7 +844,7 @@ describe('RiskManagerService', () => {
 
     it('should set overrideRationale in returned decision', async () => {
       const decision = await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(decision.overrideRationale).toBe(
@@ -850,7 +857,7 @@ describe('RiskManagerService', () => {
       (service as any).openPositionCount = 10;
 
       await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       expect(mockPrisma.riskOverrideLog.create).toHaveBeenCalledWith({
@@ -866,7 +873,7 @@ describe('RiskManagerService', () => {
       (service as any).openPositionCount = 5;
 
       const decision = await service.processOverride(
-        'opp-123',
+        asOpportunityId('opp-123'),
         'High conviction based on analysis',
       );
       // bankrollUsd (10000) * maxPositionPct (0.03) = 300
@@ -876,9 +883,9 @@ describe('RiskManagerService', () => {
 
   describe('budget reservation', () => {
     const makeReservationRequest = (overrides?: Record<string, unknown>) => ({
-      opportunityId: 'opp-1',
+      opportunityId: asOpportunityId('opp-1'),
       recommendedPositionSizeUsd: new FinancialDecimal(300),
-      pairId: 'pair-1',
+      pairId: asPairId('pair-1'),
       isPaper: false,
       ...overrides,
     });
@@ -887,7 +894,7 @@ describe('RiskManagerService', () => {
       const reservation = await service.reserveBudget(makeReservationRequest());
       expect(reservation).toBeDefined();
       expect(reservation.reservationId).toBeDefined();
-      expect(reservation.opportunityId).toBe('opp-1');
+      expect(reservation.opportunityId).toBe(asOpportunityId('opp-1'));
       expect(reservation.reservedPositionSlots).toBe(1);
       // maxPositionSizeUsd = 10000 * 0.03 = 300
       expect(reservation.reservedCapitalUsd.toNumber()).toBe(300);
@@ -900,7 +907,7 @@ describe('RiskManagerService', () => {
         EVENT_NAMES.BUDGET_RESERVED,
         expect.objectContaining({
           reservationId: reservation.reservationId,
-          opportunityId: 'opp-1',
+          opportunityId: asOpportunityId('opp-1'),
         }),
       );
     });
@@ -921,13 +928,15 @@ describe('RiskManagerService', () => {
 
       // Reserve one slot → effective = 10
       await service.reserveBudget(
-        makeReservationRequest({ opportunityId: 'opp-fill' }),
+        makeReservationRequest({ opportunityId: asOpportunityId('opp-fill') }),
       );
 
       // Next reservation should fail
       await expect(
         service.reserveBudget(
-          makeReservationRequest({ opportunityId: 'opp-overflow' }),
+          makeReservationRequest({
+            opportunityId: asOpportunityId('opp-overflow'),
+          }),
         ),
       ).rejects.toThrow(RiskLimitError);
     });
@@ -987,9 +996,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should throw when committing invalid reservation ID', async () => {
-      await expect(service.commitReservation('non-existent')).rejects.toThrow(
-        RiskLimitError,
-      );
+      await expect(
+        service.commitReservation(asReservationId('non-existent')),
+      ).rejects.toThrow(RiskLimitError);
     });
 
     it('should release reservation and return budget to pool', async () => {
@@ -1018,17 +1027,17 @@ describe('RiskManagerService', () => {
     });
 
     it('should throw when releasing invalid reservation ID', async () => {
-      await expect(service.releaseReservation('non-existent')).rejects.toThrow(
-        RiskLimitError,
-      );
+      await expect(
+        service.releaseReservation(asReservationId('non-existent')),
+      ).rejects.toThrow(RiskLimitError);
     });
 
     it('should track multiple concurrent reservations correctly', async () => {
       const r1 = await service.reserveBudget(
-        makeReservationRequest({ opportunityId: 'opp-1' }),
+        makeReservationRequest({ opportunityId: asOpportunityId('opp-1') }),
       );
       const r2 = await service.reserveBudget(
-        makeReservationRequest({ opportunityId: 'opp-2' }),
+        makeReservationRequest({ opportunityId: asOpportunityId('opp-2') }),
       );
 
       const exposure = service.getCurrentExposure();
@@ -1556,9 +1565,9 @@ describe('RiskManagerService', () => {
       capitalUsd: number,
     ): BudgetReservation {
       const reservation: BudgetReservation = {
-        reservationId: id,
-        opportunityId: 'opp-test',
-        pairId: 'pair-test',
+        reservationId: asReservationId(id),
+        opportunityId: asOpportunityId('opp-test'),
+        pairId: asPairId('pair-test'),
         isPaper: false,
         reservedPositionSlots: 1,
         reservedCapitalUsd: new FinancialDecimal(capitalUsd),
@@ -1574,7 +1583,10 @@ describe('RiskManagerService', () => {
       // Stub persistState to avoid Prisma
       vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
 
-      await service.adjustReservation('res-adj-1', new Decimal('150'));
+      await service.adjustReservation(
+        asReservationId('res-adj-1'),
+        new Decimal('150'),
+      );
 
       const map = (service as any).reservations as Map<
         string,
@@ -1590,7 +1602,10 @@ describe('RiskManagerService', () => {
         .spyOn(service as any, 'persistState')
         .mockResolvedValue(undefined);
 
-      await service.adjustReservation('res-adj-2', new Decimal('999999'));
+      await service.adjustReservation(
+        asReservationId('res-adj-2'),
+        new Decimal('999999'),
+      );
 
       // Capital should remain unchanged — persistState should NOT be called
       const map = (service as any).reservations as Map<
@@ -1604,7 +1619,10 @@ describe('RiskManagerService', () => {
 
     it('should throw RiskLimitError when reservation not found', async () => {
       await expect(
-        service.adjustReservation('nonexistent-id', new Decimal('100')),
+        service.adjustReservation(
+          asReservationId('nonexistent-id'),
+          new Decimal('100'),
+        ),
       ).rejects.toThrow('Cannot adjust reservation');
     });
 
@@ -1614,7 +1632,10 @@ describe('RiskManagerService', () => {
         .spyOn(service as any, 'persistState')
         .mockResolvedValue(undefined);
 
-      await service.adjustReservation('res-adj-3', new Decimal('50'));
+      await service.adjustReservation(
+        asReservationId('res-adj-3'),
+        new Decimal('50'),
+      );
 
       expect(persistSpy).toHaveBeenCalledTimes(1);
     });
@@ -1625,7 +1646,10 @@ describe('RiskManagerService', () => {
       vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
 
       // Total reserved = 500. Adjust res-adj-4 down to 100 → total should be 300
-      await service.adjustReservation('res-adj-4', new Decimal('100'));
+      await service.adjustReservation(
+        asReservationId('res-adj-4'),
+        new Decimal('100'),
+      );
 
       const map = (service as any).reservations as Map<
         string,
@@ -1641,9 +1665,9 @@ describe('RiskManagerService', () => {
 
   describe('paper mode duplicate opportunity prevention', () => {
     const makePaperRequest = (overrides?: Record<string, unknown>) => ({
-      opportunityId: 'opp-paper-1',
+      opportunityId: asOpportunityId('opp-paper-1'),
       recommendedPositionSizeUsd: new FinancialDecimal(300),
-      pairId: 'pair-paper-1',
+      pairId: asPairId('pair-paper-1'),
       isPaper: true,
       ...overrides,
     });
@@ -1654,7 +1678,7 @@ describe('RiskManagerService', () => {
 
       await expect(
         service.reserveBudget(
-          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+          makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
         ),
       ).rejects.toThrow(/paper position already open or reserved for pair/);
     });
@@ -1666,7 +1690,7 @@ describe('RiskManagerService', () => {
       await service.releaseReservation(reservation.reservationId);
 
       const second = await service.reserveBudget(
-        makePaperRequest({ opportunityId: 'opp-paper-2' }),
+        makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
       );
       expect(second).toBeDefined();
     });
@@ -1682,7 +1706,7 @@ describe('RiskManagerService', () => {
       );
 
       const second = await service.reserveBudget(
-        makePaperRequest({ opportunityId: 'opp-paper-2' }),
+        makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
       );
       expect(second).toBeDefined();
     });
@@ -1690,16 +1714,16 @@ describe('RiskManagerService', () => {
     it('should not apply dedup in live mode', async () => {
       vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
       const liveRequest = {
-        opportunityId: 'opp-live-1',
+        opportunityId: asOpportunityId('opp-live-1'),
         recommendedPositionSizeUsd: new FinancialDecimal(300),
-        pairId: 'pair-live-1',
+        pairId: asPairId('pair-live-1'),
         isPaper: false,
       };
 
       await service.reserveBudget(liveRequest);
       const second = await service.reserveBudget({
         ...liveRequest,
-        opportunityId: 'opp-live-2',
+        opportunityId: asOpportunityId('opp-live-2'),
       });
       expect(second).toBeDefined();
     });
@@ -1710,7 +1734,7 @@ describe('RiskManagerService', () => {
 
       await expect(
         service.reserveBudget(
-          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+          makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
         ),
       ).rejects.toThrow(/paper position already open or reserved for pair/);
     });
@@ -1721,8 +1745,8 @@ describe('RiskManagerService', () => {
 
       const second = await service.reserveBudget(
         makePaperRequest({
-          opportunityId: 'opp-paper-2',
-          pairId: 'pair-paper-2',
+          opportunityId: asOpportunityId('opp-paper-2'),
+          pairId: asPairId('pair-paper-2'),
         }),
       );
       expect(second).toBeDefined();
@@ -1752,8 +1776,8 @@ describe('RiskManagerService', () => {
       await expect(
         service.reserveBudget(
           makePaperRequest({
-            pairId: 'pair-restored-1',
-            opportunityId: 'opp-after-restart',
+            pairId: asPairId('pair-restored-1'),
+            opportunityId: asOpportunityId('opp-after-restart'),
           }),
         ),
       ).rejects.toThrow(/paper position already open or reserved for pair/);
@@ -1761,8 +1785,8 @@ describe('RiskManagerService', () => {
       // Different pair should still succeed
       const allowed = await service.reserveBudget(
         makePaperRequest({
-          pairId: 'pair-not-restored',
-          opportunityId: 'opp-new',
+          pairId: asPairId('pair-not-restored'),
+          opportunityId: asOpportunityId('opp-new'),
         }),
       );
       expect(allowed).toBeDefined();
@@ -1835,7 +1859,7 @@ describe('RiskManagerService', () => {
       const warnSpy = vi.spyOn(service['logger'], 'warn');
       await expect(
         service.reserveBudget(
-          makePaperRequest({ opportunityId: 'opp-paper-2' }),
+          makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
         ),
       ).rejects.toThrow();
 
@@ -1843,8 +1867,8 @@ describe('RiskManagerService', () => {
         expect.objectContaining({
           message: 'Paper mode duplicate opportunity blocked',
           data: expect.objectContaining({
-            pairId: 'pair-paper-1',
-            opportunityId: 'opp-paper-2',
+            pairId: asPairId('pair-paper-1'),
+            opportunityId: asOpportunityId('opp-paper-2'),
           }),
         }),
       );

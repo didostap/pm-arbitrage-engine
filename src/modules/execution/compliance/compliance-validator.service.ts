@@ -8,6 +8,7 @@ import type {
   ComplianceDecision,
   ComplianceViolation,
 } from './compliance-config';
+import { asOpportunityId, asPairId } from '../../../common/types/branded.type';
 
 @Injectable()
 export class ComplianceValidatorService {
@@ -49,8 +50,8 @@ export class ComplianceValidatorService {
       this.eventEmitter.emit(
         EVENT_NAMES.COMPLIANCE_BLOCKED,
         new ComplianceBlockedEvent(
-          context.opportunityId,
-          context.pairId,
+          asOpportunityId(context.opportunityId),
+          asPairId(context.pairId),
           violations.map((v) => ({
             platform: v.platform,
             category: v.category,

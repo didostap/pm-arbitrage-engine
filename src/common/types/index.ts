@@ -19,3 +19,23 @@ export type {
   ReconciliationResult,
   ReconciliationDiscrepancy,
 } from './reconciliation.types.js';
+export type {
+  Branded,
+  PositionId,
+  OrderId,
+  PairId,
+  MatchId,
+  ContractId,
+  OpportunityId,
+  ReservationId,
+} from './branded.type.js';
+export {
+  asPositionId,
+  asOrderId,
+  asPairId,
+  asMatchId,
+  asContractId,
+  asOpportunityId,
+  asReservationId,
+  unwrapId,
+} from './branded.type.js';

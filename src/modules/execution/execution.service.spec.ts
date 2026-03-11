@@ -21,6 +21,14 @@ import {
 } from '../../common/events/execution.events';
 import { createMockPlatformConnector } from '../../test/mock-factories.js';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
+import {
+  asContractId,
+  asMatchId,
+  asOpportunityId,
+  asOrderId,
+  asPairId,
+  asReservationId,
+} from '../../common/types/branded.type';
 import type {
   RankedOpportunity,
   BudgetReservation,
@@ -42,7 +50,7 @@ function makePairConfig(
     eventDescription: 'Test event',
     operatorVerificationTimestamp: new Date(),
     primaryLeg: 'kalshi',
-    matchId: 'match-uuid-1',
+    matchId: asMatchId('match-uuid-1'),
     ...overrides,
   };
 }
@@ -91,7 +99,7 @@ function makeKalshiOrderBook(): NormalizedOrderBook {
   // Kalshi buy side: asks at ≤0.45 with qty ≥223 (100/0.45≈222)
   return {
     platformId: PlatformId.KALSHI,
-    contractId: 'kalshi-contract-1',
+    contractId: asContractId('kalshi-contract-1'),
     bids: [{ price: 0.44, quantity: 500 }],
     asks: [{ price: 0.45, quantity: 500 }],
     timestamp: new Date(),
@@ -102,7 +110,7 @@ function makePolymarketOrderBook(): NormalizedOrderBook {
   // Polymarket sell side: bids at ≥0.55 with qty ≥182 (100/0.55≈181)
   return {
     platformId: PlatformId.POLYMARKET,
-    contractId: 'pm-contract-1',
+    contractId: asContractId('pm-contract-1'),
     bids: [{ price: 0.55, quantity: 500 }],
     asks: [{ price: 0.56, quantity: 500 }],
     timestamp: new Date(),
@@ -116,9 +124,9 @@ function makeOpportunity(
     opportunity: makeEnriched(enrichedOverrides),
     netEdge: new Decimal('0.08'),
     reservationRequest: {
-      opportunityId: 'opp-1',
+      opportunityId: asOpportunityId('opp-1'),
       recommendedPositionSizeUsd: new Decimal('100'),
-      pairId: 'pair-1',
+      pairId: asPairId('pair-1'),
       isPaper: false,
     },
   };
@@ -126,9 +134,9 @@ function makeOpportunity(
 
 function makeReservation(): BudgetReservation {
   return {
-    reservationId: 'res-1',
-    opportunityId: 'opp-1',
-    pairId: 'pair-1',
+    reservationId: asReservationId('res-1'),
+    opportunityId: asOpportunityId('opp-1'),
+    pairId: asPairId('pair-1'),
     isPaper: false,
     reservedPositionSlots: 1,
     reservedCapitalUsd: new Decimal('100'),
@@ -142,7 +150,7 @@ function makeFilledOrder(
   overrides?: Partial<OrderResult>,
 ): OrderResult {
   return {
-    orderId: `order-${platform}-1`,
+    orderId: asOrderId(`order-${platform}-1`),
     platformId: platform,
     status: 'filled',
     filledQuantity: 200,
@@ -510,7 +518,7 @@ describe('ExecutionService', () => {
       const event = singleLegCalls[0]![1] as SingleLegExposureEvent;
       expect(event).toBeInstanceOf(SingleLegExposureEvent);
       expect(event.positionId).toBeDefined();
-      expect(event.pairId).toBe('pair-1');
+      expect(event.pairId).toBe(asPairId('pair-1'));
       expect(event.expectedEdge).toBe(0.08);
       expect(event.filledLeg.platform).toBe(PlatformId.KALSHI);
       expect(event.filledLeg.orderId).toBeDefined();
@@ -869,8 +877,8 @@ describe('ExecutionService', () => {
 
       expect(complianceValidator.validate).toHaveBeenCalledWith(
         expect.objectContaining({
-          pairId: 'pair-1',
-          opportunityId: 'opp-1',
+          pairId: asPairId('pair-1'),
+          opportunityId: asOpportunityId('opp-1'),
           primaryPlatform: PlatformId.KALSHI,
           secondaryPlatform: PlatformId.POLYMARKET,
           eventDescription: 'Test event description',

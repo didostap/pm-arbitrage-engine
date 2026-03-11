@@ -1,16 +1,23 @@
 import { BaseEvent } from './base.event';
 import { PlatformId } from '../types/platform.type';
+import type {
+  ContractId,
+  OpportunityId,
+  OrderId,
+  PairId,
+  PositionId,
+} from '../types/branded.type';
 
 export class OrderFilledEvent extends BaseEvent {
   constructor(
-    public readonly orderId: string,
+    public readonly orderId: OrderId,
     public readonly platform: PlatformId,
     public readonly side: string,
     public readonly price: number,
     public readonly size: number,
     public readonly fillPrice: number,
     public readonly fillSize: number,
-    public readonly positionId: string,
+    public readonly positionId: PositionId,
     correlationId?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
@@ -23,7 +30,7 @@ export class ExecutionFailedEvent extends BaseEvent {
   constructor(
     public readonly reasonCode: number,
     public readonly reason: string,
-    public readonly opportunityId: string,
+    public readonly opportunityId: OpportunityId,
     public readonly context: Record<string, unknown>,
     correlationId?: string,
     public readonly isPaper: boolean = false,
@@ -35,12 +42,12 @@ export class ExecutionFailedEvent extends BaseEvent {
 
 export class SingleLegExposureEvent extends BaseEvent {
   constructor(
-    public readonly positionId: string,
-    public readonly pairId: string,
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
     public readonly expectedEdge: number,
     public readonly filledLeg: {
       platform: PlatformId;
-      orderId: string;
+      orderId: OrderId;
       side: string;
       price: number;
       size: number;
@@ -75,8 +82,8 @@ export class SingleLegExposureEvent extends BaseEvent {
 
 export class ExitTriggeredEvent extends BaseEvent {
   constructor(
-    public readonly positionId: string,
-    public readonly pairId: string,
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
     public readonly exitType:
       | 'take_profit'
       | 'stop_loss'
@@ -85,8 +92,8 @@ export class ExitTriggeredEvent extends BaseEvent {
     public readonly initialEdge: string,
     public readonly finalEdge: string,
     public readonly realizedPnl: string,
-    public readonly kalshiCloseOrderId: string,
-    public readonly polymarketCloseOrderId: string,
+    public readonly kalshiCloseOrderId: OrderId,
+    public readonly polymarketCloseOrderId: OrderId,
     correlationId?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
@@ -97,8 +104,8 @@ export class ExitTriggeredEvent extends BaseEvent {
 
 export class ComplianceBlockedEvent extends BaseEvent {
   constructor(
-    public readonly opportunityId: string,
-    public readonly pairId: string,
+    public readonly opportunityId: OpportunityId,
+    public readonly pairId: PairId,
     public readonly violations: Array<{
       platform: string;
       category: string;
@@ -115,7 +122,7 @@ export class ComplianceBlockedEvent extends BaseEvent {
 export class DepthCheckFailedEvent extends BaseEvent {
   constructor(
     public readonly platform: PlatformId,
-    public readonly contractId: string,
+    public readonly contractId: ContractId,
     public readonly side: 'buy' | 'sell',
     public readonly errorType: string,
     public readonly errorMessage: string,
@@ -127,11 +134,11 @@ export class DepthCheckFailedEvent extends BaseEvent {
 
 export class SingleLegResolvedEvent extends BaseEvent {
   constructor(
-    public readonly positionId: string,
-    public readonly pairId: string,
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
     public readonly resolutionType: 'retried' | 'closed',
     public readonly resolvedOrder: {
-      orderId: string;
+      orderId: OrderId;
       platform: PlatformId;
       status: string;
       filledPrice: number;

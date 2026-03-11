@@ -21,6 +21,7 @@ import { RISK_ERROR_CODES } from '../../common/errors/risk-limit-error';
 import { RiskOverrideDto } from './dto/risk-override.dto';
 import { RiskOverrideResponseDto } from './dto/risk-override-response.dto';
 import { RISK_MANAGER_TOKEN } from './risk-management.constants';
+import { asOpportunityId } from '../../common/types/branded.type';
 
 @ApiTags('Risk Management')
 @ApiBearerAuth()
@@ -46,7 +47,7 @@ export class RiskOverrideController {
   ): Promise<RiskOverrideResponseDto> {
     try {
       const decision = await this.riskManager.processOverride(
-        dto.opportunityId,
+        asOpportunityId(dto.opportunityId),
         dto.rationale,
       );
 

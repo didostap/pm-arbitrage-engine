@@ -21,7 +21,8 @@ import type {
   PlatformHealth,
   Position,
 } from '../../common/types/index.js';
-import { PlatformId } from '../../common/types/index.js';
+import { PlatformId, asOrderId } from '../../common/types/index.js';
+import type { ContractId, OrderId } from '../../common/types/index.js';
 import {
   KALSHI_ERROR_CODES,
   PlatformApiError,
@@ -274,7 +275,7 @@ export class KalshiConnector
     await this.disconnect();
   }
 
-  async getOrderBook(contractId: string): Promise<NormalizedOrderBook> {
+  async getOrderBook(contractId: ContractId): Promise<NormalizedOrderBook> {
     await this.rateLimiter.acquireRead();
 
     try {
@@ -395,7 +396,7 @@ export class KalshiConnector
           : 0;
 
       return {
-        orderId: order.order_id,
+        orderId: asOrderId(order.order_id),
         platformId: PlatformId.KALSHI,
         status,
         filledQuantity,
@@ -407,7 +408,7 @@ export class KalshiConnector
     }
   }
 
-  async cancelOrder(orderId: string): Promise<CancelResult> {
+  async cancelOrder(orderId: OrderId): Promise<CancelResult> {
     if (!this.connected) {
       throw new PlatformApiError(
         KALSHI_ERROR_CODES.INVALID_REQUEST,
@@ -460,7 +461,7 @@ export class KalshiConnector
     }
   }
 
-  async getOrder(orderId: string): Promise<OrderStatusResult> {
+  async getOrder(orderId: OrderId): Promise<OrderStatusResult> {
     if (!this.connected) {
       throw new PlatformApiError(
         KALSHI_ERROR_CODES.INVALID_REQUEST,
@@ -511,7 +512,7 @@ export class KalshiConnector
           : undefined;
 
       return {
-        orderId: order.order_id,
+        orderId: asOrderId(order.order_id),
         status,
         fillPrice,
         fillSize: fillCount > 0 ? fillCount : undefined,

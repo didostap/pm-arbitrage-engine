@@ -32,6 +32,7 @@ import {
   SystemHealthError,
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../common/errors/system-health-error';
+import { asMatchId } from '../common/types/branded.type';
 
 @ApiTags('Contract Matches')
 @ApiBearerAuth()
@@ -73,7 +74,8 @@ export class MatchApprovalController {
   @ApiResponse({ status: 404, description: 'Match not found' })
   async getMatchById(@Param('id') id: string): Promise<MatchDetailResponseDto> {
     try {
-      const data = await this.matchApprovalService.getMatchById(id);
+      const matchId = asMatchId(id);
+      const data = await this.matchApprovalService.getMatchById(matchId);
       return { data, timestamp: new Date().toISOString() };
     } catch (error) {
       this.throwHttpFromSystemError(error);
@@ -93,8 +95,9 @@ export class MatchApprovalController {
     @Body(new ValidationPipe({ whitelist: true })) dto: ApproveMatchDto,
   ): Promise<MatchActionResponseDto> {
     try {
+      const matchId = asMatchId(id);
       const match = await this.matchApprovalService.approveMatch(
-        id,
+        matchId,
         dto.rationale,
       );
       return {
@@ -127,8 +130,9 @@ export class MatchApprovalController {
     @Body(new ValidationPipe({ whitelist: true })) dto: RejectMatchDto,
   ): Promise<MatchActionResponseDto> {
     try {
+      const matchId = asMatchId(id);
       const match = await this.matchApprovalService.rejectMatch(
-        id,
+        matchId,
         dto.rationale,
       );
       return {

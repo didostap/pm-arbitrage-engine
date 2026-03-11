@@ -19,6 +19,7 @@ import { MatchPendingReviewEvent } from '../../common/events/match-pending-revie
 import { LlmScoringError } from '../../common/errors/llm-scoring-error.js';
 import { ConfigValidationError } from '../../common/errors/config-validation-error.js';
 import { withCorrelationId } from '../../common/services/correlation-context.js';
+import { asMatchId, asContractId } from '../../common/types/branded.type.js';
 
 interface DiscoveryStats {
   catalogsFetched: number;
@@ -339,16 +340,16 @@ export class CandidateDiscoveryService implements OnModuleInit {
         this.eventEmitter.emit(
           EVENT_NAMES.MATCH_APPROVED,
           new MatchApprovedEvent(
-            match.matchId,
-            polyContract.contractId,
-            kalshiContract.contractId,
+            asMatchId(match.matchId),
+            asContractId(polyContract.contractId),
+            asContractId(kalshiContract.contractId),
             `Auto-approved by discovery pipeline (score: ${result.score})`,
           ),
         );
         this.eventEmitter.emit(
           EVENT_NAMES.MATCH_AUTO_APPROVED,
           new MatchAutoApprovedEvent(
-            match.matchId,
+            asMatchId(match.matchId),
             result.score,
             result.model,
             result.escalated,
@@ -361,7 +362,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
         this.eventEmitter.emit(
           EVENT_NAMES.MATCH_PENDING_REVIEW,
           new MatchPendingReviewEvent(
-            match.matchId,
+            asMatchId(match.matchId),
             result.score,
             result.model,
             result.escalated,

@@ -1,4 +1,5 @@
 import { BaseEvent } from './base.event';
+import type { PairId, PositionId } from '../types/branded.type';
 
 /**
  * Emitted when trading is halted for any reason (time drift, risk limits, etc.)
@@ -66,8 +67,8 @@ export class SystemHealthCriticalEvent extends BaseEvent {
  */
 export class ReconciliationDiscrepancyEvent extends BaseEvent {
   constructor(
-    public readonly positionId: string,
-    public readonly pairId: string,
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
     public readonly discrepancyType:
       | 'order_status_mismatch'
       | 'order_not_found'

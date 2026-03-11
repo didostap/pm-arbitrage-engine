@@ -1,3 +1,4 @@
+import type { ContractId } from './branded.type.js';
 import { PlatformId } from './platform.type.js';
 
 export interface PriceLevel {
@@ -7,7 +8,7 @@ export interface PriceLevel {
 
 export interface NormalizedOrderBook {
   platformId: PlatformId;
-  contractId: string;
+  contractId: ContractId;
   bids: PriceLevel[];
   asks: PriceLevel[];
   timestamp: Date;

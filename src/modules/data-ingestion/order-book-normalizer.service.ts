@@ -8,6 +8,7 @@ import { PlatformId } from '../../common/types/platform.type.js';
 import { normalizeKalshiLevels } from '../../common/utils/index.js';
 import type { KalshiOrderBook } from '../../connectors/kalshi/kalshi-websocket.client';
 import type { PolymarketOrderBookMessage } from '../../connectors/polymarket/polymarket.types';
+import { asContractId } from '../../common/types/branded.type.js';
 
 @Injectable()
 export class OrderBookNormalizerService {
@@ -78,7 +79,7 @@ export class OrderBookNormalizerService {
 
     return {
       platformId: PlatformId.KALSHI,
-      contractId: kalshiBook.market_ticker,
+      contractId: asContractId(kalshiBook.market_ticker),
       bids,
       asks,
       timestamp: new Date(),
@@ -198,7 +199,7 @@ export class OrderBookNormalizerService {
 
     return {
       platformId: PlatformId.POLYMARKET,
-      contractId: polymarketBook.asset_id,
+      contractId: asContractId(polymarketBook.asset_id),
       bids,
       asks,
       timestamp: new Date(polymarketBook.timestamp),
