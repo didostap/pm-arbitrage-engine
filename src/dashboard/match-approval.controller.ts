@@ -57,6 +57,7 @@ export class MatchApprovalController {
       status,
       page,
       limit,
+      query.resolution,
     );
 
     return {

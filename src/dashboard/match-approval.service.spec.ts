@@ -165,6 +165,94 @@ describe('MatchApprovalService', () => {
 
       expect(dto.confidenceScore).toBe(87.3);
     });
+
+    it('should map resolution fields to MatchSummaryDto', async () => {
+      const match = buildMockMatch({
+        polymarketResolution: 'yes',
+        kalshiResolution: 'yes',
+        resolutionTimestamp: new Date('2026-03-10'),
+        resolutionDiverged: false,
+        divergenceNotes: null,
+      });
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.polymarketResolution).toBe('yes');
+      expect(dto.kalshiResolution).toBe('yes');
+      expect(dto.resolutionTimestamp).toBe('2026-03-10T00:00:00.000Z');
+      expect(dto.resolutionDiverged).toBe(false);
+      expect(dto.divergenceNotes).toBeNull();
+    });
+
+    it('should map null resolution fields to null', async () => {
+      const match = buildMockMatch();
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.polymarketResolution).toBeNull();
+      expect(dto.kalshiResolution).toBeNull();
+      expect(dto.resolutionTimestamp).toBeNull();
+      expect(dto.resolutionDiverged).toBeNull();
+      expect(dto.divergenceNotes).toBeNull();
+    });
+
+    it('should filter by resolution=resolved', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20, 'resolved');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { resolutionTimestamp: { not: null } },
+        }),
+      );
+    });
+
+    it('should filter by resolution=unresolved', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20, 'unresolved');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { resolutionTimestamp: null },
+        }),
+      );
+    });
+
+    it('should filter by resolution=diverged', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20, 'diverged');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { resolutionDiverged: true },
+        }),
+      );
+    });
+
+    it('should combine status and resolution filters', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('approved', 1, 20, 'diverged');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { operatorApproved: true, resolutionDiverged: true },
+        }),
+      );
+    });
   });
 
   describe('getMatchById', () => {

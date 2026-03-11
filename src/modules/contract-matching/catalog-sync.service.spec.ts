@@ -22,6 +22,7 @@ function makeMockProvider(
   return {
     getPlatformId: () => platform,
     listActiveContracts: vi.fn().mockResolvedValue(contracts),
+    getContractResolution: vi.fn().mockResolvedValue(null),
   };
 }
 

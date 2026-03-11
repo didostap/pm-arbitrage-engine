@@ -6,8 +6,9 @@ import { PlatformApiError } from '../../common/errors/platform-api-error';
 import type { ConfigService } from '@nestjs/config';
 
 // Mock kalshi-typescript SDK
-const { mockGetEvents } = vi.hoisted(() => ({
+const { mockGetEvents, mockGetMarket } = vi.hoisted(() => ({
   mockGetEvents: vi.fn(),
+  mockGetMarket: vi.fn(),
 }));
 vi.mock('kalshi-typescript', () => {
   const MockEventsApi = vi.fn() as {
@@ -15,8 +16,17 @@ vi.mock('kalshi-typescript', () => {
     prototype: Record<string, unknown>;
   };
   MockEventsApi.prototype['getEvents'] = mockGetEvents;
+  const MockMarketApi = vi.fn() as {
+    new (): unknown;
+    prototype: Record<string, unknown>;
+  };
+  MockMarketApi.prototype['getMarket'] = mockGetMarket;
   const MockConfiguration = vi.fn();
-  return { EventsApi: MockEventsApi, Configuration: MockConfiguration };
+  return {
+    EventsApi: MockEventsApi,
+    MarketApi: MockMarketApi,
+    Configuration: MockConfiguration,
+  };
 });
 
 function createMockConfig(
@@ -407,6 +417,119 @@ describe('KalshiCatalogProvider', () => {
 
       const result = await provider.listActiveContracts();
       expect(result[0]!.settlementDate).toBeUndefined();
+    });
+  });
+
+  describe('getContractResolution', () => {
+    it('should return yes outcome when market is settled with result yes', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: {
+          market: { ticker: 'BTC-100K', status: 'settled', result: 'yes' },
+        },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: 'yes',
+        settled: true,
+        rawStatus: 'settled',
+      });
+    });
+
+    it('should return no outcome when market is settled with result no', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: {
+          market: { ticker: 'BTC-100K', status: 'settled', result: 'no' },
+        },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: 'no',
+        settled: true,
+        rawStatus: 'settled',
+      });
+    });
+
+    it('should handle case-insensitive result field', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: {
+          market: { ticker: 'BTC-100K', status: 'settled', result: 'Yes' },
+        },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: 'yes',
+        settled: true,
+        rawStatus: 'settled',
+      });
+    });
+
+    it('should return invalid when settled with unexpected result', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: {
+          market: { ticker: 'BTC-100K', status: 'settled', result: 'void' },
+        },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: 'invalid',
+        settled: true,
+        rawStatus: 'settled',
+      });
+    });
+
+    it('should return null outcome when market is not settled (open)', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: { market: { ticker: 'BTC-100K', status: 'open' } },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: null,
+        settled: false,
+        rawStatus: 'open',
+      });
+    });
+
+    it('should return null outcome when market is closed but not settled', async () => {
+      mockGetMarket.mockResolvedValueOnce({
+        data: { market: { ticker: 'BTC-100K', status: 'closed' } },
+      });
+
+      const result = await provider.getContractResolution('BTC-100K');
+      expect(result).toEqual({
+        outcome: null,
+        settled: false,
+        rawStatus: 'closed',
+      });
+    });
+
+    it('should throw PlatformApiError on API failure', async () => {
+      mockGetMarket.mockRejectedValueOnce(new Error('Network timeout'));
+
+      await expect(provider.getContractResolution('BTC-100K')).rejects.toThrow(
+        PlatformApiError,
+      );
+      await expect(provider.getContractResolution('BTC-100K')).rejects.toThrow(
+        /Kalshi resolution check failed/,
+      );
+    });
+
+    it('should re-throw PlatformApiError as-is', async () => {
+      const apiError = new PlatformApiError(
+        1099,
+        'Rate limited',
+        PlatformId.KALSHI,
+        'warning',
+      );
+      mockGetMarket.mockRejectedValueOnce(apiError);
+
+      await expect(provider.getContractResolution('BTC-100K')).rejects.toBe(
+        apiError,
+      );
     });
   });
 });

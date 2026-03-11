@@ -10,9 +10,16 @@ export interface ContractSummary {
   platform: PlatformId;
 }
 
+export interface ResolutionOutcome {
+  outcome: 'yes' | 'no' | 'invalid' | null;
+  settled: boolean;
+  rawStatus?: string;
+}
+
 export interface IContractCatalogProvider {
   listActiveContracts(): Promise<ContractSummary[]>;
   getPlatformId(): PlatformId;
+  getContractResolution(contractId: string): Promise<ResolutionOutcome | null>;
 }
 
 export const KALSHI_CATALOG_TOKEN = 'IContractCatalogProvider:Kalshi';

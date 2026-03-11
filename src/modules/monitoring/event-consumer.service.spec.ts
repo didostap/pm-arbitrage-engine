@@ -107,6 +107,7 @@ describe('EventConsumerService', () => {
         EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
         EVENT_NAMES.RECONCILIATION_DISCREPANCY,
         EVENT_NAMES.TIME_DRIFT_HALT,
+        EVENT_NAMES.RESOLUTION_DIVERGED,
       ];
 
       for (const eventName of criticalEvents) {
@@ -150,6 +151,8 @@ describe('EventConsumerService', () => {
         EVENT_NAMES.RECONCILIATION_COMPLETE,
         EVENT_NAMES.SYSTEM_TRADING_RESUMED,
         EVENT_NAMES.PLATFORM_GAS_UPDATED,
+        EVENT_NAMES.RESOLUTION_POLL_COMPLETED,
+        EVENT_NAMES.CALIBRATION_COMPLETED,
       ];
 
       for (const eventName of infoEvents) {

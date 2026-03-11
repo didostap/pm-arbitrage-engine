@@ -425,4 +425,171 @@ describe('KnowledgeBaseService', () => {
       });
     });
   });
+
+  describe('getResolutionContext', () => {
+    it('should return stats and diverged examples for resolved matches', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(10) // totalResolved
+        .mockResolvedValueOnce(2); // divergedCount
+
+      prisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'div-1',
+          polymarketDescription: 'Poly desc 1',
+          kalshiDescription: 'Kalshi desc 1',
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+        {
+          matchId: 'div-2',
+          polymarketDescription: 'Poly desc 2',
+          kalshiDescription: 'Kalshi desc 2',
+          polymarketResolution: 'no',
+          kalshiResolution: 'yes',
+        },
+      ]);
+
+      const result = await service.getResolutionContext();
+
+      expect(result.totalResolved).toBe(10);
+      expect(result.divergedCount).toBe(2);
+      expect(result.divergenceRate).toBeCloseTo(0.2);
+      expect(result.validatedPatterns).toBe(8);
+      expect(result.divergedExamples).toHaveLength(2);
+      expect(result.divergedExamples[0]).toEqual({
+        matchId: 'div-1',
+        polyDesc: 'Poly desc 1',
+        kalshiDesc: 'Kalshi desc 1',
+        polyRes: 'yes',
+        kalshiRes: 'no',
+      });
+    });
+
+    it('should return empty context when no resolved matches exist', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+
+      const result = await service.getResolutionContext();
+
+      expect(result.totalResolved).toBe(0);
+      expect(result.divergedCount).toBe(0);
+      expect(result.divergenceRate).toBe(0);
+      expect(result.validatedPatterns).toBe(0);
+      expect(result.divergedExamples).toHaveLength(0);
+    });
+
+    it('should fall back to global stats when category is undefined', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(1);
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+
+      const result = await service.getResolutionContext(undefined);
+
+      expect(result.totalResolved).toBe(5);
+      // Global stats used — no category filter on count queries
+      expect(prisma.contractMatch.count).toHaveBeenCalledWith({
+        where: { resolutionTimestamp: { not: null } },
+      });
+    });
+
+    it('should fall back to global stats when category is provided (v1 limitation)', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(1);
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+
+      const result = await service.getResolutionContext('politics');
+
+      // v1: category is accepted but falls back to global stats
+      expect(result.totalResolved).toBe(5);
+      expect(prisma.contractMatch.count).toHaveBeenCalledWith({
+        where: { resolutionTimestamp: { not: null } },
+      });
+    });
+
+    it('should limit diverged examples to 3 most recent', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(20)
+        .mockResolvedValueOnce(5);
+
+      prisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'div-1',
+          polymarketDescription: 'desc',
+          kalshiDescription: 'desc',
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+        {
+          matchId: 'div-2',
+          polymarketDescription: 'desc',
+          kalshiDescription: 'desc',
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+        {
+          matchId: 'div-3',
+          polymarketDescription: 'desc',
+          kalshiDescription: 'desc',
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+      ]);
+
+      const result = await service.getResolutionContext();
+
+      expect(result.divergedExamples).toHaveLength(3);
+      // Verify the query limits to 3
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 3 }),
+      );
+    });
+
+    it('should truncate descriptions longer than 200 characters', async () => {
+      const longDesc = 'A'.repeat(250);
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(1);
+
+      prisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'div-1',
+          polymarketDescription: longDesc,
+          kalshiDescription: longDesc,
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+      ]);
+
+      const result = await service.getResolutionContext();
+
+      expect(result.divergedExamples[0]!.polyDesc).toHaveLength(203); // 200 + '...'
+      expect(result.divergedExamples[0]!.polyDesc).toMatch(/\.\.\.$/);
+      expect(result.divergedExamples[0]!.kalshiDesc).toHaveLength(203);
+    });
+
+    it('should handle null descriptions gracefully', async () => {
+      prisma.contractMatch.count
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(1);
+
+      prisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'div-1',
+          polymarketDescription: null,
+          kalshiDescription: null,
+          polymarketResolution: 'yes',
+          kalshiResolution: 'no',
+        },
+      ]);
+
+      const result = await service.getResolutionContext();
+
+      expect(result.divergedExamples[0]!.polyDesc).toBe('');
+      expect(result.divergedExamples[0]!.kalshiDesc).toBe('');
+    });
+  });
 });

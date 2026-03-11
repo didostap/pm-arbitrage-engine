@@ -46,6 +46,11 @@ declare module 'kalshi-typescript' {
       createOrderRequest: CreateOrderRequest,
       options?: unknown,
     ): Promise<{ data: CreateOrderResponse }>;
+
+    getMarket(
+      ticker: string,
+      options?: unknown,
+    ): Promise<{ data: { market: KalshiMarketDetail } }>;
   }
 
   export interface CreateOrderRequest {

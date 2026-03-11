@@ -315,4 +315,131 @@ describe('LlmScoringStrategy', () => {
       expect(calledPrompt).toContain('Score them 0-10');
     });
   });
+
+  describe('resolution context in prompt', () => {
+    it('should include resolution context when provided with data', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 85, confidence: 'high', reasoning: 'ok' }),
+      );
+
+      await strategy.scoreMatch('A', 'B', {
+        category: 'politics',
+        resolutionContext: {
+          totalResolved: 12,
+          divergedCount: 1,
+          divergenceRate: 0.083,
+          validatedPatterns: 11,
+          divergedExamples: [
+            {
+              matchId: 'ex-1',
+              polyDesc: 'Poly desc',
+              kalshiDesc: 'Kalshi desc',
+              polyRes: 'yes',
+              kalshiRes: 'no',
+            },
+          ],
+        },
+      });
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      expect(calledPrompt).toContain('Historical Resolution Data');
+      expect(calledPrompt).toContain('category "politics"');
+      expect(calledPrompt).toContain('12 matches resolved');
+      expect(calledPrompt).toContain('1 diverged');
+      expect(calledPrompt).toContain('8.3% divergence rate');
+      expect(calledPrompt).toContain('Recent divergences');
+      expect(calledPrompt).toContain('Poly desc');
+    });
+
+    it('should omit resolution section when not provided', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 90, confidence: 'high', reasoning: 'ok' }),
+      );
+
+      await strategy.scoreMatch('A', 'B');
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      expect(calledPrompt).not.toContain('Historical Resolution Data');
+    });
+
+    it('should omit resolution section when totalResolved is 0', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 90, confidence: 'high', reasoning: 'ok' }),
+      );
+
+      await strategy.scoreMatch('A', 'B', {
+        resolutionContext: {
+          totalResolved: 0,
+          divergedCount: 0,
+          divergenceRate: 0,
+          validatedPatterns: 0,
+          divergedExamples: [],
+        },
+      });
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      expect(calledPrompt).not.toContain('Historical Resolution Data');
+    });
+
+    it('should use "all categories" label when no category provided', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 90, confidence: 'high', reasoning: 'ok' }),
+      );
+
+      await strategy.scoreMatch('A', 'B', {
+        resolutionContext: {
+          totalResolved: 5,
+          divergedCount: 0,
+          divergenceRate: 0,
+          validatedPatterns: 5,
+          divergedExamples: [],
+        },
+      });
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      expect(calledPrompt).toContain('all categories');
+    });
+
+    it('should truncate resolution context section to 500 chars max', async () => {
+      mockGeminiGenerate.mockResolvedValue(
+        geminiResponse({ score: 90, confidence: 'high', reasoning: 'ok' }),
+      );
+
+      // Create many long diverged examples to exceed 500 chars
+      const longExamples = Array.from({ length: 10 }, (_, i) => ({
+        matchId: `ex-${i}`,
+        polyDesc: 'A very long polymarket description that takes up space',
+        kalshiDesc: 'A very long kalshi description that takes up space too',
+        polyRes: 'yes',
+        kalshiRes: 'no',
+      }));
+
+      await strategy.scoreMatch('A', 'B', {
+        resolutionContext: {
+          totalResolved: 100,
+          divergedCount: 10,
+          divergenceRate: 0.1,
+          validatedPatterns: 90,
+          divergedExamples: longExamples,
+        },
+      });
+
+      const calledPrompt = (
+        mockGeminiGenerate.mock.calls[0]![0] as { contents: string }
+      ).contents;
+      // Extract just the resolution section
+      const resStart = calledPrompt.indexOf('Historical Resolution Data');
+      const resEnd = calledPrompt.indexOf('CRITICAL RULE');
+      const resSection = calledPrompt.slice(resStart - 2, resEnd);
+      expect(resSection.length).toBeLessThanOrEqual(503); // 500 + '...' or newline prefix
+    });
+  });
 });

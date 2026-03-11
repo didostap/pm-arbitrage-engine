@@ -42,6 +42,7 @@ describe('ConfidenceScorerService', () => {
   };
   let knowledgeBase: {
     updateConfidenceScore: ReturnType<typeof vi.fn>;
+    getResolutionContext: ReturnType<typeof vi.fn>;
   };
   let prisma: {
     contractMatch: {
@@ -58,6 +59,13 @@ describe('ConfidenceScorerService', () => {
     strategy = { scoreMatch: vi.fn() };
     knowledgeBase = {
       updateConfidenceScore: vi.fn().mockResolvedValue(undefined),
+      getResolutionContext: vi.fn().mockResolvedValue({
+        totalResolved: 0,
+        divergedCount: 0,
+        divergenceRate: 0,
+        validatedPatterns: 0,
+        divergedExamples: [],
+      }),
     };
     prisma = {
       contractMatch: {
@@ -283,6 +291,88 @@ describe('ConfidenceScorerService', () => {
 
       await expect(service.scoreMatch('match-1')).rejects.toThrow(
         'LLM exploded',
+      );
+    });
+  });
+
+  describe('resolution context integration', () => {
+    it('should query resolution context and pass to scoring strategy', async () => {
+      const resolutionCtx = {
+        totalResolved: 10,
+        divergedCount: 1,
+        divergenceRate: 0.1,
+        validatedPatterns: 9,
+        divergedExamples: [],
+      };
+      knowledgeBase.getResolutionContext.mockResolvedValue(resolutionCtx);
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      strategy.scoreMatch.mockResolvedValue({
+        score: 50,
+        confidence: 'low',
+        reasoning: 'test',
+        model: 'model',
+        escalated: false,
+      });
+
+      await service.scoreMatch('match-1');
+
+      expect(knowledgeBase.getResolutionContext).toHaveBeenCalled();
+      expect(strategy.scoreMatch).toHaveBeenCalledWith(
+        'Will Bitcoin exceed $100k?',
+        'Bitcoin above $100,000 by Dec 2026',
+        expect.objectContaining({
+          resolutionContext: resolutionCtx,
+        }),
+      );
+    });
+
+    it('should proceed without resolution context if getResolutionContext throws', async () => {
+      knowledgeBase.getResolutionContext.mockRejectedValue(
+        new Error('DB connection lost'),
+      );
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      strategy.scoreMatch.mockResolvedValue({
+        score: 88,
+        confidence: 'high',
+        reasoning: 'match',
+        model: 'gemini-2.5-flash',
+        escalated: false,
+      });
+
+      const result = await service.scoreMatch('match-1');
+
+      expect(result!.score).toBe(88);
+      // Strategy should be called WITHOUT resolutionContext
+      expect(strategy.scoreMatch).toHaveBeenCalledWith(
+        'Will Bitcoin exceed $100k?',
+        'Bitcoin above $100,000 by Dec 2026',
+
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          resolutionDate: expect.any(Date),
+        }),
+      );
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const callArgs: Record<string, unknown> =
+        strategy.scoreMatch.mock.calls[0]![2];
+      expect(callArgs.resolutionContext).toBeUndefined();
+    });
+
+    it('should pass undefined category when match has no category info', async () => {
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      strategy.scoreMatch.mockResolvedValue({
+        score: 50,
+        confidence: 'low',
+        reasoning: 'test',
+        model: 'model',
+        escalated: false,
+      });
+
+      await service.scoreMatch('match-1');
+
+      // getResolutionContext called with undefined category
+      expect(knowledgeBase.getResolutionContext).toHaveBeenCalledWith(
+        undefined,
       );
     });
   });

@@ -24,13 +24,17 @@ export class MatchApprovalService {
     status: 'pending' | 'approved' | 'rejected' | 'all',
     page: number,
     limit: number,
+    resolution?: 'resolved' | 'unresolved' | 'diverged',
   ): Promise<{
     data: MatchSummaryDto[];
     count: number;
     page: number;
     limit: number;
   }> {
-    const where = this.buildWhereFilter(status);
+    const where = {
+      ...this.buildWhereFilter(status),
+      ...this.buildResolutionFilter(resolution),
+    };
     const skip = (page - 1) * limit;
 
     const [matches, count] = await Promise.all([
@@ -200,6 +204,19 @@ export class MatchApprovalService {
     }
   }
 
+  private buildResolutionFilter(resolution?: string): Record<string, unknown> {
+    switch (resolution) {
+      case 'resolved':
+        return { resolutionTimestamp: { not: null } };
+      case 'unresolved':
+        return { resolutionTimestamp: null };
+      case 'diverged':
+        return { resolutionDiverged: true };
+      default:
+        return {};
+    }
+  }
+
   private toSummaryDto(match: ContractMatch): MatchSummaryDto {
     return {
       matchId: match.matchId,
@@ -213,6 +230,11 @@ export class MatchApprovalService {
         match.operatorApprovalTimestamp?.toISOString() ?? null,
       operatorRationale: match.operatorRationale,
       confidenceScore: match.confidenceScore ?? null,
+      polymarketResolution: match.polymarketResolution ?? null,
+      kalshiResolution: match.kalshiResolution ?? null,
+      resolutionTimestamp: match.resolutionTimestamp?.toISOString() ?? null,
+      resolutionDiverged: match.resolutionDiverged ?? null,
+      divergenceNotes: match.divergenceNotes ?? null,
       createdAt: match.createdAt.toISOString(),
       updatedAt: match.updatedAt.toISOString(),
     };

@@ -42,6 +42,12 @@ export enum MatchStatusFilter {
   ALL = 'all',
 }
 
+export enum ResolutionStatusFilter {
+  RESOLVED = 'resolved',
+  UNRESOLVED = 'unresolved',
+  DIVERGED = 'diverged',
+}
+
 export class MatchListQueryDto {
   @ApiPropertyOptional({
     enum: MatchStatusFilter,
@@ -66,6 +72,14 @@ export class MatchListQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  @ApiPropertyOptional({
+    enum: ResolutionStatusFilter,
+    description: 'Filter by resolution status',
+  })
+  @IsOptional()
+  @IsEnum(ResolutionStatusFilter)
+  resolution?: ResolutionStatusFilter;
 }
 
 // ─── Response DTOs ───────────────────────────────────────────────────────────
@@ -94,6 +108,16 @@ export class MatchSummaryDto {
     description: 'Confidence score (0-100, null if not yet calculated)',
   })
   confidenceScore!: number | null;
+  @ApiProperty({ nullable: true, type: String })
+  polymarketResolution!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  kalshiResolution!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  resolutionTimestamp!: string | null;
+  @ApiProperty({ nullable: true, type: Boolean })
+  resolutionDiverged!: boolean | null;
+  @ApiProperty({ nullable: true, type: String })
+  divergenceNotes!: string | null;
   @ApiProperty() createdAt!: string;
   @ApiProperty() updatedAt!: string;
 }

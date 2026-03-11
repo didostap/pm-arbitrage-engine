@@ -28,6 +28,9 @@ import {
   formatReconciliationDiscrepancy,
   formatSystemHealthCritical,
   formatTestAlert,
+  formatResolutionDivergence,
+  formatResolutionPollCompleted,
+  formatCalibrationCompleted,
   getEventSeverity,
 } from './formatters/telegram-message.formatter.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -53,6 +56,9 @@ import type {
   ReconciliationDiscrepancyEvent,
   SystemHealthCriticalEvent,
 } from '../../common/events/system.events.js';
+import type { ResolutionDivergedEvent } from '../../common/events/resolution-diverged.event.js';
+import type { ResolutionPollCompletedEvent } from '../../common/events/resolution-poll-completed.event.js';
+import type { CalibrationCompletedEvent } from '../../common/events/calibration-completed.event.js';
 
 interface BufferedMessage {
   text: string;
@@ -90,6 +96,9 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.SYSTEM_TRADING_RESUMED,
   EVENT_NAMES.RECONCILIATION_DISCREPANCY,
   EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
+  EVENT_NAMES.RESOLUTION_DIVERGED,
+  EVENT_NAMES.RESOLUTION_POLL_COMPLETED,
+  EVENT_NAMES.CALIBRATION_COMPLETED,
 ]);
 
 /**
@@ -149,6 +158,18 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
   [
     EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
     (e) => formatSystemHealthCritical(e as SystemHealthCriticalEvent),
+  ],
+  [
+    EVENT_NAMES.RESOLUTION_DIVERGED,
+    (e) => formatResolutionDivergence(e as ResolutionDivergedEvent),
+  ],
+  [
+    EVENT_NAMES.RESOLUTION_POLL_COMPLETED,
+    (e) => formatResolutionPollCompleted(e as ResolutionPollCompletedEvent),
+  ],
+  [
+    EVENT_NAMES.CALIBRATION_COMPLETED,
+    (e) => formatCalibrationCompleted(e as CalibrationCompletedEvent),
   ],
 ]);
 

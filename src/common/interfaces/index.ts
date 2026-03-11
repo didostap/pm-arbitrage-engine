@@ -16,11 +16,13 @@ export { POSITION_CLOSE_SERVICE_TOKEN } from './position-close-service.interface
 export type {
   IScoringStrategy,
   ScoringResult,
+  ResolutionContext,
 } from './scoring-strategy.interface.js';
 export { SCORING_STRATEGY_TOKEN } from './scoring-strategy.interface.js';
 export type {
   IContractCatalogProvider,
   ContractSummary,
+  ResolutionOutcome,
 } from './contract-catalog-provider.interface.js';
 export {
   KALSHI_CATALOG_TOKEN,

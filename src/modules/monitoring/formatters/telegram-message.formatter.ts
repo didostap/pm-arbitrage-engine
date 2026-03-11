@@ -487,6 +487,103 @@ export function formatTestAlert(): string {
   return `${header}\n\n${body}`;
 }
 
+// ─── Story 8.3: Resolution Feedback Loop Formatters ──────────────────────────
+
+export function formatResolutionDivergence(event: {
+  matchId: string;
+  polymarketResolution: string;
+  kalshiResolution: string;
+  divergenceNotes: string | null;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.critical} <b>🚨 RESOLUTION DIVERGED</b>`;
+  const body = [
+    `Match: <code>${escapeHtml(event.matchId)}</code>`,
+    `Polymarket: <code>${escapeHtml(event.polymarketResolution)}</code>`,
+    `Kalshi: <code>${escapeHtml(event.kalshiResolution)}</code>`,
+    '',
+    '<b>Action Required:</b> Add root cause analysis in divergenceNotes',
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
+
+export function formatResolutionPollCompleted(event: {
+  stats: {
+    totalChecked: number;
+    newlyResolved: number;
+    diverged: number;
+    skippedInvalid: number;
+    pendingOnePlatform: number;
+    errors: number;
+  };
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const s = event.stats;
+  const severity = s.diverged > 0 ? 'warning' : 'info';
+  const emoji = SEVERITY_EMOJI[severity];
+  const header = `${emoji} <b>Resolution Poll ${s.diverged > 0 ? '⚠️' : '✓'}</b>`;
+  const body = [
+    `Checked: <code>${s.totalChecked}</code>`,
+    `Resolved: <code>${s.newlyResolved}</code>`,
+    s.diverged > 0
+      ? `<b>Diverged: ${s.diverged}</b>`
+      : `Diverged: <code>0</code>`,
+    `Pending: <code>${s.pendingOnePlatform}</code>`,
+    `Invalid: <code>${s.skippedInvalid}</code>`,
+    `Errors: <code>${s.errors}</code>`,
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
+
+export function formatCalibrationCompleted(event: {
+  calibrationResult: {
+    totalResolvedMatches: number;
+    minimumDataMet: boolean;
+    tiers: {
+      autoApprove: { matchCount: number; divergenceRate: number };
+      pendingReview: { matchCount: number; divergenceRate: number };
+      autoReject: { matchCount: number; divergenceRate: number };
+    };
+    recommendations: string[];
+  };
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const r = event.calibrationResult;
+  const hasRecs = r.recommendations.length > 0;
+  const severity = hasRecs ? 'warning' : 'info';
+  const emoji = SEVERITY_EMOJI[severity];
+  const header = `${emoji} <b>Calibration Analysis</b>`;
+  const lines = [
+    `Total resolved: <code>${r.totalResolvedMatches}</code>`,
+    `Data sufficient: <code>${r.minimumDataMet ? 'yes' : 'no'}</code>`,
+  ];
+
+  if (r.minimumDataMet) {
+    lines.push(
+      '',
+      `Auto-approve: <code>${r.tiers.autoApprove.matchCount}</code> (${r.tiers.autoApprove.divergenceRate}% div.)`,
+      `Pending review: <code>${r.tiers.pendingReview.matchCount}</code> (${r.tiers.pendingReview.divergenceRate}% div.)`,
+      `Auto-reject: <code>${r.tiers.autoReject.matchCount}</code> (${r.tiers.autoReject.divergenceRate}% div.)`,
+    );
+  }
+
+  if (hasRecs) {
+    lines.push('', '<b>Recommendations:</b>');
+    for (const rec of r.recommendations) {
+      lines.push(`• ${escapeHtml(rec)}`);
+    }
+  }
+
+  const body = lines.join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
+
 // ─── Event Severity Mapping ───────────────────────────────────────────────────
 
 const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
@@ -497,6 +594,7 @@ const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
   'system.health.critical': 'critical',
   'system.reconciliation.discrepancy': 'critical',
   'time.drift.halt': 'critical',
+  'contract.match.resolution.diverged': 'critical',
   // Warning
   'execution.order.failed': 'warning',
   'risk.limit.approached': 'warning',
@@ -511,6 +609,8 @@ const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
   'execution.single_leg.resolved': 'info',
   'platform.health.recovered': 'info',
   'system.trading.resumed': 'info',
+  'contract.match.resolution.poll_completed': 'info',
+  'contract.match.calibration.completed': 'info',
 };
 
 export function getEventSeverity(eventName: string): AlertSeverity {

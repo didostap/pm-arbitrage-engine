@@ -1,3 +1,18 @@
+export interface ResolutionContext {
+  totalResolved: number;
+  divergedCount: number;
+  /** Fraction (0 to 1), e.g. 0.083 = 8.3%. Multiply by 100 for percentage display. */
+  divergenceRate: number;
+  validatedPatterns: number;
+  divergedExamples: Array<{
+    matchId: string;
+    polyDesc: string;
+    kalshiDesc: string;
+    polyRes: string;
+    kalshiRes: string;
+  }>;
+}
+
 export const SCORING_STRATEGY_TOKEN = 'IScoringStrategy';
 
 export interface ScoringResult {
@@ -12,6 +27,10 @@ export interface IScoringStrategy {
   scoreMatch(
     polyDescription: string,
     kalshiDescription: string,
-    metadata?: { resolutionDate?: Date; category?: string },
+    metadata?: {
+      resolutionDate?: Date;
+      category?: string;
+      resolutionContext?: ResolutionContext;
+    },
   ): Promise<ScoringResult>;
 }

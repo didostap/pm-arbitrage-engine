@@ -9,12 +9,16 @@ import { LlmScoringStrategy } from './llm-scoring.strategy.js';
 import { ConfidenceScorerService } from './confidence-scorer.service.js';
 import { CatalogSyncService } from './catalog-sync.service.js';
 import { CandidateDiscoveryService } from './candidate-discovery.service.js';
+import { ResolutionPollerService } from './resolution-poller.service.js';
+import { CalibrationService } from './calibration.service.js';
+import { CalibrationController } from './calibration.controller.js';
 import { ConnectorModule } from '../../connectors/connector.module.js';
 
 export { SCORING_STRATEGY_TOKEN };
 
 @Module({
   imports: [forwardRef(() => ConnectorModule)],
+  controllers: [CalibrationController],
   providers: [
     ContractPairLoaderService,
     ContractMatchSyncService,
@@ -25,6 +29,8 @@ export { SCORING_STRATEGY_TOKEN };
     ConfidenceScorerService,
     CatalogSyncService,
     CandidateDiscoveryService,
+    ResolutionPollerService,
+    CalibrationService,
   ],
   exports: [
     ContractPairLoaderService,

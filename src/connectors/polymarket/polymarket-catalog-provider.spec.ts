@@ -214,4 +214,102 @@ describe('PolymarketCatalogProvider', () => {
       /Polymarket Gamma API error/,
     );
   });
+
+  describe('getContractResolution', () => {
+    it('should return yes when YES token has winner=true', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            conditionId: 'cond-abc',
+            tokens: [
+              { outcome: 'Yes', winner: true },
+              { outcome: 'No', winner: false },
+            ],
+          },
+        ]),
+      );
+
+      const result = await provider.getContractResolution('cond-abc');
+      expect(result).toEqual({ outcome: 'yes', settled: true });
+      expect(fetchSpy.mock.calls[0]![0]).toContain('condition_ids=cond-abc');
+    });
+
+    it('should return no when NO token has winner=true', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            conditionId: 'cond-abc',
+            tokens: [
+              { outcome: 'Yes', winner: false },
+              { outcome: 'No', winner: true },
+            ],
+          },
+        ]),
+      );
+
+      const result = await provider.getContractResolution('cond-abc');
+      expect(result).toEqual({ outcome: 'no', settled: true });
+    });
+
+    it('should return not settled when no winner set', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            conditionId: 'cond-abc',
+            tokens: [
+              { outcome: 'Yes', winner: false },
+              { outcome: 'No', winner: false },
+            ],
+          },
+        ]),
+      );
+
+      const result = await provider.getContractResolution('cond-abc');
+      expect(result).toEqual({ outcome: null, settled: false });
+    });
+
+    it('should return null when no markets returned', async () => {
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.getContractResolution('cond-abc');
+      expect(result).toBeNull();
+    });
+
+    it('should throw PlatformApiError on non-OK response', async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+      });
+
+      await expect(provider.getContractResolution('cond-abc')).rejects.toThrow(
+        PlatformApiError,
+      );
+    });
+
+    it('should throw PlatformApiError on fetch error', async () => {
+      fetchSpy.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(provider.getContractResolution('cond-abc')).rejects.toThrow(
+        PlatformApiError,
+      );
+      await expect(provider.getContractResolution('cond-abc')).rejects.toThrow(
+        /Polymarket resolution check failed/,
+      );
+    });
+
+    it('should re-throw PlatformApiError as-is', async () => {
+      const apiError = new PlatformApiError(
+        1099,
+        'Rate limited',
+        PlatformId.POLYMARKET,
+        'warning',
+      );
+      fetchSpy.mockRejectedValueOnce(apiError);
+
+      await expect(provider.getContractResolution('cond-abc')).rejects.toBe(
+        apiError,
+      );
+    });
+  });
 });

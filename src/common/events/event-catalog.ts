@@ -163,6 +163,12 @@ export const EVENT_NAMES = {
   // [Story 8.4] Discovery Pipeline Events
   /** Emitted when a discovery run completes (success or partial failure) */
   DISCOVERY_RUN_COMPLETED: 'contract.discovery.run_completed',
+
+  // [Story 8.3] Resolution Feedback Loop Events
+  /** Emitted when the resolution poller completes a run */
+  RESOLUTION_POLL_COMPLETED: 'contract.match.resolution.poll_completed',
+  /** Emitted when calibration analysis completes */
+  CALIBRATION_COMPLETED: 'contract.match.calibration.completed',
 } as const;
 
 /**

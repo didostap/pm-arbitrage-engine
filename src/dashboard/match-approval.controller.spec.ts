@@ -17,6 +17,7 @@ function buildMatchDto(
   return {
     matchId: 'match-1',
     polymarketContractId: 'poly-123',
+    polymarketClobTokenId: null,
     kalshiContractId: 'kalshi-456',
     polymarketDescription: 'Will X happen?',
     kalshiDescription: 'Will X happen by date?',
@@ -24,6 +25,11 @@ function buildMatchDto(
     operatorApprovalTimestamp: null,
     operatorRationale: null,
     confidenceScore: null,
+    polymarketResolution: null,
+    kalshiResolution: null,
+    resolutionTimestamp: null,
+    resolutionDiverged: null,
+    divergenceNotes: null,
     createdAt: '2026-03-01T00:00:00.000Z',
     updatedAt: '2026-03-01T00:00:00.000Z',
     ...overrides,
@@ -64,7 +70,7 @@ describe('MatchApprovalController', () => {
 
       const result = await controller.listMatches({});
 
-      expect(service.listMatches).toHaveBeenCalledWith('all', 1, 20);
+      expect(service.listMatches).toHaveBeenCalledWith('all', 1, 20, undefined);
       expect(result.data).toHaveLength(1);
       expect(result.count).toBe(1);
       expect(result.timestamp).toBeDefined();
@@ -80,7 +86,12 @@ describe('MatchApprovalController', () => {
 
       await controller.listMatches({ status: MatchStatusFilter.PENDING });
 
-      expect(service.listMatches).toHaveBeenCalledWith('pending', 1, 20);
+      expect(service.listMatches).toHaveBeenCalledWith(
+        'pending',
+        1,
+        20,
+        undefined,
+      );
     });
 
     it('should pass pagination params', async () => {
@@ -93,7 +104,7 @@ describe('MatchApprovalController', () => {
 
       await controller.listMatches({ page: 2, limit: 50 });
 
-      expect(service.listMatches).toHaveBeenCalledWith('all', 2, 50);
+      expect(service.listMatches).toHaveBeenCalledWith('all', 2, 50, undefined);
     });
   });
 

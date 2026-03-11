@@ -6,16 +6,45 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
   IScoringStrategy,
   ScoringResult,
+  ResolutionContext,
 } from '../../common/interfaces/scoring-strategy.interface.js';
 import {
   LlmScoringError,
   LLM_SCORING_ERROR_CODES,
 } from '../../common/errors/llm-scoring-error.js';
 
+function buildResolutionSection(
+  resolutionContext: ResolutionContext,
+  category?: string,
+): string {
+  if (resolutionContext.totalResolved === 0) return '';
+
+  const label = category ? `category "${category}"` : 'all categories';
+  let section = `\n\nHistorical Resolution Data for ${label}:\n- ${resolutionContext.totalResolved} matches resolved, ${resolutionContext.divergedCount} diverged (${(resolutionContext.divergenceRate * 100).toFixed(1)}% divergence rate)\n- Factor this historical accuracy into your confidence assessment`;
+
+  if (resolutionContext.divergedExamples.length > 0) {
+    section += '\n- Recent divergences:';
+    for (const ex of resolutionContext.divergedExamples) {
+      section += `\n  • "${ex.polyDesc}" vs "${ex.kalshiDesc}" (Poly: ${ex.polyRes}, Kalshi: ${ex.kalshiRes})`;
+    }
+  }
+
+  // Truncate to 500 chars max to stay within token budget
+  if (section.length > 500) {
+    section = section.slice(0, 497) + '...';
+  }
+
+  return section;
+}
+
 function buildPrompt(
   polyDescription: string,
   kalshiDescription: string,
-  metadata?: { resolutionDate?: Date; category?: string },
+  metadata?: {
+    resolutionDate?: Date;
+    category?: string;
+    resolutionContext?: ResolutionContext;
+  },
 ): string {
   let context = '';
   if (metadata?.resolutionDate) {
@@ -25,10 +54,18 @@ function buildPrompt(
     context += `\nCategory: ${metadata.category}`;
   }
 
+  let resolutionSection = '';
+  if (metadata?.resolutionContext) {
+    resolutionSection = buildResolutionSection(
+      metadata.resolutionContext,
+      metadata.category,
+    );
+  }
+
   return `You are a prediction market contract matching expert. Determine if these two contracts are FUNCTIONALLY IDENTICAL — meaning a YES on one platform corresponds to the same real-world outcome as a YES on the other.
 
 Contract A (Polymarket): ${polyDescription}
-Contract B (Kalshi): ${kalshiDescription}${context}
+Contract B (Kalshi): ${kalshiDescription}${context}${resolutionSection}
 
 CRITICAL RULE — Outcome specificity:
 Contracts about the SAME broader event but DIFFERENT specific outcomes are NOT matches. Score them 0-10.
@@ -175,7 +212,11 @@ export class LlmScoringStrategy implements IScoringStrategy {
   async scoreMatch(
     polyDescription: string,
     kalshiDescription: string,
-    metadata?: { resolutionDate?: Date; category?: string },
+    metadata?: {
+      resolutionDate?: Date;
+      category?: string;
+      resolutionContext?: ResolutionContext;
+    },
   ): Promise<ScoringResult> {
     const prompt = buildPrompt(polyDescription, kalshiDescription, metadata);
 

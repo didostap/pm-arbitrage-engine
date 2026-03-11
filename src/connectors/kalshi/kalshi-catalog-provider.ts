@@ -4,12 +4,14 @@ import { readFileSync } from 'node:fs';
 import {
   Configuration,
   EventsApi,
+  MarketApi,
   type KalshiEvent,
   type KalshiMarketDetail,
 } from 'kalshi-typescript';
 import type {
   IContractCatalogProvider,
   ContractSummary,
+  ResolutionOutcome,
 } from '../../common/interfaces/contract-catalog-provider.interface.js';
 import { PlatformId } from '../../common/types/platform.type.js';
 import { PlatformApiError } from '../../common/errors/platform-api-error.js';
@@ -21,6 +23,7 @@ const PAGE_DELAY_MS = 200;
 export class KalshiCatalogProvider implements IContractCatalogProvider {
   private readonly logger = new Logger(KalshiCatalogProvider.name);
   private readonly eventsApi: EventsApi;
+  private readonly marketApi: MarketApi;
 
   constructor(private readonly configService: ConfigService) {
     const apiKeyId = this.configService.get<string>('KALSHI_API_KEY_ID', '');
@@ -52,6 +55,7 @@ export class KalshiCatalogProvider implements IContractCatalogProvider {
     });
 
     this.eventsApi = new EventsApi(config);
+    this.marketApi = new MarketApi(config);
   }
 
   getPlatformId(): PlatformId {
@@ -103,6 +107,37 @@ export class KalshiCatalogProvider implements IContractCatalogProvider {
     });
 
     return contracts;
+  }
+
+  async getContractResolution(
+    contractId: string,
+  ): Promise<ResolutionOutcome | null> {
+    try {
+      const response = await this.marketApi.getMarket(contractId);
+      const market = response.data.market;
+
+      if (market.status === 'settled') {
+        const result = market.result?.toLowerCase();
+        if (result === 'yes' || result === 'no') {
+          return { outcome: result, settled: true, rawStatus: market.status };
+        }
+        return { outcome: 'invalid', settled: true, rawStatus: market.status };
+      }
+
+      return {
+        outcome: null,
+        settled: false,
+        rawStatus: market.status,
+      };
+    } catch (error) {
+      if (error instanceof PlatformApiError) throw error;
+      throw new PlatformApiError(
+        1011,
+        `Kalshi resolution check failed for ${contractId}: ${error instanceof Error ? error.message : String(error)}`,
+        PlatformId.KALSHI,
+        'error',
+      );
+    }
   }
 
   private mapToContractSummary(

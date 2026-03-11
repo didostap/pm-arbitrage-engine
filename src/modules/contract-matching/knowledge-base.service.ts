@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { ResolutionContext } from '../../common/interfaces/scoring-strategy.interface.js';
 import { PrismaService } from '../../common/prisma.service';
 import {
   SystemHealthError,
@@ -196,6 +197,63 @@ export class KnowledgeBaseService {
       totalResolved > 0 ? divergedCount / totalResolved : 0;
 
     return { totalResolved, divergedCount, divergenceRate };
+  }
+
+  async getResolutionContext(category?: string): Promise<ResolutionContext> {
+    if (category) {
+      this.logger.debug({
+        message:
+          'Category-based resolution context not yet supported (v1 limitation) — using global stats',
+        data: { category },
+      });
+    }
+
+    const [totalResolved, divergedCount] = await Promise.all([
+      this.prisma.contractMatch.count({
+        where: { resolutionTimestamp: { not: null } },
+      }),
+      this.prisma.contractMatch.count({
+        where: { resolutionDiverged: true },
+      }),
+    ]);
+
+    const divergenceRate =
+      totalResolved > 0 ? divergedCount / totalResolved : 0;
+    const validatedPatterns = totalResolved - divergedCount;
+
+    const divergedMatches = await this.prisma.contractMatch.findMany({
+      where: { resolutionDiverged: true },
+      select: {
+        matchId: true,
+        polymarketDescription: true,
+        kalshiDescription: true,
+        polymarketResolution: true,
+        kalshiResolution: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 3,
+    });
+
+    const divergedExamples = divergedMatches.map((m) => ({
+      matchId: m.matchId,
+      polyDesc: this.truncateDesc(m.polymarketDescription),
+      kalshiDesc: this.truncateDesc(m.kalshiDescription),
+      polyRes: m.polymarketResolution ?? '',
+      kalshiRes: m.kalshiResolution ?? '',
+    }));
+
+    return {
+      totalResolved,
+      divergedCount,
+      divergenceRate,
+      validatedPatterns,
+      divergedExamples,
+    };
+  }
+
+  private truncateDesc(desc: string | null | undefined, max = 200): string {
+    if (!desc) return '';
+    return desc.length > max ? desc.slice(0, max) + '...' : desc;
   }
 
   private buildResolutionFilter(

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type {
   IContractCatalogProvider,
   ContractSummary,
+  ResolutionOutcome,
 } from '../../common/interfaces/contract-catalog-provider.interface.js';
 import { PlatformId } from '../../common/types/platform.type.js';
 import { PlatformApiError } from '../../common/errors/platform-api-error.js';
@@ -16,6 +17,16 @@ interface PolymarketMarket {
   description?: string;
   endDate?: string;
   clobTokenIds?: string;
+}
+
+interface PolymarketToken {
+  outcome: string;
+  winner: boolean;
+}
+
+interface PolymarketResolutionMarket {
+  conditionId: string;
+  tokens: PolymarketToken[];
 }
 
 interface PolymarketEvent {
@@ -92,6 +103,53 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
     });
 
     return contracts;
+  }
+
+  async getContractResolution(
+    contractId: string,
+  ): Promise<ResolutionOutcome | null> {
+    try {
+      const url = `${this.gammaApiUrl}/markets?condition_ids=${contractId}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new PlatformApiError(
+          1022,
+          `Polymarket resolution check failed: ${response.status} ${response.statusText}`,
+          PlatformId.POLYMARKET,
+          'error',
+        );
+      }
+
+      const markets = (await response.json()) as PolymarketResolutionMarket[];
+
+      if (!markets.length) {
+        return null;
+      }
+
+      const market = markets[0]!;
+      const tokens = market.tokens ?? [];
+
+      for (const token of tokens) {
+        if (token.winner) {
+          const outcome = token.outcome?.toLowerCase();
+          if (outcome === 'yes' || outcome === 'no') {
+            return { outcome, settled: true };
+          }
+          return { outcome: 'invalid', settled: true };
+        }
+      }
+
+      return { outcome: null, settled: false };
+    } catch (error) {
+      if (error instanceof PlatformApiError) throw error;
+      throw new PlatformApiError(
+        1023,
+        `Polymarket resolution check failed for ${contractId}: ${error instanceof Error ? error.message : String(error)}`,
+        PlatformId.POLYMARKET,
+        'error',
+      );
+    }
   }
 
   private mapToContractSummary(

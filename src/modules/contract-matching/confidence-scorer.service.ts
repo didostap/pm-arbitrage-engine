@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type {
   IScoringStrategy,
   ScoringResult,
+  ResolutionContext,
 } from '../../common/interfaces/scoring-strategy.interface.js';
 import { SCORING_STRATEGY_TOKEN } from '../../common/interfaces/scoring-strategy.interface.js';
 import { PrismaService } from '../../common/prisma.service.js';
@@ -73,12 +74,30 @@ export class ConfidenceScorerService {
       return undefined;
     }
 
+    // Query resolution context for feedback integration (graceful degradation)
+    let resolutionContext: ResolutionContext | undefined;
+    try {
+      resolutionContext = await this.knowledgeBase.getResolutionContext(
+        undefined, // v1: no per-category filtering (ContractMatch has no category field)
+      );
+    } catch (error) {
+      this.logger.warn({
+        message:
+          'Failed to fetch resolution context — scoring without feedback data',
+        data: {
+          matchId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+
     // Score via strategy
     const result = await this.scoringStrategy.scoreMatch(
       match.polymarketDescription,
       match.kalshiDescription,
       {
         resolutionDate: match.resolutionDate ?? undefined,
+        resolutionContext,
       },
     );
 
