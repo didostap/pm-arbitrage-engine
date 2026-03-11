@@ -995,19 +995,22 @@ describe('PolymarketConnector', () => {
   });
 
   describe('rate limiter initialization', () => {
-    it('should initialize rate limiter with fromLimits(2, 2) bucket sizes', () => {
-      // fromLimits(2, 2) → readBucket = ceil(2 × 1.5) = 3, writeBucket = ceil(2 × 1.5) = 3
+    it('should initialize with fromLimits(50, 50) bucket sizes', async () => {
+      // fromLimits(50, 50) → readBucket = ceil(50 × 1.5) = 75, writeBucket = ceil(50 × 1.5) = 75
       const rateLimiter = (
         connector as unknown as {
           rateLimiter: {
+            acquireRead: () => Promise<void>;
             getUtilization: () => { read: number; write: number };
           };
         }
       ).rateLimiter;
 
-      // Fresh limiter at 0% utilization
+      // After one read: utilization = 1/75 ≈ 1.33% (50,50 config)
+      // Would be 1/3 ≈ 33.33% with old fromLimits(2, 2) config — caught by < 2% threshold
+      await rateLimiter.acquireRead();
       const util = rateLimiter.getUtilization();
-      expect(util.read).toBeCloseTo(0, 0);
+      expect(util.read).toBeLessThan(2);
       expect(util.write).toBeCloseTo(0, 0);
     });
   });

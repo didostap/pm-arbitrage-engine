@@ -74,13 +74,15 @@ export class PolymarketConnector
     );
     this.chainId = this.configService.get<number>('POLYMARKET_CHAIN_ID', 137);
 
-    // Polymarket rate limits: ~100 req/min (~1.67/s), no published write limit.
-    // fromLimits(2, 2) → readBucket: 3 tokens (ceil(2×1.5)), readRefill: 1.6/s (2×0.8)
-    // Note: bucket size (3 tokens) is sized for post-batch-migration read patterns (~1-3 reads/cycle).
-    // If batch order book fetch (Story 6-5-2a) is reverted or read patterns increase
-    // (e.g., retry storms), revisit these limits. withRetry() exponential backoff provides
-    // additional mitigation.
-    this.rateLimiter = RateLimiter.fromLimits(2, 2, this.logger);
+    // Polymarket CLOB API rate limits (verified 2026-03-11):
+    //   Source: https://docs.polymarket.com/api-reference/rate-limits
+    //   GET /books (batch): 500 req/10s = 50/s (tightest relevant endpoint)
+    //   GET /book (single): 1,500 req/10s = 150/s
+    //   POST /order: 3,500 req/10s burst, 36,000/10min sustained
+    // Modeled against GET /books (50/s) as the conservative baseline.
+    // fromLimits(50, 50) → readBucket: 75 tokens, readRefill: 40/s (50×0.8 safety buffer)
+    // At current load (~5-10 reads/30s cycle): utilization < 1%.
+    this.rateLimiter = RateLimiter.fromLimits(50, 50, this.logger);
   }
 
   async onModuleInit(): Promise<void> {
