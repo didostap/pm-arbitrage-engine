@@ -51,6 +51,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
   private readonly preFilterThreshold: number;
   private readonly settlementWindowDays: number;
   private readonly maxCandidatesPerContract: number;
+  private readonly llmConcurrency: number;
 
   constructor(
     private readonly catalogSync: CatalogSyncService,
@@ -79,6 +80,11 @@ export class CandidateDiscoveryService implements OnModuleInit {
         'DISCOVERY_MAX_CANDIDATES_PER_CONTRACT',
         20,
       ),
+    );
+    this.llmConcurrency = Math.max(
+      1,
+      Number(this.configService.get<number>('DISCOVERY_LLM_CONCURRENCY', 10)) ||
+        1,
     );
   }
 
@@ -154,8 +160,11 @@ export class CandidateDiscoveryService implements OnModuleInit {
         const polyContracts = catalogs.get(PlatformId.POLYMARKET) ?? [];
         const kalshiContracts = catalogs.get(PlatformId.KALSHI) ?? [];
 
+        let track = 0;
         // Single-direction: Polymarket → Kalshi (TF-IDF cosine is symmetric)
         for (const polyContract of polyContracts) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          track++;
           const dateCandidates = this.filterBySettlementDate(
             kalshiContracts,
             polyContract.settlementDate,
@@ -176,29 +185,66 @@ export class CandidateDiscoveryService implements OnModuleInit {
 
           stats.candidatesPreFiltered += ranked.length;
 
-          for (const candidate of ranked.slice(
-            0,
-            this.maxCandidatesPerContract,
-          )) {
-            const kalshiContract = kalshiContracts.find(
-              (k) => k.contractId === candidate.id,
+          const candidatePairs = ranked
+            .slice(0, this.maxCandidatesPerContract)
+            .map((candidate) => ({
+              candidate,
+              kalshiContract: kalshiContracts.find(
+                (k) => k.contractId === candidate.id,
+              ),
+            }))
+            .filter(
+              (
+                pair,
+              ): pair is typeof pair & {
+                kalshiContract: ContractSummary;
+              } => pair.kalshiContract !== undefined,
             );
-            if (!kalshiContract) continue;
 
-            try {
-              await this.processCandidate(polyContract, kalshiContract, stats);
-            } catch (error) {
-              stats.scoringFailures++;
-              this.logger.error({
-                message: 'Candidate processing failed',
-                data: {
-                  polyContractId: polyContract.contractId,
-                  kalshiContractId: kalshiContract.contractId,
-                  error: error instanceof Error ? error.message : String(error),
-                },
-              });
+          // Process candidates in parallel batches.
+          // Stats mutations inside processCandidate (e.g. stats.pairsScored++)
+          // are synchronous increments that execute between await points in
+          // Node.js's single-threaded event loop — no two increments can
+          // interleave mid-operation. Do not refactor those increments to
+          // span an await without revisiting concurrency safety.
+          const batchStart = Date.now();
+
+          for (let i = 0; i < candidatePairs.length; i += this.llmConcurrency) {
+            const batch = candidatePairs.slice(i, i + this.llmConcurrency);
+            const results = await Promise.allSettled(
+              batch.map(({ kalshiContract }) =>
+                this.processCandidate(polyContract, kalshiContract, stats),
+              ),
+            );
+
+            for (const [idx, result] of results.entries()) {
+              if (result.status === 'rejected') {
+                stats.scoringFailures++;
+                const { kalshiContract } = batch[idx]!;
+                this.logger.error({
+                  message: 'Candidate processing failed',
+                  data: {
+                    polyContractId: polyContract.contractId,
+                    kalshiContractId: kalshiContract.contractId,
+                    error:
+                      result.reason instanceof Error
+                        ? result.reason.message
+                        : String(result.reason),
+                  },
+                });
+              }
             }
           }
+
+          this.logger.debug({
+            message: 'Candidate batch completed',
+            data: {
+              polyContractId: polyContract.contractId,
+              candidateCount: candidatePairs.length,
+              concurrency: this.llmConcurrency,
+              durationMs: Date.now() - batchStart,
+            },
+          });
         }
       } catch (error) {
         this.logger.error({

@@ -1,5 +1,6 @@
-/* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { CandidateDiscoveryService } from './candidate-discovery.service';
 import { CatalogSyncService } from './catalog-sync.service';
 import { PreFilterService } from './pre-filter.service';
@@ -70,6 +71,7 @@ describe('CandidateDiscoveryService', () => {
     DISCOVERY_PREFILTER_THRESHOLD: 0.25,
     DISCOVERY_SETTLEMENT_WINDOW_DAYS: 7,
     DISCOVERY_MAX_CANDIDATES_PER_CONTRACT: 20,
+    DISCOVERY_LLM_CONCURRENCY: 10,
     LLM_AUTO_APPROVE_THRESHOLD: 85,
     LLM_MIN_REVIEW_THRESHOLD: 40,
   };
@@ -739,6 +741,288 @@ describe('CandidateDiscoveryService', () => {
         data: expect.objectContaining({
           polymarketClobTokenId: null,
         }),
+      });
+    });
+
+    describe('batch parallelization', () => {
+      // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+      let logSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+      afterEach(() => {
+        logSpy?.mockRestore();
+        logSpy = undefined;
+        configValues['DISCOVERY_LLM_CONCURRENCY'] = 10;
+      });
+
+      it('should continue processing when a candidate in the batch rejects', async () => {
+        const kalshi3 = [
+          makeContract(PlatformId.KALSHI, 'K1'),
+          makeContract(PlatformId.KALSHI, 'K2'),
+          makeContract(PlatformId.KALSHI, 'K3'),
+        ];
+        catalogSync.syncCatalogs.mockResolvedValue(
+          new Map([
+            [
+              PlatformId.POLYMARKET,
+              [makeContract(PlatformId.POLYMARKET, 'P1')],
+            ],
+            [PlatformId.KALSHI, kalshi3],
+          ]),
+        );
+
+        preFilter.filterCandidates
+          .mockReturnValueOnce([
+            {
+              id: 'K1',
+              description: 'Title K1',
+              combinedScore: 0.5,
+              tfidfScore: 0.4,
+              keywordOverlap: 0.6,
+            },
+            {
+              id: 'K2',
+              description: 'Title K2',
+              combinedScore: 0.45,
+              tfidfScore: 0.35,
+              keywordOverlap: 0.55,
+            },
+            {
+              id: 'K3',
+              description: 'Title K3',
+              combinedScore: 0.4,
+              tfidfScore: 0.3,
+              keywordOverlap: 0.5,
+            },
+          ])
+          .mockReturnValue([]);
+
+        (
+          scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+        ).mockResolvedValue(makeScoringResult(90));
+
+        // K1 succeeds, K2 throws non-P2002 error (bubbles up from processCandidate), K3 succeeds
+        prisma.contractMatch.create
+          .mockResolvedValueOnce({ matchId: 'match-1' })
+          .mockRejectedValueOnce(new Error('DB connection lost'))
+          .mockResolvedValueOnce({ matchId: 'match-3' });
+
+        await service.runDiscovery();
+
+        expect(scoringStrategy.scoreMatch).toHaveBeenCalledTimes(3);
+        expect(prisma.contractMatch.create).toHaveBeenCalledTimes(3);
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+          expect.objectContaining({
+            stats: expect.objectContaining({
+              pairsScored: 2,
+              autoApproved: 2,
+              scoringFailures: 1,
+            }),
+          }),
+        );
+      });
+
+      it('should respect DISCOVERY_LLM_CONCURRENCY config', async () => {
+        logSpy = vi.spyOn(Logger.prototype, 'debug');
+
+        configValues['DISCOVERY_LLM_CONCURRENCY'] = 2;
+        service = new CandidateDiscoveryService(
+          catalogSync as unknown as CatalogSyncService,
+          preFilter as unknown as PreFilterService,
+          scoringStrategy,
+          prisma as unknown as PrismaService,
+          eventEmitter as unknown as EventEmitter2,
+          configService,
+          schedulerRegistry as unknown as SchedulerRegistry,
+        );
+
+        const kalshi5 = Array.from({ length: 5 }, (_, i) =>
+          makeContract(PlatformId.KALSHI, `KX${i}`),
+        );
+        catalogSync.syncCatalogs.mockResolvedValue(
+          new Map([
+            [
+              PlatformId.POLYMARKET,
+              [makeContract(PlatformId.POLYMARKET, 'PX')],
+            ],
+            [PlatformId.KALSHI, kalshi5],
+          ]),
+        );
+
+        preFilter.filterCandidates
+          .mockReturnValueOnce(
+            kalshi5.map((k, i) => ({
+              id: k.contractId,
+              description: k.title,
+              combinedScore: 0.5 - i * 0.01,
+              tfidfScore: 0.4,
+              keywordOverlap: 0.6,
+            })),
+          )
+          .mockReturnValue([]);
+
+        (
+          scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+        ).mockResolvedValue(makeScoringResult(90));
+
+        await service.runDiscovery();
+
+        expect(scoringStrategy.scoreMatch).toHaveBeenCalledTimes(5);
+
+        const batchLog = logSpy.mock.calls.find(
+          (call: unknown[]) =>
+            typeof call[0] === 'object' &&
+            call[0] !== null &&
+            'message' in call[0] &&
+            (call[0] as { message: string }).message ===
+              'Candidate batch completed',
+        );
+        expect(batchLog).toBeDefined();
+        expect(batchLog![0]).toEqual(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              candidateCount: 5,
+              concurrency: 2,
+            }),
+          }),
+        );
+      });
+
+      it('should emit timing log per polyContract with durationMs', async () => {
+        logSpy = vi.spyOn(Logger.prototype, 'debug');
+
+        preFilter.filterCandidates
+          .mockReturnValueOnce([
+            {
+              id: 'K1',
+              description: 'Title K1',
+              combinedScore: 0.5,
+              tfidfScore: 0.4,
+              keywordOverlap: 0.6,
+            },
+            {
+              id: 'K2',
+              description: 'Title K2',
+              combinedScore: 0.45,
+              tfidfScore: 0.35,
+              keywordOverlap: 0.55,
+            },
+          ])
+          .mockReturnValue([]);
+
+        (
+          scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+        ).mockResolvedValue(makeScoringResult(90));
+
+        await service.runDiscovery();
+
+        const batchLog = logSpy.mock.calls.find(
+          (call: unknown[]) =>
+            typeof call[0] === 'object' &&
+            call[0] !== null &&
+            'message' in call[0] &&
+            (call[0] as { message: string }).message ===
+              'Candidate batch completed' &&
+            'data' in call[0] &&
+            (call[0] as { data: { candidateCount: number } }).data
+              .candidateCount > 0,
+        );
+        expect(batchLog).toBeDefined();
+        const data = (batchLog![0] as { data: Record<string, unknown> }).data;
+        expect(data.candidateCount).toBe(2);
+        expect(data.concurrency).toBe(10);
+        expect(typeof data.durationMs).toBe('number');
+      });
+
+      it('should emit timing log with candidateCount 0 when no Kalshi matches found', async () => {
+        logSpy = vi.spyOn(Logger.prototype, 'debug');
+
+        // Pre-filter returns candidates whose IDs don't match any Kalshi contract
+        preFilter.filterCandidates
+          .mockReturnValueOnce([
+            {
+              id: 'NONEXISTENT1',
+              description: 'No match',
+              combinedScore: 0.5,
+              tfidfScore: 0.4,
+              keywordOverlap: 0.6,
+            },
+            {
+              id: 'NONEXISTENT2',
+              description: 'No match',
+              combinedScore: 0.45,
+              tfidfScore: 0.35,
+              keywordOverlap: 0.55,
+            },
+          ])
+          .mockReturnValue([]);
+
+        await service.runDiscovery();
+
+        expect(scoringStrategy.scoreMatch).not.toHaveBeenCalled();
+
+        const batchLog = logSpy.mock.calls.find(
+          (call: unknown[]) =>
+            typeof call[0] === 'object' &&
+            call[0] !== null &&
+            'message' in call[0] &&
+            (call[0] as { message: string }).message ===
+              'Candidate batch completed',
+        );
+        expect(batchLog).toBeDefined();
+        const data = (batchLog![0] as { data: Record<string, unknown> }).data;
+        expect(data.candidateCount).toBe(0);
+        expect(typeof data.durationMs).toBe('number');
+      });
+
+      it('should floor concurrency to 1 when DISCOVERY_LLM_CONCURRENCY is 0', async () => {
+        logSpy = vi.spyOn(Logger.prototype, 'debug');
+
+        configValues['DISCOVERY_LLM_CONCURRENCY'] = 0;
+        service = new CandidateDiscoveryService(
+          catalogSync as unknown as CatalogSyncService,
+          preFilter as unknown as PreFilterService,
+          scoringStrategy,
+          prisma as unknown as PrismaService,
+          eventEmitter as unknown as EventEmitter2,
+          configService,
+          schedulerRegistry as unknown as SchedulerRegistry,
+        );
+
+        preFilter.filterCandidates
+          .mockReturnValueOnce([
+            {
+              id: 'K1',
+              description: 'Title K1',
+              combinedScore: 0.5,
+              tfidfScore: 0.4,
+              keywordOverlap: 0.6,
+            },
+          ])
+          .mockReturnValue([]);
+
+        (
+          scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+        ).mockResolvedValueOnce(makeScoringResult(90));
+
+        await service.runDiscovery();
+
+        expect(scoringStrategy.scoreMatch).toHaveBeenCalledTimes(1);
+        expect(prisma.contractMatch.create).toHaveBeenCalledTimes(1);
+
+        // Verify concurrency actually floored to 1 (not silently using default 10)
+        const batchLog = logSpy.mock.calls.find(
+          (call: unknown[]) =>
+            typeof call[0] === 'object' &&
+            call[0] !== null &&
+            'message' in call[0] &&
+            (call[0] as { message: string }).message ===
+              'Candidate batch completed',
+        );
+        expect(batchLog).toBeDefined();
+        expect(
+          (batchLog![0] as { data: { concurrency: number } }).data.concurrency,
+        ).toBe(1);
       });
     });
   });
