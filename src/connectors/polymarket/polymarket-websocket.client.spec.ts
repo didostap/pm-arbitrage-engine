@@ -83,6 +83,60 @@ describe('PolymarketWebSocketClient', () => {
       expect(rawBook.asks[1]?.price).toBe('0.68');
     });
 
+    it('should truncate orderbook beyond MAX_ORDERBOOK_DEPTH (50)', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      const bids = Array.from({ length: 60 }, (_, i) => ({
+        price: (0.5 - i * 0.005).toFixed(4),
+        size: '100',
+      }));
+
+      const bookMsg = JSON.stringify({
+        event_type: 'book',
+        asset_id: 'token-deep',
+        market: 'market-1',
+        timestamp: Date.now(),
+        bids,
+        asks: [],
+        hash: '',
+      });
+
+      client.handleMessage(bookMsg);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      const rawBook = callback.mock.calls[0]?.[0] as PolymarketOrderBookMessage;
+      expect(rawBook.bids.length).toBeLessThanOrEqual(50);
+    });
+
+    it('should deduplicate snapshot levels with duplicate prices (last wins)', () => {
+      const callback = vi.fn();
+      client.onUpdate(callback);
+
+      const bookMsg = JSON.stringify({
+        event_type: 'book',
+        asset_id: 'token-dup',
+        market: 'market-1',
+        timestamp: Date.now(),
+        bids: [
+          { price: '0.50', size: '100' },
+          { price: '0.50', size: '200' },
+          { price: '0.48', size: '300' },
+        ],
+        asks: [],
+        hash: '',
+      });
+
+      client.handleMessage(bookMsg);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      const rawBook = callback.mock.calls[0]?.[0] as PolymarketOrderBookMessage;
+      // '0.50' deduplicated: last occurrence (size=200) wins
+      expect(rawBook.bids).toHaveLength(2);
+      const bid50 = rawBook.bids.find((b) => b.price === '0.5');
+      expect(bid50?.size).toBe('200');
+    });
+
     it('should handle empty book snapshot', () => {
       const callback = vi.fn();
       client.onUpdate(callback);

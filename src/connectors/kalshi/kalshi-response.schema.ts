@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 // Kalshi REST API response schemas
 
+/**
+ * Intentional passthrough strategy: only critical consumed fields are validated
+ * with strict Zod types. Additional fields returned by the Kalshi API (e.g.
+ * `created_time`, `yes_price_dollars`, `no_price_dollars`, `expiration_time`)
+ * pass through unvalidated via `.passthrough()` and are accessed via cast
+ * (e.g. `order as Record<string, unknown>`). This avoids breaking on API
+ * additions while still guaranteeing the fields we depend on are present.
+ */
 export const kalshiOrderResponseSchema = z
   .object({
     data: z.object({
@@ -9,10 +17,10 @@ export const kalshiOrderResponseSchema = z
         .object({
           order_id: z.string(),
           status: z.string(),
-          remaining_count: z.number(),
-          fill_count: z.number(),
-          taker_fill_count: z.number(),
-          taker_fill_cost: z.number(),
+          remaining_count_fp: z.string(),
+          fill_count_fp: z.string(),
+          taker_fill_count_fp: z.string(),
+          taker_fill_cost_dollars: z.string(),
         })
         .passthrough(),
     }),
@@ -28,7 +36,7 @@ export const kalshiCancelOrderResponseSchema = z
           status: z.string(),
         })
         .passthrough(),
-      reduced_by: z.number(),
+      reduced_by_fp: z.string(),
     }),
   })
   .passthrough();
@@ -49,8 +57,8 @@ const kalshiSnapshotMsgSchema = z
   .object({
     seq: z.number(),
     market_ticker: z.string(),
-    yes: z.array(z.tuple([z.number(), z.number()])),
-    no: z.array(z.tuple([z.number(), z.number()])),
+    yes_dollars_fp: z.array(z.tuple([z.string(), z.string()])),
+    no_dollars_fp: z.array(z.tuple([z.string(), z.string()])),
   })
   .passthrough();
 
@@ -58,8 +66,8 @@ const kalshiDeltaMsgSchema = z
   .object({
     seq: z.number(),
     market_ticker: z.string(),
-    price: z.number(),
-    delta: z.number(),
+    price_dollars: z.string(),
+    delta_fp: z.string(),
     side: z.enum(['yes', 'no']),
   })
   .passthrough();

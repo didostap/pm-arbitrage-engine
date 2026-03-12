@@ -17,16 +17,12 @@ declare module 'kalshi-typescript' {
   }
 
   export interface Orderbook {
-    /** YES side bids: [price_cents, quantity][] */
-    yes?: Array<Array<number>>;
-    /** NO side bids: [price_cents, quantity][] */
-    no?: Array<Array<number>>;
     yes_dollars: Array<Array<string>>;
     no_dollars: Array<Array<string>>;
   }
 
   export interface GetMarketOrderbookResponse {
-    orderbook: Orderbook;
+    orderbook_fp: Orderbook;
   }
 
   export class MarketApi {
@@ -59,8 +55,8 @@ declare module 'kalshi-typescript' {
     type: 'limit' | 'market';
     side: 'yes' | 'no';
     count: number;
-    yes_price?: number; // cents (1-99)
-    no_price?: number; // cents (1-99)
+    yes_price_dollars?: string; // dollar string (e.g. "0.42")
+    no_price_dollars?: string; // dollar string (e.g. "0.58")
   }
 
   export interface CreateOrderResponse {
@@ -74,13 +70,14 @@ declare module 'kalshi-typescript' {
     side: string;
     type: string;
     status: string; // 'resting' | 'executed' | 'canceled' | 'pending'
-    yes_price: number;
-    no_price: number;
+    yes_price_dollars: string;
+    no_price_dollars: string;
     created_time: string;
     expiration_time: string;
-    taker_fill_count: number;
-    taker_fill_cost: number;
-    remaining_count: number;
+    taker_fill_count_fp: string;
+    taker_fill_cost_dollars: string;
+    remaining_count_fp: string;
+    fill_count_fp: string;
     place_count: number;
   }
 

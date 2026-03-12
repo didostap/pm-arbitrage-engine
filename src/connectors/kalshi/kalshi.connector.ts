@@ -44,9 +44,9 @@ interface KalshiOrderResponse {
     order: {
       order_id: string;
       status: string;
-      remaining_count: number;
-      fill_count: number;
-      taker_fill_cost: number;
+      remaining_count_fp: string;
+      fill_count_fp: string;
+      taker_fill_cost_dollars: string;
     };
   };
 }
@@ -57,10 +57,8 @@ interface KalshiCancelOrderResponse {
     order: {
       order_id: string;
       status: string;
-      remaining_count: number;
-      fill_count: number;
     };
-    reduced_by: number;
+    reduced_by_fp: string;
   };
 }
 
@@ -305,21 +303,15 @@ export class KalshiConnector
       );
 
       this.lastHeartbeat = new Date();
-      const orderbook = response.data.orderbook;
-      const yesRaw: [number, number][] | undefined = orderbook?.yes as
-        | [number, number][]
-        | undefined;
-      const noRaw: [number, number][] | undefined = orderbook?.no as
-        | [number, number][]
+      const orderbookFp = response.data.orderbook_fp;
+      const yesRaw: [string, string][] | undefined =
+        orderbookFp?.yes_dollars as [string, string][] | undefined;
+      const noRaw: [string, string][] | undefined = orderbookFp?.no_dollars as
+        | [string, string][]
         | undefined;
 
-      // Kalshi API returns orderbook.yes / orderbook.no (not true/false)
-      const yesBids: [number, number][] = Array.isArray(yesRaw)
-        ? yesRaw.map(([p, q]: number[]) => [p ?? 0, q ?? 0])
-        : [];
-      const noBids: [number, number][] = Array.isArray(noRaw)
-        ? noRaw.map(([p, q]: number[]) => [p ?? 0, q ?? 0])
-        : [];
+      const yesBids: [string, string][] = Array.isArray(yesRaw) ? yesRaw : [];
+      const noBids: [string, string][] = Array.isArray(noRaw) ? noRaw : [];
       const { bids, asks } = normalizeKalshiLevels(yesBids, noBids);
 
       return {
@@ -349,11 +341,12 @@ export class KalshiConnector
     await this.rateLimiter.acquireWrite();
 
     try {
-      // Convert internal decimal price (0.00-1.00) to Kalshi cents (1-99)
-      const priceCents = new Decimal(params.price.toString())
-        .mul(100)
-        .round()
-        .toNumber();
+      // Convert internal decimal price (0.00-1.00) to dollar string for Kalshi FP API.
+      // ROUND_DOWN: never round a buy price up — conservative for the trader.
+      const priceDollars = new Decimal(params.price.toString()).toFixed(
+        2,
+        Decimal.ROUND_DOWN,
+      );
 
       const response = await withRetry(
         () =>
@@ -365,7 +358,7 @@ export class KalshiConnector
             // Buying YES = long, Selling YES = short (equivalent to inverse NO position).
             side: 'yes',
             count: params.quantity,
-            yes_price: priceCents,
+            yes_price_dollars: priceDollars,
           }),
         RETRY_STRATEGIES.NETWORK_ERROR,
         (attempt, error) => {
@@ -391,24 +384,22 @@ export class KalshiConnector
       const order = validated.data.order;
 
       // Map Kalshi status to OrderResult status
+      const remainingCount = new Decimal(order.remaining_count_fp).toNumber();
       let status: OrderResult['status'];
       if (order.status === 'executed') {
-        status = order.remaining_count > 0 ? 'partial' : 'filled';
+        status = remainingCount > 0 ? 'partial' : 'filled';
       } else if (order.status === 'canceled') {
         status = 'rejected';
       } else {
         status = 'pending';
       }
 
-      // Convert fill price back from cents to decimal
-      const filledQuantity = order.taker_fill_count;
-      const filledPrice =
-        filledQuantity > 0 && order.taker_fill_cost > 0
-          ? new Decimal(order.taker_fill_cost.toString())
-              .div(filledQuantity)
-              .div(100)
-              .toNumber()
-          : 0;
+      // Fill price from dollar-based fields — no /100 conversion needed
+      const filledQty = new Decimal(order.taker_fill_count_fp);
+      const filledQuantity = filledQty.toNumber();
+      const filledPrice = filledQty.greaterThan(0)
+        ? new Decimal(order.taker_fill_cost_dollars).div(filledQty).toNumber()
+        : 0;
 
       // created_time passes through via .passthrough()
       const rawOrder = order as Record<string, unknown>;
@@ -519,25 +510,23 @@ export class KalshiConnector
       });
       const order = validated.data.order;
 
+      const remainingCount = new Decimal(order.remaining_count_fp).toNumber();
       let status: OrderStatusResult['status'];
       if (order.status === 'resting') {
         status = 'pending';
       } else if (order.status === 'canceled') {
         status = 'cancelled';
       } else if (order.status === 'executed') {
-        status = order.remaining_count > 0 ? 'partial' : 'filled';
+        status = remainingCount > 0 ? 'partial' : 'filled';
       } else {
         status = 'pending';
       }
 
-      const fillCount = order.fill_count;
-      const fillPrice =
-        fillCount > 0 && order.taker_fill_cost > 0
-          ? new Decimal(order.taker_fill_cost.toString())
-              .div(fillCount)
-              .div(100)
-              .toNumber()
-          : undefined;
+      const fillQty = new Decimal(order.fill_count_fp);
+      const fillCount = fillQty.toNumber();
+      const fillPrice = fillQty.greaterThan(0)
+        ? new Decimal(order.taker_fill_cost_dollars).div(fillQty).toNumber()
+        : undefined;
 
       return {
         orderId: asOrderId(order.order_id),
@@ -582,7 +571,10 @@ export class KalshiConnector
       makerFeePercent: 0,
       takerFeePercent: 1.75,
       description:
-        'Kalshi dynamic taker fee: 0.07 × P × (1-P) per contract. takerFeePercent is worst-case at P=0.50.',
+        'Kalshi dynamic taker fee: 0.07 × P × (1-P) per contract. ' +
+        'takerFeePercent=1.75 is worst-case at P=0.50 ($0.0175/contract = 1.75% of $1.00 notional). ' +
+        'takerFeeForPrice returns the fee rate per unit price; total fee = price × rate.',
+      // Returns fee *rate* per unit price: consumers compute total = P × rate = P × 0.07 × (1-P).
       takerFeeForPrice: (price: number): number => {
         if (price <= 0 || price >= 1) return 0;
         return new Decimal(0.07).mul(new Decimal(1).minus(price)).toNumber();

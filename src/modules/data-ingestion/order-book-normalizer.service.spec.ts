@@ -25,22 +25,22 @@ describe('OrderBookNormalizerService', () => {
   });
 
   describe('normalize()', () => {
-    it('should convert Kalshi cents to decimal with realistic spread', () => {
+    it('should convert Kalshi dollar strings to decimal with realistic spread', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
         yes: [
-          [60, 1000],
-          [59, 500],
-        ], // YES bids: 60¢, 59¢
+          ['0.6000', '1000.00'],
+          ['0.5900', '500.00'],
+        ], // YES bids: $0.60, $0.59
         no: [
-          [35, 800],
-          [34, 600],
-        ], // NO bids: 35¢, 34¢ → YES asks: 65¢, 66¢
+          ['0.3500', '800.00'],
+          ['0.3400', '600.00'],
+        ], // NO bids: $0.35, $0.34 → YES asks: 0.65, 0.66
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
 
-      // Best bid: highest YES bid = 60¢ = 0.60
+      // Best bid: highest YES bid = $0.60 = 0.60
       expect(normalized.bids[0]!.price).toBe(0.6);
       expect(normalized.bids[0]!.quantity).toBe(1000);
 
@@ -64,8 +64,8 @@ describe('OrderBookNormalizerService', () => {
     it('should handle zero-spread (locked) market', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[62, 1000]],
-        no: [[38, 800]], // 62 + 38 = 100 → zero spread
+        yes: [['0.6200', '1000.00']],
+        no: [['0.3800', '800.00']], // 0.62 + 0.38 = 1.00 → zero spread
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -78,8 +78,8 @@ describe('OrderBookNormalizerService', () => {
     it('should detect and log crossed market', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[65, 1000]], // YES bid 65¢
-        no: [[30, 800]], // NO bid 30¢ → YES ask 70¢
+        yes: [['0.6500', '1000.00']], // YES bid $0.65
+        no: [['0.3000', '800.00']], // NO bid $0.30 → YES ask 0.70
       } as KalshiOrderBook;
 
       // Spy on logger.warn
@@ -98,8 +98,8 @@ describe('OrderBookNormalizerService', () => {
     it('should log warning for actual crossed market', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[65, 1000]], // YES bid 65¢
-        no: [[40, 800]], // NO bid 40¢ → YES ask 60¢ (CROSSED!)
+        yes: [['0.6500', '1000.00']], // YES bid $0.65
+        no: [['0.4000', '800.00']], // NO bid $0.40 → YES ask 0.60 (CROSSED!)
       } as KalshiOrderBook;
 
       const warnSpy = vi.spyOn(service['logger'], 'warn');
@@ -123,8 +123,8 @@ describe('OrderBookNormalizerService', () => {
     it('should handle empty orderbook', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [],
-        no: [],
+        yes: [] as [string, string][],
+        no: [] as [string, string][],
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -137,8 +137,8 @@ describe('OrderBookNormalizerService', () => {
     it('should handle single-sided book (only YES bids)', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[60, 1000]],
-        no: [],
+        yes: [['0.6000', '1000.00']],
+        no: [] as [string, string][],
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -151,8 +151,8 @@ describe('OrderBookNormalizerService', () => {
     it('should handle single-sided book (only NO bids)', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [],
-        no: [[35, 800]],
+        yes: [] as [string, string][],
+        no: [['0.3500', '800.00']],
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -165,8 +165,8 @@ describe('OrderBookNormalizerService', () => {
     it('should return null and log error for price > 1', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[150, 1000]], // Invalid: 150¢ > 100¢
-        no: [],
+        yes: [['1.5000', '1000.00']], // Invalid: $1.50 > $1.00
+        no: [] as [string, string][],
       } as KalshiOrderBook;
 
       const errorSpy = vi.spyOn(service['logger'], 'error');
@@ -185,8 +185,8 @@ describe('OrderBookNormalizerService', () => {
     it('should return null and log error for price < 0', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [],
-        no: [[110, 800]], // NO 110¢ → YES ask -10¢ (invalid)
+        yes: [] as [string, string][],
+        no: [['1.1000', '800.00']], // NO $1.10 → YES ask -0.10 (invalid)
       } as KalshiOrderBook;
 
       const errorSpy = vi.spyOn(service['logger'], 'error');
@@ -208,8 +208,8 @@ describe('OrderBookNormalizerService', () => {
     it('should allow price exactly 0', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[0, 1000]], // 0¢ valid for impossible outcome
-        no: [],
+        yes: [['0.0000', '1000.00']], // $0.00 valid for impossible outcome
+        no: [] as [string, string][],
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -220,8 +220,8 @@ describe('OrderBookNormalizerService', () => {
     it('should allow price exactly 1', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[100, 1000]], // 100¢ valid for certain outcome
-        no: [],
+        yes: [['1.0000', '1000.00']], // $1.00 valid for certain outcome
+        no: [] as [string, string][],
       } as KalshiOrderBook;
 
       const normalized = service.normalize(kalshiBook)!;
@@ -232,11 +232,11 @@ describe('OrderBookNormalizerService', () => {
     it('should sort asks ascending', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [],
+        yes: [] as [string, string][],
         no: [
-          [30, 800],
-          [35, 600],
-          [25, 1000],
+          ['0.3000', '800.00'],
+          ['0.3500', '600.00'],
+          ['0.2500', '1000.00'],
         ], // Unsorted NO bids
       } as KalshiOrderBook;
 
@@ -252,8 +252,8 @@ describe('OrderBookNormalizerService', () => {
     it('should track normalization latency', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[60, 1000]],
-        no: [[35, 800]],
+        yes: [['0.6000', '1000.00']],
+        no: [['0.3500', '800.00']],
       } as KalshiOrderBook;
 
       // Normalize several times
@@ -269,8 +269,8 @@ describe('OrderBookNormalizerService', () => {
     it('should set timestamp and sequence number', () => {
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[60, 1000]],
-        no: [[35, 800]],
+        yes: [['0.6000', '1000.00']],
+        no: [['0.3500', '800.00']],
         seq: 12345,
       } as KalshiOrderBook;
 
@@ -290,8 +290,8 @@ describe('OrderBookNormalizerService', () => {
       // Normalize multiple times to build samples
       const kalshiBook = {
         market_ticker: 'TEST-MARKET',
-        yes: [[60, 1000]],
-        no: [[35, 800]],
+        yes: [['0.6000', '1000.00']],
+        no: [['0.3500', '800.00']],
       } as KalshiOrderBook;
 
       for (let i = 0; i < 100; i++) {

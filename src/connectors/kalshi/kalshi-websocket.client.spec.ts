@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import Decimal from 'decimal.js';
+import type { NormalizedOrderBook } from '../../common/types/index.js';
 import type { LocalOrderbookState } from './kalshi.types.js';
 import { KalshiWebSocketClient } from './kalshi-websocket.client.js';
 
@@ -28,63 +30,65 @@ describe('KalshiWebSocketClient', () => {
     it('should add a new YES price level', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
-        no: [[38, 800]],
+        yes: [['0.6200', '1000.00']],
+        no: [['0.3800', '800.00']],
       };
 
-      client.applyDelta(state, 63, 200, 'yes');
+      client.applyDelta(state, '0.6300', '200.00', 'yes');
 
-      expect(state.yes).toContainEqual([63, 200]);
+      expect(state.yes).toContainEqual(['0.6300', '200.00']);
       expect(state.yes).toHaveLength(2);
-      expect(state.yes[0]?.[0]).toBe(63);
-      expect(state.yes[1]?.[0]).toBe(62);
+      expect(state.yes[0]?.[0]).toBe('0.6300');
+      expect(state.yes[1]?.[0]).toBe('0.6200');
     });
 
     it('should add a new NO price level', () => {
       const state: LocalOrderbookState = {
         seq: 1,
         yes: [],
-        no: [[38, 800]],
+        no: [['0.3800', '800.00']],
       };
 
-      client.applyDelta(state, 40, 500, 'no');
+      client.applyDelta(state, '0.4000', '500.00', 'no');
 
-      expect(state.no).toContainEqual([40, 500]);
+      expect(state.no).toContainEqual(['0.4000', '500.00']);
       expect(state.no).toHaveLength(2);
     });
 
     it('should increase quantity on existing level', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
+        yes: [['0.6200', '1000.00']],
         no: [],
       };
 
-      client.applyDelta(state, 62, 500, 'yes');
+      client.applyDelta(state, '0.6200', '500.00', 'yes');
 
-      expect(state.yes).toEqual([[62, 1500]]);
+      expect(state.yes[0]?.[0]).toBe('0.6200');
+      expect(state.yes[0]?.[1]).toBe('1500');
     });
 
     it('should decrease quantity on existing level', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
+        yes: [['0.6200', '1000.00']],
         no: [],
       };
 
-      client.applyDelta(state, 62, -300, 'yes');
+      client.applyDelta(state, '0.6200', '-300.00', 'yes');
 
-      expect(state.yes).toEqual([[62, 700]]);
+      expect(state.yes[0]?.[0]).toBe('0.6200');
+      expect(state.yes[0]?.[1]).toBe('700');
     });
 
     it('should remove level when quantity goes to zero', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
+        yes: [['0.6200', '1000.00']],
         no: [],
       };
 
-      client.applyDelta(state, 62, -1000, 'yes');
+      client.applyDelta(state, '0.6200', '-1000.00', 'yes');
 
       expect(state.yes).toHaveLength(0);
     });
@@ -92,11 +96,11 @@ describe('KalshiWebSocketClient', () => {
     it('should remove level when quantity goes below zero', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 500]],
+        yes: [['0.6200', '500.00']],
         no: [],
       };
 
-      client.applyDelta(state, 62, -600, 'yes');
+      client.applyDelta(state, '0.6200', '-600.00', 'yes');
 
       expect(state.yes).toHaveLength(0);
     });
@@ -104,13 +108,56 @@ describe('KalshiWebSocketClient', () => {
     it('should ignore negative delta for non-existent level', () => {
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
+        yes: [['0.6200', '1000.00']],
         no: [],
       };
 
-      client.applyDelta(state, 99, -100, 'yes');
+      client.applyDelta(state, '0.9900', '-100.00', 'yes');
 
-      expect(state.yes).toEqual([[62, 1000]]);
+      expect(state.yes).toEqual([['0.6200', '1000.00']]);
+    });
+
+    it('should log debug when negative delta targets non-existent level', () => {
+      const debugSpy = vi.spyOn(client['logger'], 'debug');
+      const state: LocalOrderbookState = {
+        seq: 1,
+        yes: [['0.6200', '1000.00']],
+        no: [],
+      };
+
+      client.applyDelta(state, '0.9900', '-100.00', 'yes');
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Negative delta for non-existent level (ignored)',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: expect.objectContaining({
+            price: '0.9900',
+            delta: '-100.00',
+            side: 'yes',
+          }),
+        }),
+      );
+    });
+
+    it('should truncate levels beyond MAX_ORDERBOOK_DEPTH (50)', () => {
+      const levels: [string, string][] = [];
+      for (let i = 0; i < 50; i++) {
+        levels.push([
+          new Decimal(0.5).plus(new Decimal(i).mul(0.01)).toFixed(4),
+          '100.00',
+        ]);
+      }
+      const state: LocalOrderbookState = {
+        seq: 1,
+        yes: levels,
+        no: [],
+      };
+
+      // Adding a 51st level should result in truncation to 50
+      client.applyDelta(state, '0.0100', '50.00', 'yes');
+
+      expect(state.yes).toHaveLength(50);
     });
   });
 
@@ -139,13 +186,13 @@ describe('KalshiWebSocketClient', () => {
       // We can verify the callback registration by constructing state and triggering emit
       const state: LocalOrderbookState = {
         seq: 1,
-        yes: [[62, 1000]],
-        no: [[38, 800]],
+        yes: [['0.6200', '1000.00']],
+        no: [['0.3800', '800.00']],
       };
 
       // Use applyDelta which is public, then check callback was NOT called
       // (applyDelta doesn't emit — only internal handleSnapshot/handleDelta do)
-      client.applyDelta(state, 63, 200, 'yes');
+      client.applyDelta(state, '0.6300', '200.00', 'yes');
       // callback not called because applyDelta is a pure state mutation
       expect(callback).not.toHaveBeenCalled();
     });
@@ -339,6 +386,86 @@ describe('KalshiWebSocketClient', () => {
 
       vi.advanceTimersByTime(30_000);
       expect(mockWs2.ping).toHaveBeenCalledTimes(1);
+    });
+
+    it('should debounce resubscribe within cooldown period', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // Subscribe to a ticker
+      kalshiClient.subscribe('CPI-22DEC');
+      mockWs.send.mockClear();
+
+      // Simulate two rapid sequence gap resubscribes via handleMessage
+      const delta1 = JSON.stringify({
+        type: 'orderbook_delta',
+        sid: 1,
+        msg: {
+          seq: 999,
+          market_ticker: 'CPI-22DEC',
+          price_dollars: '0.50',
+          delta_fp: '10.00',
+          side: 'yes',
+        },
+      });
+      triggerWsEvent(mockWs, 'message', delta1);
+
+      const delta2 = JSON.stringify({
+        type: 'orderbook_delta',
+        sid: 1,
+        msg: {
+          seq: 1000,
+          market_ticker: 'CPI-22DEC',
+          price_dollars: '0.50',
+          delta_fp: '10.00',
+          side: 'yes',
+        },
+      });
+      triggerWsEvent(mockWs, 'message', delta2);
+
+      // Only one resubscribe should have been sent (second suppressed by cooldown)
+      const subscribeCalls = mockWs.send.mock.calls.filter(
+        (call: unknown[]) => {
+          const parsed = JSON.parse(call[0] as string) as { cmd?: string };
+          return parsed.cmd === 'subscribe';
+        },
+      );
+      expect(subscribeCalls).toHaveLength(1);
+    });
+
+    it('should deduplicate snapshot levels with duplicate prices', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      const callback = vi.fn();
+      kalshiClient.onUpdate(callback);
+      kalshiClient.subscribe('CPI-22DEC');
+
+      // Snapshot with duplicate price '0.6500' in yes — last occurrence should win
+      const snapshot = JSON.stringify({
+        type: 'orderbook_snapshot',
+        sid: 1,
+        msg: {
+          seq: 1,
+          market_ticker: 'CPI-22DEC',
+          yes_dollars_fp: [
+            ['0.6500', '100.00'],
+            ['0.6500', '200.00'],
+            ['0.7000', '50.00'],
+          ],
+          no_dollars_fp: [],
+        },
+      });
+      triggerWsEvent(mockWs, 'message', snapshot);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      const book = callback.mock.calls[0]![0] as NormalizedOrderBook;
+      // Deduplication: '0.6500' appears once with qty 200 (last wins)
+      expect(book.bids).toHaveLength(2);
+      const bid65 = book.bids.find((b) => Math.abs(b.price - 0.65) < 0.001);
+      expect(bid65?.quantity).toBe(200);
     });
 
     it('should reject with timeout if connect takes >10s', async () => {

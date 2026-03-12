@@ -3,6 +3,7 @@ import {
   kalshiOrderResponseSchema,
   kalshiAccountLimitsResponseSchema,
   kalshiWsMessageSchema,
+  kalshiCancelOrderResponseSchema,
 } from './kalshi-response.schema';
 
 describe('kalshiOrderResponseSchema', () => {
@@ -12,10 +13,10 @@ describe('kalshiOrderResponseSchema', () => {
         order: {
           order_id: 'ord-123',
           status: 'resting',
-          remaining_count: 10,
-          fill_count: 5,
-          taker_fill_count: 5,
-          taker_fill_cost: 250,
+          remaining_count_fp: '10.00',
+          fill_count_fp: '5.00',
+          taker_fill_count_fp: '5.00',
+          taker_fill_cost_dollars: '2.50',
         },
       },
     });
@@ -28,10 +29,10 @@ describe('kalshiOrderResponseSchema', () => {
         order: {
           order_id: 'ord-123',
           status: 'resting',
-          remaining_count: 10,
-          fill_count: 5,
-          taker_fill_count: 5,
-          taker_fill_cost: 250,
+          remaining_count_fp: '10.00',
+          fill_count_fp: '5.00',
+          taker_fill_count_fp: '5.00',
+          taker_fill_cost_dollars: '2.50',
           extra_field: 'ignored',
         },
       },
@@ -43,6 +44,51 @@ describe('kalshiOrderResponseSchema', () => {
   it('should reject missing required fields', () => {
     expect(() =>
       kalshiOrderResponseSchema.parse({ data: { order: {} } }),
+    ).toThrow();
+  });
+
+  it('should preserve passthrough fields (created_time, yes_price_dollars) for cast access', () => {
+    const result = kalshiOrderResponseSchema.parse({
+      data: {
+        order: {
+          order_id: 'ord-pt',
+          status: 'executed',
+          remaining_count_fp: '0.00',
+          fill_count_fp: '10.00',
+          taker_fill_count_fp: '10.00',
+          taker_fill_cost_dollars: '4.50',
+          created_time: '2026-01-01T00:00:00Z',
+          yes_price_dollars: '0.45',
+        },
+      },
+    });
+    const rawOrder = result.data.order as Record<string, unknown>;
+    expect(rawOrder['created_time']).toBe('2026-01-01T00:00:00Z');
+    expect(rawOrder['yes_price_dollars']).toBe('0.45');
+  });
+});
+
+describe('kalshiCancelOrderResponseSchema', () => {
+  it('should accept valid cancel response with reduced_by_fp string', () => {
+    const result = kalshiCancelOrderResponseSchema.parse({
+      data: {
+        order: {
+          order_id: 'ord-456',
+          status: 'canceled',
+        },
+        reduced_by_fp: '5.00',
+      },
+    });
+    expect(result.data.reduced_by_fp).toBe('5.00');
+  });
+
+  it('should reject missing reduced_by_fp', () => {
+    expect(() =>
+      kalshiCancelOrderResponseSchema.parse({
+        data: {
+          order: { order_id: 'ord-456', status: 'canceled' },
+        },
+      }),
     ).toThrow();
   });
 });
@@ -64,8 +110,8 @@ describe('kalshiWsMessageSchema', () => {
       msg: {
         seq: 100,
         market_ticker: 'MARKET-123',
-        yes: [[65, 100]],
-        no: [[35, 200]],
+        yes_dollars_fp: [['0.6500', '100.00']],
+        no_dollars_fp: [['0.3500', '200.00']],
       },
     });
     expect(result.type).toBe('orderbook_snapshot');
@@ -78,8 +124,8 @@ describe('kalshiWsMessageSchema', () => {
       msg: {
         seq: 101,
         market_ticker: 'MARKET-123',
-        price: 65,
-        delta: 50,
+        price_dollars: '0.6500',
+        delta_fp: '50.00',
         side: 'yes',
       },
     });

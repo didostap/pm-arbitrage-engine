@@ -3,15 +3,15 @@
 export interface KalshiOrderbookSnapshotMsg {
   seq: number;
   market_ticker: string;
-  yes: Array<[number, number]>;
-  no: Array<[number, number]>;
+  yes_dollars_fp: Array<[string, string]>;
+  no_dollars_fp: Array<[string, string]>;
 }
 
 export interface KalshiOrderbookDeltaMsg {
   seq: number;
   market_ticker: string;
-  price: number;
-  delta: number;
+  price_dollars: string;
+  delta_fp: string;
   side: 'yes' | 'no';
 }
 
@@ -32,6 +32,6 @@ export interface KalshiSubscribeCommand {
 
 export interface LocalOrderbookState {
   seq: number;
-  yes: Array<[number, number]>;
-  no: Array<[number, number]>;
+  yes: Array<[string, string]>;
+  no: Array<[string, string]>;
 }

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { createSign, constants as cryptoConstants } from 'crypto';
+import Decimal from 'decimal.js';
 import WebSocket from 'ws';
 import {
   NormalizedOrderBook,
@@ -16,11 +17,11 @@ import type {
   LocalOrderbookState,
 } from './kalshi.types.js';
 
-/** Raw Kalshi order book format (prices in cents) */
+/** Raw Kalshi order book format (dollar string tuples from fixed-point API) */
 export interface KalshiOrderBook {
   market_ticker: string;
-  yes: [number, number][]; // [[price_cents, quantity], ...]
-  no: [number, number][]; // [[price_cents, quantity], ...]
+  yes: [string, string][]; // [[price_dollars, quantity_fp], ...]
+  no: [string, string][]; // [[price_dollars, quantity_fp], ...]
   seq?: number; // Optional sequence number for WebSocket
 }
 
@@ -29,6 +30,12 @@ export interface KalshiWebSocketConfig {
   privateKeyPem: string;
   wsUrl: string;
 }
+
+/** Maximum depth for each side of the local orderbook. Prevents unbounded growth. */
+const MAX_ORDERBOOK_DEPTH = 50;
+
+/** Minimum interval between resubscribe requests for the same ticker (ms). */
+const RESUBSCRIBE_COOLDOWN_MS = 1_000;
 
 /**
  * WebSocket client for Kalshi real-time orderbook data.
@@ -49,6 +56,7 @@ export class KalshiWebSocketClient {
   private commandId = 0;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lastResubscribeTime = new Map<string, number>();
 
   constructor(private readonly config: KalshiWebSocketConfig) {}
 
@@ -146,6 +154,7 @@ export class KalshiWebSocketClient {
     this.isConnected = false;
     this.orderbookState.clear();
     this.lastSequence.clear();
+    this.lastResubscribeTime.clear();
   }
 
   subscribe(ticker: string): void {
@@ -159,6 +168,7 @@ export class KalshiWebSocketClient {
     this.subscriptions.delete(ticker);
     this.orderbookState.delete(ticker);
     this.lastSequence.delete(ticker);
+    this.lastResubscribeTime.delete(ticker);
     if (this.isConnected && this.ws) {
       this.ws.send(
         JSON.stringify({
@@ -239,8 +249,8 @@ export class KalshiWebSocketClient {
   private handleSnapshot(msg: KalshiOrderbookSnapshotMsg): void {
     const state: LocalOrderbookState = {
       seq: msg.seq,
-      yes: [...msg.yes],
-      no: [...msg.no],
+      yes: this.deduplicateLevels([...msg.yes_dollars_fp]),
+      no: this.deduplicateLevels([...msg.no_dollars_fp]),
     };
     this.orderbookState.set(msg.market_ticker, state);
     this.lastSequence.set(msg.market_ticker, msg.seq);
@@ -263,18 +273,17 @@ export class KalshiWebSocketClient {
           received: msg.seq,
         },
       });
-      // Resubscribe to get a fresh snapshot
-      this.sendSubscribe(msg.market_ticker);
+      this.debouncedResubscribe(msg.market_ticker);
       return;
     }
 
     const state = this.orderbookState.get(msg.market_ticker);
     if (!state) {
-      this.sendSubscribe(msg.market_ticker);
+      this.debouncedResubscribe(msg.market_ticker);
       return;
     }
 
-    this.applyDelta(state, msg.price, msg.delta, msg.side);
+    this.applyDelta(state, msg.price_dollars, msg.delta_fp, msg.side);
     state.seq = msg.seq;
     this.lastSequence.set(msg.market_ticker, msg.seq);
     this.emitUpdate(msg.market_ticker, state);
@@ -282,31 +291,43 @@ export class KalshiWebSocketClient {
 
   applyDelta(
     state: LocalOrderbookState,
-    price: number,
-    delta: number,
+    priceDollars: string,
+    deltaFp: string,
     side: 'yes' | 'no',
   ): void {
     const levels = side === 'yes' ? state.yes : state.no;
-    const levelIndex = levels.findIndex(([p]) => p === price);
+    const levelIndex = levels.findIndex(([p]) => p === priceDollars);
+    const deltaDecimal = new Decimal(deltaFp);
 
-    if (delta > 0) {
+    if (deltaDecimal.greaterThan(0)) {
       if (levelIndex >= 0) {
         const level = levels[levelIndex];
         if (level) {
-          level[1] += delta;
+          level[1] = new Decimal(level[1]).plus(deltaDecimal).toString();
         }
       } else {
-        levels.push([price, delta]);
-        levels.sort((a, b) => b[0] - a[0]);
+        levels.push([priceDollars, deltaFp]);
+        levels.sort((a, b) => new Decimal(b[0]).comparedTo(new Decimal(a[0])));
+        if (levels.length > MAX_ORDERBOOK_DEPTH) {
+          levels.length = MAX_ORDERBOOK_DEPTH;
+        }
       }
     } else if (levelIndex >= 0) {
       const level = levels[levelIndex];
       if (level) {
-        level[1] += delta;
-        if (level[1] <= 0) {
+        level[1] = new Decimal(level[1]).plus(deltaDecimal).toString();
+        if (new Decimal(level[1]).lte(0)) {
           levels.splice(levelIndex, 1);
         }
       }
+    } else {
+      this.logger.debug({
+        message: 'Negative delta for non-existent level (ignored)',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: { price: priceDollars, delta: deltaFp, side },
+      });
     }
   }
 
@@ -331,7 +352,9 @@ export class KalshiWebSocketClient {
     this.clearPingTimers();
     this.pingInterval = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-      // Clear any existing pong timeout to prevent overlapping timeouts
+      // Clear any existing pong timeout to prevent overlapping timeouts.
+      // No race condition: Node.js is single-threaded, so clearTimeout + ping + setTimeout
+      // execute atomically within this tick — no concurrent handler can interleave.
       if (this.pongTimeout) {
         clearTimeout(this.pongTimeout);
         this.pongTimeout = null;
@@ -358,6 +381,32 @@ export class KalshiWebSocketClient {
       clearTimeout(this.pongTimeout);
       this.pongTimeout = null;
     }
+  }
+
+  /**
+   * Deduplicates price levels, keeping the last occurrence for each price.
+   * Guards against malformed snapshots with duplicate price entries.
+   */
+  private deduplicateLevels(levels: [string, string][]): [string, string][] {
+    const seen = new Map<string, [string, string]>();
+    for (const level of levels) {
+      seen.set(level[0], level);
+    }
+    return [...seen.values()];
+  }
+
+  /**
+   * Sends a resubscribe only if the cooldown period has elapsed for this ticker.
+   * Prevents rapid-fire resubscribe storms during sequence gap bursts.
+   */
+  private debouncedResubscribe(ticker: string): void {
+    const now = Date.now();
+    const lastTime = this.lastResubscribeTime.get(ticker) ?? 0;
+    if (now - lastTime < RESUBSCRIBE_COOLDOWN_MS) {
+      return;
+    }
+    this.lastResubscribeTime.set(ticker, now);
+    this.sendSubscribe(ticker);
   }
 
   private scheduleReconnect(): void {

@@ -157,12 +157,12 @@ describe('KalshiConnector', () => {
   });
 
   describe('getOrderBook', () => {
-    it('should transform YES/NO bids to normalized format', async () => {
+    it('should transform YES/NO dollar levels to normalized format', async () => {
       mockGetMarketOrderbook.mockResolvedValue({
         data: {
-          orderbook: {
-            yes: [[62, 1000]], // 62¢ YES bid
-            no: [[38, 800]], // 38¢ NO bid → 62¢ YES ask (1 - 0.38)
+          orderbook_fp: {
+            yes_dollars: [['0.6200', '1000.00']], // $0.62 YES bid
+            no_dollars: [['0.3800', '800.00']], // $0.38 NO bid → YES ask (1 - 0.38 = 0.62)
           },
         },
       });
@@ -173,9 +173,9 @@ describe('KalshiConnector', () => {
 
       expect(orderbook.platformId).toBe(PlatformId.KALSHI);
       expect(orderbook.contractId).toBe(asContractId('CPI-22DEC-TN0.1'));
-      // YES bid 62¢ → 0.62
+      // YES bid $0.62 → 0.62
       expect(orderbook.bids).toEqual([{ price: 0.62, quantity: 1000 }]);
-      // NO bid 38¢ → YES ask (1 - 0.38) = 0.62
+      // NO bid $0.38 → YES ask (1 - 0.38) = 0.62
       expect(orderbook.asks).toEqual([{ price: 0.62, quantity: 800 }]);
     });
 
@@ -192,9 +192,9 @@ describe('KalshiConnector', () => {
     it('should handle empty orderbook', async () => {
       mockGetMarketOrderbook.mockResolvedValue({
         data: {
-          orderbook: {
-            yes: undefined,
-            no: undefined,
+          orderbook_fp: {
+            yes_dollars: undefined,
+            no_dollars: undefined,
           },
         },
       });
@@ -206,16 +206,16 @@ describe('KalshiConnector', () => {
   });
 
   describe('submitOrder', () => {
-    it('should convert decimal price to cents and return mapped result', async () => {
+    it('should send dollar string price and return mapped result', async () => {
       mockCreateOrder.mockResolvedValue({
         data: {
           order: {
             order_id: 'kalshi-order-1',
             status: 'executed',
-            remaining_count: 0,
-            fill_count: 10,
-            taker_fill_count: 10,
-            taker_fill_cost: 450, // 10 contracts * 45 cents
+            remaining_count_fp: '0.00',
+            fill_count_fp: '10.00',
+            taker_fill_count_fp: '10.00',
+            taker_fill_cost_dollars: '4.50', // 10 contracts * $0.45
             created_time: '2026-01-01T00:00:00Z',
           },
         },
@@ -235,9 +235,9 @@ describe('KalshiConnector', () => {
       expect(result.filledPrice).toBe(0.45);
       expect(result.platformId).toBe(PlatformId.KALSHI);
 
-      // Verify cents conversion: 0.45 → 45 cents
+      // Verify dollar string conversion: 0.45 → "0.45"
       expect(mockCreateOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ yes_price: 45 }),
+        expect.objectContaining({ yes_price_dollars: '0.45' }),
       );
     });
 
@@ -247,10 +247,10 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-2',
             status: 'canceled',
-            remaining_count: 10,
-            fill_count: 0,
-            taker_fill_count: 0,
-            taker_fill_cost: 0,
+            remaining_count_fp: '10.00',
+            fill_count_fp: '0.00',
+            taker_fill_count_fp: '0.00',
+            taker_fill_cost_dollars: '0.00',
             created_time: '2026-01-01T00:00:00Z',
           },
         },
@@ -265,6 +265,35 @@ describe('KalshiConnector', () => {
       });
 
       expect(result.status).toBe('rejected');
+    });
+
+    it('should round price DOWN to 2 decimal places (never up)', async () => {
+      mockCreateOrder.mockResolvedValue({
+        data: {
+          order: {
+            order_id: 'kalshi-order-round',
+            status: 'resting',
+            remaining_count_fp: '10.00',
+            fill_count_fp: '0.00',
+            taker_fill_count_fp: '0.00',
+            taker_fill_cost_dollars: '0.00',
+            created_time: '2026-01-01T00:00:00Z',
+          },
+        },
+      });
+
+      await connector.submitOrder({
+        contractId: asContractId('CPI-22DEC-TN0.1'),
+        side: 'buy',
+        quantity: 10,
+        price: 0.455,
+        type: 'limit',
+      });
+
+      // 0.455 should round DOWN to "0.45", not up to "0.46"
+      expect(mockCreateOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ yes_price_dollars: '0.45' }),
+      );
     });
 
     it('should throw PlatformApiError on SDK error', async () => {
@@ -297,10 +326,10 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-1',
             status: 'executed',
-            remaining_count: 0,
-            fill_count: 10,
-            taker_fill_count: 10,
-            taker_fill_cost: 450, // 10 contracts * 45 cents each = 450 cents total
+            remaining_count_fp: '0.00',
+            fill_count_fp: '10.00',
+            taker_fill_count_fp: '10.00',
+            taker_fill_cost_dollars: '4.50', // 10 contracts * $0.45 each = $4.50 total
           },
         },
       });
@@ -322,10 +351,10 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-2',
             status: 'executed',
-            remaining_count: 5,
-            fill_count: 5,
-            taker_fill_count: 5,
-            taker_fill_cost: 225, // 5 contracts * 45 cents = 225 cents total
+            remaining_count_fp: '5.00',
+            fill_count_fp: '5.00',
+            taker_fill_count_fp: '5.00',
+            taker_fill_cost_dollars: '2.25', // 5 contracts * $0.45 = $2.25 total
           },
         },
       });
@@ -344,10 +373,10 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-3',
             status: 'resting',
-            remaining_count: 10,
-            fill_count: 0,
-            taker_fill_count: 0,
-            taker_fill_cost: 0,
+            remaining_count_fp: '10.00',
+            fill_count_fp: '0.00',
+            taker_fill_count_fp: '0.00',
+            taker_fill_cost_dollars: '0.00',
           },
         },
       });
@@ -367,10 +396,10 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-4',
             status: 'canceled',
-            remaining_count: 10,
-            fill_count: 0,
-            taker_fill_count: 0,
-            taker_fill_cost: 0,
+            remaining_count_fp: '10.00',
+            fill_count_fp: '0.00',
+            taker_fill_count_fp: '0.00',
+            taker_fill_cost_dollars: '0.00',
           },
         },
       });
@@ -417,10 +446,8 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-1',
             status: 'canceled',
-            remaining_count: 0,
-            fill_count: 0,
           },
-          reduced_by: 10,
+          reduced_by_fp: '10.00',
         },
       });
 
@@ -438,10 +465,8 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'kalshi-order-2',
             status: 'executed',
-            remaining_count: 0,
-            fill_count: 10,
           },
-          reduced_by: 0,
+          reduced_by_fp: '0.00',
         },
       });
 
@@ -480,10 +505,8 @@ describe('KalshiConnector', () => {
           order: {
             order_id: 'order-1',
             status: 'resting',
-            remaining_count: 10,
-            fill_count: 0,
           },
-          reduced_by: 0,
+          reduced_by_fp: '0.00',
         },
       });
 
@@ -498,7 +521,7 @@ describe('KalshiConnector', () => {
       mockCancelOrder.mockResolvedValue({
         data: {
           order: { order_id: 'order-1', status: 'canceled' },
-          reduced_by: 5,
+          reduced_by_fp: '5.00',
         },
       });
 

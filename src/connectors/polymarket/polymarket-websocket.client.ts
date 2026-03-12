@@ -23,6 +23,9 @@ interface LocalOrderBookState {
   timestamp: number;
 }
 
+/** Maximum depth for each side of the local orderbook. Prevents unbounded growth. */
+const MAX_ORDERBOOK_DEPTH = 50;
+
 /**
  * WebSocket client for Polymarket real-time market data.
  * Connects to wss://ws-subscriptions-clob.polymarket.com/ws/market
@@ -215,18 +218,24 @@ export class PolymarketWebSocketClient {
   }
 
   private handleBookSnapshot(msg: PolymarketOrderBookMessage): void {
-    const bids: PriceLevel[] = (msg.bids ?? []).map((b) => ({
+    const dedupedBids = this.deduplicateLevels(msg.bids ?? []);
+    const dedupedAsks = this.deduplicateLevels(msg.asks ?? []);
+
+    const bids: PriceLevel[] = dedupedBids.map((b) => ({
       price: new Decimal(b.price).toNumber(),
       quantity: new Decimal(b.size).toNumber(),
     }));
-    const asks: PriceLevel[] = (msg.asks ?? []).map((a) => ({
+    const asks: PriceLevel[] = dedupedAsks.map((a) => ({
       price: new Decimal(a.price).toNumber(),
       quantity: new Decimal(a.size).toNumber(),
     }));
 
     // Sort bids descending, asks ascending
-    bids.sort((a, b) => new Decimal(b.price).minus(a.price).toNumber());
-    asks.sort((a, b) => new Decimal(a.price).minus(b.price).toNumber());
+    bids.sort((a, b) => new Decimal(b.price).comparedTo(a.price));
+    asks.sort((a, b) => new Decimal(a.price).comparedTo(b.price));
+
+    if (bids.length > MAX_ORDERBOOK_DEPTH) bids.length = MAX_ORDERBOOK_DEPTH;
+    if (asks.length > MAX_ORDERBOOK_DEPTH) asks.length = MAX_ORDERBOOK_DEPTH;
 
     const state: LocalOrderBookState = {
       bids,
@@ -304,6 +313,20 @@ export class PolymarketWebSocketClient {
     for (const sub of this.subscribers) {
       sub(rawBook);
     }
+  }
+
+  /**
+   * Deduplicates price levels, keeping the last occurrence for each price.
+   * Guards against malformed snapshots with duplicate price entries.
+   */
+  private deduplicateLevels(
+    levels: Array<{ price: string; size: string }>,
+  ): Array<{ price: string; size: string }> {
+    const seen = new Map<string, { price: string; size: string }>();
+    for (const level of levels) {
+      seen.set(level.price, level);
+    }
+    return [...seen.values()];
   }
 
   private startPingInterval(): void {
