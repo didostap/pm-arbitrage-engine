@@ -8,10 +8,11 @@ import {
 } from '../../common/types/index.js';
 import { RETRY_STRATEGIES } from '../../common/errors/index.js';
 import { normalizeKalshiLevels } from '../../common/utils/index.js';
+import { parseWsMessage } from '../common/parse-ws-message.js';
+import { kalshiWsMessageSchema } from './kalshi-response.schema.js';
 import type {
   KalshiOrderbookDeltaMsg,
   KalshiOrderbookSnapshotMsg,
-  KalshiWebSocketMessage,
   LocalOrderbookState,
 } from './kalshi.types.js';
 
@@ -202,7 +203,10 @@ export class KalshiWebSocketClient {
           : Buffer.isBuffer(data)
             ? data.toString('utf-8')
             : Buffer.from(data as ArrayBuffer).toString('utf-8');
-      const message = JSON.parse(raw) as KalshiWebSocketMessage;
+      const message = parseWsMessage(kalshiWsMessageSchema, JSON.parse(raw), {
+        platform: PlatformId.KALSHI,
+      });
+      if (!message) return;
 
       switch (message.type) {
         case 'orderbook_snapshot':

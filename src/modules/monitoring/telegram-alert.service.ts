@@ -8,6 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import { SystemHealthError } from '../../common/errors/system-health-error.js';
+import {
+  telegramResponseSchema,
+  telegramRateLimitSchema,
+} from '../../common/schemas/telegram-response.schema.js';
 import { withCorrelationId } from '../../common/services/correlation-context.js';
 import { withRetry } from '../../common/utils/with-retry.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
@@ -286,19 +290,21 @@ export class TelegramAlertService implements OnModuleInit, OnModuleDestroy {
 
       if (!response.ok) {
         if (response.status === 429) {
-          const body = (await response.json()) as {
-            parameters?: { retry_after?: number };
-          };
-          const retryAfter = body.parameters?.retry_after;
-          if (retryAfter && retryAfter > 0) {
-            this.lastRetryAfterMs = retryAfter * 1000;
+          const parsed = telegramRateLimitSchema.safeParse(
+            await response.json(),
+          );
+          if (parsed.success) {
+            const retryAfter = parsed.data.parameters?.retry_after;
+            if (retryAfter && retryAfter > 0) {
+              this.lastRetryAfterMs = retryAfter * 1000;
+            }
           }
         }
         return false;
       }
 
-      const body = (await response.json()) as { ok: boolean };
-      return body.ok;
+      const parsed = telegramResponseSchema.safeParse(await response.json());
+      return parsed.success ? parsed.data.ok : false;
     } catch {
       return false;
     }

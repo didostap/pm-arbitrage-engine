@@ -31,6 +31,12 @@ import {
 import { withRetry, normalizeKalshiLevels } from '../../common/utils/index.js';
 import { RateLimiter } from '../../common/utils/rate-limiter.js';
 import { KalshiWebSocketClient } from './kalshi-websocket.client.js';
+import { parseApiResponse } from '../common/parse-api-response.js';
+import {
+  kalshiOrderResponseSchema,
+  kalshiAccountLimitsResponseSchema,
+  kalshiCancelOrderResponseSchema,
+} from './kalshi-response.schema.js';
 
 /** Minimal shape of the Kalshi SDK Order returned by GET /portfolio/orders/{order_id}. */
 interface KalshiOrderResponse {
@@ -182,7 +188,12 @@ export class KalshiConnector
 
   private async initializeRateLimiterFromApi(): Promise<void> {
     try {
-      const response = await this.accountApi.getAccountApiLimits();
+      const rawResponse = await this.accountApi.getAccountApiLimits();
+      const response = parseApiResponse(
+        kalshiAccountLimitsResponseSchema,
+        rawResponse,
+        { platform: PlatformId.KALSHI, operation: 'getAccountApiLimits' },
+      );
       const { read_limit, write_limit, usage_tier } = response.data;
 
       if (
@@ -373,7 +384,11 @@ export class KalshiConnector
       );
 
       this.lastHeartbeat = new Date();
-      const order = response.data.order;
+      const validated = parseApiResponse(kalshiOrderResponseSchema, response, {
+        platform: PlatformId.KALSHI,
+        operation: 'submitOrder',
+      });
+      const order = validated.data.order;
 
       // Map Kalshi status to OrderResult status
       let status: OrderResult['status'];
@@ -395,13 +410,17 @@ export class KalshiConnector
               .toNumber()
           : 0;
 
+      // created_time passes through via .passthrough()
+      const rawOrder = order as Record<string, unknown>;
       return {
         orderId: asOrderId(order.order_id),
         platformId: PlatformId.KALSHI,
         status,
         filledQuantity,
         filledPrice,
-        timestamp: new Date(order.created_time),
+        timestamp: new Date(
+          (rawOrder['created_time'] as string) ?? new Date().toISOString(),
+        ),
       };
     } catch (error) {
       throw this.mapError(error);
@@ -436,7 +455,12 @@ export class KalshiConnector
       );
 
       this.lastHeartbeat = new Date();
-      const order = response.data.order;
+      const validated = parseApiResponse(
+        kalshiCancelOrderResponseSchema,
+        response,
+        { platform: PlatformId.KALSHI, operation: 'cancelOrder' },
+      );
+      const order = validated.data.order;
 
       if (order.status === 'canceled') {
         return { orderId, status: 'cancelled' };
@@ -489,7 +513,11 @@ export class KalshiConnector
       );
 
       this.lastHeartbeat = new Date();
-      const order = response.data.order;
+      const validated = parseApiResponse(kalshiOrderResponseSchema, response, {
+        platform: PlatformId.KALSHI,
+        operation: 'getOrder',
+      });
+      const order = validated.data.order;
 
       let status: OrderStatusResult['status'];
       if (order.status === 'resting') {

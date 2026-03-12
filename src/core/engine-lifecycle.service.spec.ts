@@ -50,7 +50,7 @@ const createProviders = (overrides?: Record<string, unknown>) => [
     useValue: {
       get: vi.fn((key: string, defaultValue?: unknown): unknown => {
         if (key === 'POLLING_INTERVAL_MS') return 30000;
-        if (key === 'ALLOW_MIXED_MODE') return defaultValue ?? 'false';
+        if (key === 'ALLOW_MIXED_MODE') return defaultValue ?? false;
         return defaultValue;
       }),
       ...(overrides?.configService as object),
@@ -324,7 +324,7 @@ describe('EngineLifecycleService', () => {
           configService: {
             get: vi.fn((key: string, defaultValue?: unknown): unknown => {
               if (key === 'POLLING_INTERVAL_MS') return 30000;
-              if (key === 'ALLOW_MIXED_MODE') return 'false';
+              if (key === 'ALLOW_MIXED_MODE') return false;
               return defaultValue;
             }),
           },
@@ -356,7 +356,7 @@ describe('EngineLifecycleService', () => {
           configService: {
             get: vi.fn((key: string, defaultValue?: unknown): unknown => {
               if (key === 'POLLING_INTERVAL_MS') return 30000;
-              if (key === 'ALLOW_MIXED_MODE') return 'true';
+              if (key === 'ALLOW_MIXED_MODE') return true;
               return defaultValue;
             }),
           },

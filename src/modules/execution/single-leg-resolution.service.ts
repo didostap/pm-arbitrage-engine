@@ -16,10 +16,14 @@ import {
   SingleLegResolvedEvent,
   OrderFilledEvent,
 } from '../../common/events/execution.events';
+import { DataCorruptionDetectedEvent } from '../../common/events/system.events';
 import {
   ExecutionError,
   EXECUTION_ERROR_CODES,
 } from '../../common/errors/execution-error';
+import { SystemHealthError } from '../../common/errors/system-health-error';
+import { parseJsonField } from '../../common/schemas/parse-json-field';
+import { sizesSchema } from '../../common/schemas/prisma-json.schema';
 import { PlatformId } from '../../common/types/platform.type';
 import {
   asContractId,
@@ -96,7 +100,30 @@ export class SingleLegResolutionService {
     const connector = this.getConnector(failedPlatform);
     const contractId = this.getContractId(position.pair, failedPlatform);
     const side = this.getSide(position, failedPlatform);
-    const sizes = position.sizes as { kalshi: string; polymarket: string };
+    let sizes: { kalshi: string; polymarket: string };
+    try {
+      sizes = parseJsonField(sizesSchema, position.sizes, {
+        model: 'OpenPosition',
+        field: 'sizes',
+        recordId: position.positionId,
+      });
+    } catch (error) {
+      const zodErrors =
+        error instanceof SystemHealthError
+          ? ((error.metadata?.zodErrors as import('zod').ZodIssue[]) ?? [])
+          : [];
+      this.eventEmitter.emit(
+        EVENT_NAMES.DATA_CORRUPTION_DETECTED,
+        new DataCorruptionDetectedEvent(
+          'OpenPosition',
+          'sizes',
+          position.positionId,
+          position.sizes,
+          zodErrors,
+        ),
+      );
+      throw error;
+    }
     const size = new Decimal(
       failedPlatform === PlatformId.KALSHI ? sizes.kalshi : sizes.polymarket,
     ).toNumber();

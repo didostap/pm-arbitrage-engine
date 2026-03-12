@@ -15,6 +15,7 @@ import { PlatformApiError } from '../../common/errors/platform-api-error';
 import { ConfigValidationError } from '../../common/errors/config-validation-error';
 import { PlatformId } from '../../common/types/platform.type';
 import { POLYMARKET_ERROR_CODES } from './polymarket-error-codes';
+import { coinGeckoPriceSchema } from './polymarket-response.schema';
 
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -248,9 +249,8 @@ export class GasEstimationService implements OnModuleInit, OnModuleDestroy {
       throw new Error(`CoinGecko HTTP ${response.status}`);
     }
 
-    const data = (await response.json()) as {
-      'polygon-ecosystem-token': { usd: number };
-    };
+    const raw: unknown = await response.json();
+    const data = coinGeckoPriceSchema.parse(raw);
     return String(data['polygon-ecosystem-token'].usd);
   }
 }

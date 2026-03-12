@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
+import { auditLogDetailsSchema } from '../../common/schemas/prisma-json.schema.js';
 import { AuditLogRepository } from '../../persistence/repositories/audit-log.repository.js';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import {
@@ -114,10 +115,11 @@ export class AuditLogService implements OnModuleInit {
       }
 
       // Recompute hash and verify currentHash
+      const parsedDetails = auditLogDetailsSchema.parse(entry.details ?? {});
       const recomputedHash = this.computeHash(
         entry.previousHash,
         entry.eventType,
-        entry.details as Record<string, unknown>,
+        parsedDetails,
         entry.createdAt.toISOString(),
       );
 

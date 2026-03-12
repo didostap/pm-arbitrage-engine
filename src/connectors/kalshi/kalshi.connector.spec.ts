@@ -213,6 +213,7 @@ describe('KalshiConnector', () => {
             order_id: 'kalshi-order-1',
             status: 'executed',
             remaining_count: 0,
+            fill_count: 10,
             taker_fill_count: 10,
             taker_fill_cost: 450, // 10 contracts * 45 cents
             created_time: '2026-01-01T00:00:00Z',
@@ -247,6 +248,7 @@ describe('KalshiConnector', () => {
             order_id: 'kalshi-order-2',
             status: 'canceled',
             remaining_count: 10,
+            fill_count: 0,
             taker_fill_count: 0,
             taker_fill_cost: 0,
             created_time: '2026-01-01T00:00:00Z',
@@ -297,6 +299,7 @@ describe('KalshiConnector', () => {
             status: 'executed',
             remaining_count: 0,
             fill_count: 10,
+            taker_fill_count: 10,
             taker_fill_cost: 450, // 10 contracts * 45 cents each = 450 cents total
           },
         },
@@ -321,6 +324,7 @@ describe('KalshiConnector', () => {
             status: 'executed',
             remaining_count: 5,
             fill_count: 5,
+            taker_fill_count: 5,
             taker_fill_cost: 225, // 5 contracts * 45 cents = 225 cents total
           },
         },
@@ -342,6 +346,7 @@ describe('KalshiConnector', () => {
             status: 'resting',
             remaining_count: 10,
             fill_count: 0,
+            taker_fill_count: 0,
             taker_fill_cost: 0,
           },
         },
@@ -364,6 +369,7 @@ describe('KalshiConnector', () => {
             status: 'canceled',
             remaining_count: 10,
             fill_count: 0,
+            taker_fill_count: 0,
             taker_fill_cost: 0,
           },
         },

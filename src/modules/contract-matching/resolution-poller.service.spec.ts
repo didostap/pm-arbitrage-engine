@@ -14,7 +14,7 @@ function createMockConfig(
   overrides: Record<string, unknown> = {},
 ): ConfigService {
   const defaults: Record<string, unknown> = {
-    RESOLUTION_POLLER_ENABLED: 'true',
+    RESOLUTION_POLLER_ENABLED: true,
     RESOLUTION_POLLER_CRON_EXPRESSION: '0 0 6 * * *',
     RESOLUTION_POLLER_BATCH_SIZE: 100,
     ...overrides,
@@ -108,7 +108,7 @@ describe('ResolutionPollerService', () => {
         kalshiCatalog as unknown as IContractCatalogProvider,
         polymarketCatalog as unknown as IContractCatalogProvider,
         eventEmitter as unknown as EventEmitter2,
-        createMockConfig({ RESOLUTION_POLLER_ENABLED: 'false' }),
+        createMockConfig({ RESOLUTION_POLLER_ENABLED: false }),
         schedulerRegistry as unknown as SchedulerRegistry,
       );
       service.onModuleInit();

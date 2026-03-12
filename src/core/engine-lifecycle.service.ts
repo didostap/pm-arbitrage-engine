@@ -254,7 +254,7 @@ export class EngineLifecycleService
 
     if (isMixedMode) {
       const allowMixed =
-        this.configService.get<string>('ALLOW_MIXED_MODE', 'false') === 'true';
+        this.configService.get<boolean>('ALLOW_MIXED_MODE') ?? false;
       if (!allowMixed) {
         throw new ConfigValidationError(
           `Mixed mode detected: Kalshi=${kalshiMode}, Polymarket=${polymarketMode}. ` +

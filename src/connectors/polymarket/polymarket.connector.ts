@@ -34,6 +34,11 @@ import { POLYMARKET_ERROR_CODES } from './polymarket-error-codes.js';
 import { GasEstimationService } from './gas-estimation.service.js';
 import { PolymarketWebSocketClient } from './polymarket-websocket.client.js';
 import type { PolymarketOrderBookMessage } from './polymarket.types.js';
+import { parseApiResponse } from '../common/parse-api-response.js';
+import {
+  polymarketOrderStatusSchema,
+  polymarketPostOrderResponseSchema,
+} from './polymarket-response.schema.js';
 import {
   POLYMARKET_MAKER_FEE,
   POLYMARKET_TAKER_FEE,
@@ -477,21 +482,24 @@ export class PolymarketConnector
         size: params.quantity,
       });
 
-      const postResponse = (await this.clobClient.postOrder(
-        orderPayload,
-      )) as Record<string, unknown>;
+      const rawPostResponse: unknown =
+        await this.clobClient.postOrder(orderPayload);
 
       this.lastHeartbeat = new Date();
 
+      const postResponse = parseApiResponse(
+        polymarketPostOrderResponseSchema,
+        rawPostResponse,
+        { platform: PlatformId.POLYMARKET, operation: 'submitOrder' },
+      );
+
       // Extract order ID from response
       const orderId = asOrderId(
-        (postResponse.orderID as string | undefined) ??
-          (postResponse.id as string | undefined) ??
-          `pm-${Date.now()}`,
+        postResponse.orderID ?? postResponse.id ?? `pm-${Date.now()}`,
       );
 
       // Check if order was immediately matched
-      const status = postResponse.status as string | undefined;
+      const status = postResponse.status;
 
       if (status === 'matched' || status === 'filled') {
         return {
@@ -515,16 +523,20 @@ export class PolymarketConnector
         );
 
         try {
-          const orderStatus = await this.clobClient.getOrder(orderId);
-          const currentStatus = (orderStatus as { status?: string }).status;
+          const rawStatus = await this.clobClient.getOrder(orderId);
+          const orderStatus = parseApiResponse(
+            polymarketOrderStatusSchema,
+            rawStatus,
+            {
+              platform: PlatformId.POLYMARKET,
+              operation: 'getOrder (submit poll)',
+            },
+          );
+          const currentStatus = orderStatus.status;
 
           if (currentStatus === 'matched' || currentStatus === 'filled') {
-            const filledSize =
-              (orderStatus as { filledSize?: number }).filledSize ??
-              params.quantity;
-            const filledPrice =
-              (orderStatus as { filledPrice?: number }).filledPrice ??
-              params.price;
+            const filledSize = orderStatus.filledSize ?? params.quantity;
+            const filledPrice = orderStatus.filledPrice ?? params.price;
 
             return {
               orderId,
@@ -634,8 +646,13 @@ export class PolymarketConnector
     await this.rateLimiter.acquireRead();
 
     try {
-      const orderData = await this.clobClient.getOrder(orderId);
-      const rawStatus = (orderData as { status?: string }).status;
+      const rawOrderData = await this.clobClient.getOrder(orderId);
+      const orderData = parseApiResponse(
+        polymarketOrderStatusSchema,
+        rawOrderData,
+        { platform: PlatformId.POLYMARKET, operation: 'getOrder' },
+      );
+      const rawStatus = orderData.status;
 
       let status: OrderStatusResult['status'];
       if (rawStatus === 'MATCHED' || rawStatus === 'matched') {
@@ -652,8 +669,8 @@ export class PolymarketConnector
         status = 'pending';
       }
 
-      const fillSize = (orderData as { filledSize?: number }).filledSize;
-      const fillPrice = (orderData as { filledPrice?: number }).filledPrice;
+      const fillSize = orderData.filledSize;
+      const fillPrice = orderData.filledPrice;
 
       return {
         orderId,

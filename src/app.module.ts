@@ -12,6 +12,7 @@ import { CoreModule } from './core/core.module';
 import { DataIngestionModule } from './modules/data-ingestion/data-ingestion.module';
 import { ContractMatchingModule } from './modules/contract-matching/contract-matching.module';
 import { loggerConfig } from './common/config/logger.config';
+import { envSchema } from './common/config/env.schema';
 
 import { ArbitrageDetectionModule } from './modules/arbitrage-detection/arbitrage-detection.module';
 import { ExitManagementModule } from './modules/exit-management/exit-management.module';
@@ -28,6 +29,7 @@ import { SystemErrorFilter } from './common/filters/system-error.filter';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: `.env.${process.env.NODE_ENV || 'development'}`,
+      validate: (env) => envSchema.parse(env),
     }),
     EventEmitterModule.forRoot({
       wildcard: true,

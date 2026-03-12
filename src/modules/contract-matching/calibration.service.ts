@@ -7,11 +7,19 @@ import { PrismaService } from '../../common/prisma.service.js';
 import {
   EVENT_NAMES,
   CalibrationCompletedEvent,
+  DataCorruptionDetectedEvent,
 } from '../../common/events/index.js';
 import type {
   CalibrationResult,
   BoundaryAnalysisEntry,
 } from '../../common/events/calibration-completed.event.js';
+import { SystemHealthError } from '../../common/errors/system-health-error.js';
+import { parseJsonField } from '../../common/schemas/parse-json-field.js';
+import {
+  calibrationTiersSchema,
+  boundaryAnalysisSchema,
+  recommendationsSchema,
+} from '../../common/schemas/prisma-json.schema.js';
 
 export type { CalibrationResult };
 
@@ -43,11 +51,9 @@ export class CalibrationService {
     // Load latest calibration result from DB (survives restarts)
     await this.loadLatestFromDb();
 
-    const enabled = this.configService.get<string>(
-      'CALIBRATION_ENABLED',
-      'true',
-    );
-    if (enabled !== 'true') {
+    const enabled =
+      this.configService.get<boolean>('CALIBRATION_ENABLED') ?? true;
+    if (!enabled) {
       this.logger.log({ message: 'Calibration service disabled' });
       return;
     }
@@ -81,19 +87,45 @@ export class CalibrationService {
       this.prisma.calibrationRun.count(),
     ]);
 
-    const data: CalibrationRunSummary[] = runs.map((run) => ({
-      id: run.id,
-      timestamp: run.timestamp,
-      totalResolvedMatches: run.totalResolvedMatches,
-      tiers: run.tiers as unknown as CalibrationResult['tiers'],
-      boundaryAnalysis:
-        run.boundaryAnalysis as unknown as BoundaryAnalysisEntry[],
-      currentAutoApproveThreshold: run.currentAutoApproveThreshold,
-      currentMinReviewThreshold: run.currentMinReviewThreshold,
-      recommendations: run.recommendations as unknown as string[],
-      minimumDataMet: run.minimumDataMet,
-      triggeredBy: run.triggeredBy,
-    }));
+    const data: CalibrationRunSummary[] = runs.map((run) => {
+      try {
+        return {
+          id: run.id,
+          timestamp: run.timestamp,
+          totalResolvedMatches: run.totalResolvedMatches,
+          tiers: parseJsonField(calibrationTiersSchema, run.tiers, {
+            model: 'CalibrationRun',
+            field: 'tiers',
+            recordId: String(run.id),
+          }),
+          boundaryAnalysis: parseJsonField(
+            boundaryAnalysisSchema,
+            run.boundaryAnalysis,
+            {
+              model: 'CalibrationRun',
+              field: 'boundaryAnalysis',
+              recordId: String(run.id),
+            },
+          ),
+          currentAutoApproveThreshold: run.currentAutoApproveThreshold,
+          currentMinReviewThreshold: run.currentMinReviewThreshold,
+          recommendations: parseJsonField(
+            recommendationsSchema,
+            run.recommendations,
+            {
+              model: 'CalibrationRun',
+              field: 'recommendations',
+              recordId: String(run.id),
+            },
+          ),
+          minimumDataMet: run.minimumDataMet,
+          triggeredBy: run.triggeredBy,
+        };
+      } catch (error) {
+        this.emitDataCorruptionEvent('CalibrationRun', run.id, run, error);
+        throw error;
+      }
+    });
 
     return { data, count: totalCount };
   }
@@ -259,17 +291,46 @@ export class CalibrationService {
         orderBy: { timestamp: 'desc' },
       });
       if (dbResult) {
-        this.latestResult = {
-          timestamp: dbResult.timestamp,
-          totalResolvedMatches: dbResult.totalResolvedMatches,
-          tiers: dbResult.tiers as unknown as CalibrationResult['tiers'],
-          boundaryAnalysis:
-            dbResult.boundaryAnalysis as unknown as BoundaryAnalysisEntry[],
-          currentAutoApproveThreshold: dbResult.currentAutoApproveThreshold,
-          currentMinReviewThreshold: dbResult.currentMinReviewThreshold,
-          recommendations: dbResult.recommendations as string[],
-          minimumDataMet: dbResult.minimumDataMet,
-        };
+        try {
+          this.latestResult = {
+            timestamp: dbResult.timestamp,
+            totalResolvedMatches: dbResult.totalResolvedMatches,
+            tiers: parseJsonField(calibrationTiersSchema, dbResult.tiers, {
+              model: 'CalibrationRun',
+              field: 'tiers',
+              recordId: String(dbResult.id),
+            }),
+            boundaryAnalysis: parseJsonField(
+              boundaryAnalysisSchema,
+              dbResult.boundaryAnalysis,
+              {
+                model: 'CalibrationRun',
+                field: 'boundaryAnalysis',
+                recordId: String(dbResult.id),
+              },
+            ),
+            currentAutoApproveThreshold: dbResult.currentAutoApproveThreshold,
+            currentMinReviewThreshold: dbResult.currentMinReviewThreshold,
+            recommendations: parseJsonField(
+              recommendationsSchema,
+              dbResult.recommendations,
+              {
+                model: 'CalibrationRun',
+                field: 'recommendations',
+                recordId: String(dbResult.id),
+              },
+            ),
+            minimumDataMet: dbResult.minimumDataMet,
+          };
+        } catch (error) {
+          this.emitDataCorruptionEvent(
+            'CalibrationRun',
+            dbResult.id,
+            dbResult,
+            error,
+          );
+          throw error;
+        }
         this.logger.log({
           message: 'Loaded latest calibration result from database',
           data: {
@@ -348,6 +409,28 @@ export class CalibrationService {
       recommendations,
       minimumDataMet: false,
     };
+  }
+
+  private emitDataCorruptionEvent(
+    model: string,
+    recordId: string,
+    rawValue: unknown,
+    error: unknown,
+  ): void {
+    const zodErrors =
+      error instanceof SystemHealthError
+        ? ((error.metadata?.zodErrors as import('zod').ZodIssue[]) ?? [])
+        : [];
+    this.eventEmitter.emit(
+      EVENT_NAMES.DATA_CORRUPTION_DETECTED,
+      new DataCorruptionDetectedEvent(
+        model,
+        'tiers|boundaryAnalysis|recommendations',
+        String(recordId),
+        rawValue,
+        zodErrors,
+      ),
+    );
   }
 
   private emitAndLog(result: CalibrationResult): void {

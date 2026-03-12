@@ -1,3 +1,4 @@
+import type { ZodIssue } from 'zod';
 import { BaseEvent } from './base.event';
 import type { PairId, PositionId } from '../types/branded.type';
 
@@ -77,6 +78,22 @@ export class ReconciliationDiscrepancyEvent extends BaseEvent {
     public readonly localState: string,
     public readonly platformState: string,
     public readonly recommendedAction: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
+ * Emitted when Prisma JSON field validation fails (data corruption detected).
+ */
+export class DataCorruptionDetectedEvent extends BaseEvent {
+  constructor(
+    public readonly model: string,
+    public readonly field: string,
+    public readonly recordId: string | undefined,
+    public readonly rawValue: unknown,
+    public readonly zodErrors: ZodIssue[],
     correlationId?: string,
   ) {
     super(correlationId);

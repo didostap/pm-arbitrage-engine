@@ -99,11 +99,9 @@ export class CandidateDiscoveryService implements OnModuleInit {
       );
     }
 
-    const enabled = this.configService.get<string>(
-      'DISCOVERY_ENABLED',
-      'false',
-    );
-    if (enabled !== 'true') {
+    const enabled =
+      this.configService.get<boolean>('DISCOVERY_ENABLED') ?? false;
+    if (!enabled) {
       this.logger.log({ message: 'Discovery pipeline disabled' });
       return;
     }
@@ -121,11 +119,9 @@ export class CandidateDiscoveryService implements OnModuleInit {
       data: { cron: cronExpr },
     });
 
-    const runOnStartup = this.configService.get<string>(
-      'DISCOVERY_RUN_ON_STARTUP',
-      'false',
-    );
-    if (runOnStartup === 'true') {
+    const runOnStartup =
+      this.configService.get<boolean>('DISCOVERY_RUN_ON_STARTUP') ?? false;
+    if (runOnStartup) {
       setTimeout(() => {
         void this.runDiscovery();
       }, 3000);

@@ -22,6 +22,8 @@ import {
   SystemHealthError,
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../common/errors/system-health-error';
+import { reconciliationContextSchema } from '../common/schemas/prisma-json.schema';
+import { parseJsonField } from '../common/schemas/parse-json-field';
 import { PlatformId } from '../common/types/platform.type';
 import type {
   ReconciliationContext,
@@ -475,8 +477,16 @@ export class StartupReconciliationService {
     let newStatus: PositionStatus;
 
     if (action === 'acknowledge') {
-      const context =
-        position.reconciliationContext as ReconciliationContext | null;
+      const rawContext = parseJsonField(
+        reconciliationContextSchema,
+        position.reconciliationContext,
+        {
+          model: 'OpenPosition',
+          field: 'reconciliationContext',
+          recordId: position.positionId,
+        },
+      );
+      const context = rawContext as ReconciliationContext | null;
       if (!context) {
         throw new Error(
           `No reconciliation context found for position ${positionId}`,

@@ -47,7 +47,7 @@ describe('CalibrationService', () => {
         const overrides: Record<string, unknown> = {
           LLM_AUTO_APPROVE_THRESHOLD: 85,
           LLM_MIN_REVIEW_THRESHOLD: 40,
-          CALIBRATION_ENABLED: 'true',
+          CALIBRATION_ENABLED: true,
           CALIBRATION_CRON_EXPRESSION: '0 0 7 1 */3 *',
         };
         return overrides[key] ?? defaultVal;
@@ -75,7 +75,7 @@ describe('CalibrationService', () => {
     it('should not register cron job when disabled', async () => {
       configService = {
         get: vi.fn((key: string, defaultVal?: unknown) => {
-          if (key === 'CALIBRATION_ENABLED') return 'false';
+          if (key === 'CALIBRATION_ENABLED') return false;
           if (key === 'LLM_AUTO_APPROVE_THRESHOLD') return 85;
           if (key === 'LLM_MIN_REVIEW_THRESHOLD') return 40;
           return defaultVal;

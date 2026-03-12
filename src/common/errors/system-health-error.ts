@@ -34,4 +34,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   NOT_FOUND: 4007,
   /** Match already approved — conflict */
   MATCH_ALREADY_APPROVED: 4008,
+  /** Prisma JSON field data corruption detected — critical */
+  DATA_CORRUPTION_DETECTED: 4500,
 } as const;

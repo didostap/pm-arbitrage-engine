@@ -7,6 +7,11 @@ import type {
 } from '../../common/interfaces/contract-catalog-provider.interface.js';
 import { PlatformId } from '../../common/types/platform.type.js';
 import { PlatformApiError } from '../../common/errors/platform-api-error.js';
+import { parseApiResponse } from '../common/parse-api-response.js';
+import {
+  polymarketEventSchema,
+  polymarketResolutionMarketSchema,
+} from './polymarket-response.schema.js';
 
 const PAGE_LIMIT = 100;
 const PAGE_DELAY_MS = 200;
@@ -17,16 +22,6 @@ interface PolymarketMarket {
   description?: string;
   endDate?: string;
   clobTokenIds?: string;
-}
-
-interface PolymarketToken {
-  outcome: string;
-  winner: boolean;
-}
-
-interface PolymarketResolutionMarket {
-  conditionId: string;
-  tokens: PolymarketToken[];
 }
 
 interface PolymarketEvent {
@@ -71,7 +66,11 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
           );
         }
 
-        const events = (await response.json()) as PolymarketEvent[];
+        const raw: unknown = await response.json();
+        const events = parseApiResponse(polymarketEventSchema.array(), raw, {
+          platform: PlatformId.POLYMARKET,
+          operation: 'listActiveContracts',
+        });
 
         for (const event of events) {
           if (!event.markets?.length) continue;
@@ -121,7 +120,12 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
         );
       }
 
-      const markets = (await response.json()) as PolymarketResolutionMarket[];
+      const raw: unknown = await response.json();
+      const markets = parseApiResponse(
+        polymarketResolutionMarketSchema.array(),
+        raw,
+        { platform: PlatformId.POLYMARKET, operation: 'getResolutionOutcome' },
+      );
 
       if (!markets.length) {
         return null;

@@ -65,8 +65,8 @@ describe('CandidateDiscoveryService', () => {
   let configService: ConfigService;
   let schedulerRegistry: { addCronJob: ReturnType<typeof vi.fn> };
 
-  const configValues: Record<string, string | number> = {
-    DISCOVERY_ENABLED: 'true',
+  const configValues: Record<string, string | number | boolean> = {
+    DISCOVERY_ENABLED: true,
     DISCOVERY_CRON_EXPRESSION: '0 0 8,20 * * *',
     DISCOVERY_PREFILTER_THRESHOLD: 0.25,
     DISCOVERY_SETTLEMENT_WINDOW_DAYS: 7,
@@ -121,7 +121,7 @@ describe('CandidateDiscoveryService', () => {
     });
 
     it('should not register cron job when discovery is disabled', () => {
-      configValues['DISCOVERY_ENABLED'] = 'false';
+      configValues['DISCOVERY_ENABLED'] = false;
       service = new CandidateDiscoveryService(
         catalogSync as unknown as CatalogSyncService,
         preFilter as unknown as PreFilterService,
@@ -136,12 +136,12 @@ describe('CandidateDiscoveryService', () => {
       expect(schedulerRegistry.addCronJob).not.toHaveBeenCalled();
 
       // Reset
-      configValues['DISCOVERY_ENABLED'] = 'true';
+      configValues['DISCOVERY_ENABLED'] = true;
     });
 
     it('should run discovery on startup when DISCOVERY_RUN_ON_STARTUP is true', () => {
       vi.useFakeTimers();
-      configValues['DISCOVERY_RUN_ON_STARTUP'] = 'true';
+      configValues['DISCOVERY_RUN_ON_STARTUP'] = true;
 
       catalogSync.syncCatalogs.mockResolvedValue(new Map());
 
@@ -166,12 +166,12 @@ describe('CandidateDiscoveryService', () => {
       expect(catalogSync.syncCatalogs).toHaveBeenCalled();
 
       vi.useRealTimers();
-      configValues['DISCOVERY_RUN_ON_STARTUP'] = 'false';
+      configValues['DISCOVERY_RUN_ON_STARTUP'] = false;
     });
 
     it('should not run discovery on startup when DISCOVERY_RUN_ON_STARTUP is false', () => {
       vi.useFakeTimers();
-      configValues['DISCOVERY_RUN_ON_STARTUP'] = 'false';
+      configValues['DISCOVERY_RUN_ON_STARTUP'] = false;
 
       service = new CandidateDiscoveryService(
         catalogSync as unknown as CatalogSyncService,

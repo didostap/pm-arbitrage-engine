@@ -11,6 +11,11 @@ import type {
   PolymarketPriceChangeMessage,
   PolymarketWebSocketConfig,
 } from './polymarket.types.js';
+import { parseWsMessage } from '../common/parse-ws-message.js';
+import {
+  polymarketOrderBookMsgSchema,
+  polymarketPriceChangeMsgSchema,
+} from './polymarket-response.schema.js';
 
 interface LocalOrderBookState {
   bids: PriceLevel[];
@@ -197,9 +202,15 @@ export class PolymarketWebSocketClient {
     const eventType = msg['event_type'] as string | undefined;
 
     if (eventType === 'book') {
-      this.handleBookSnapshot(msg as unknown as PolymarketOrderBookMessage);
+      const validated = parseWsMessage(polymarketOrderBookMsgSchema, msg, {
+        platform: PlatformId.POLYMARKET,
+      });
+      if (validated) this.handleBookSnapshot(validated);
     } else if (eventType === 'price_change') {
-      this.handlePriceChange(msg as unknown as PolymarketPriceChangeMessage);
+      const validated = parseWsMessage(polymarketPriceChangeMsgSchema, msg, {
+        platform: PlatformId.POLYMARKET,
+      });
+      if (validated) this.handlePriceChange(validated);
     }
   }
 

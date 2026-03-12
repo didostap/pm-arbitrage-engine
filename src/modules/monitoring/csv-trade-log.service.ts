@@ -82,8 +82,8 @@ export class CsvTradeLogService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    const csvEnabled = this.configService.get<string>('CSV_ENABLED');
-    if (csvEnabled === 'false') {
+    const csvEnabled = this.configService.get<boolean>('CSV_ENABLED') ?? true;
+    if (csvEnabled === false) {
       this.enabled = false;
       this.logger.log({
         message: 'CSV trade logging disabled via CSV_ENABLED=false',

@@ -50,9 +50,9 @@ describe('CsvTradeLogService', () => {
 
     mockConfigService = {
       get: vi.fn((key: string) => {
-        const config: Record<string, string> = {
+        const config: Record<string, string | boolean> = {
           CSV_TRADE_LOG_DIR: '/tmp/test-trade-logs',
-          CSV_ENABLED: 'true',
+          CSV_ENABLED: true,
         };
         return config[key];
       }),
@@ -126,7 +126,7 @@ describe('CsvTradeLogService', () => {
 
     it('should disable logging when CSV_ENABLED=false', async () => {
       mockConfigService.get.mockImplementation((key: string) => {
-        if (key === 'CSV_ENABLED') return 'false';
+        if (key === 'CSV_ENABLED') return false;
         if (key === 'CSV_TRADE_LOG_DIR') return '/tmp/test-trade-logs';
         return undefined;
       });

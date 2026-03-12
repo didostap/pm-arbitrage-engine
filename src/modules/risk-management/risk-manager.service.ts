@@ -23,9 +23,11 @@ import {
   BudgetReleasedEvent,
   TradingHaltedEvent,
   TradingResumedEvent,
+  DataCorruptionDetectedEvent,
 } from '../../common/events';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PrismaService } from '../../common/prisma.service';
+import { haltReasonSchema } from '../../common/schemas/prisma-json.schema';
 import {
   RiskLimitError,
   RISK_ERROR_CODES,
@@ -174,15 +176,25 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       if (state.haltReason) {
         try {
           const parsed: unknown = JSON.parse(state.haltReason);
-          if (Array.isArray(parsed)) {
-            for (const r of parsed) {
-              if (typeof r === 'string') {
-                this.activeHaltReasons.add(r as HaltReason);
-              }
+          const validated = haltReasonSchema.safeParse(parsed);
+          if (validated.success) {
+            for (const r of validated.data) {
+              this.activeHaltReasons.add(r as HaltReason);
             }
           } else if (typeof parsed === 'string' && parsed.length > 0) {
-            // Legacy single-string format
+            // Legacy single-string JSON format
             this.activeHaltReasons.add(parsed as HaltReason);
+          } else {
+            this.eventEmitter.emit(
+              EVENT_NAMES.DATA_CORRUPTION_DETECTED,
+              new DataCorruptionDetectedEvent(
+                'RiskState',
+                'haltReason',
+                'default',
+                parsed,
+                validated.error?.issues ?? [],
+              ),
+            );
           }
         } catch {
           // Legacy single-string format (not JSON)

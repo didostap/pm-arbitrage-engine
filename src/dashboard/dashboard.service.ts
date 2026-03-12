@@ -1,16 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
+import { parseJsonField } from '../common/schemas/parse-json-field';
+import {
+  entryPricesSchema,
+  auditLogDetailsSchema,
+} from '../common/schemas/prisma-json.schema';
+import { EVENT_NAMES } from '../common/events/event-catalog';
+import { DataCorruptionDetectedEvent } from '../common/events/system.events';
+import {
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from '../common/errors/system-health-error';
 // TODO: Replace remaining PrismaService usage with dedicated repositories
 // (OrderRepository, PlatformHealthLogRepository) to fix architecture violation.
 // PositionRepository now used for getPositions — PrismaService still needed for
 // other aggregation queries.
 import { PrismaService } from '../common/prisma.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
-import {
-  SystemHealthError,
-  SYSTEM_HEALTH_ERROR_CODES,
-} from '../common/errors/system-health-error';
 import type { DashboardOverviewDto } from './dto/dashboard-overview.dto';
 import type { PlatformHealthDto } from './dto/platform-health.dto';
 import type { PositionSummaryDto } from './dto/position-summary.dto';
@@ -32,6 +40,7 @@ export class DashboardService {
     private readonly configService: ConfigService,
     private readonly enrichmentService: PositionEnrichmentService,
     private readonly positionRepository: PositionRepository,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -274,7 +283,7 @@ export class DashboardService {
         // Group exitType by pairId (most recent per pairId)
         const closedPairIds = new Set(closedPositions.map((p) => p.pairId));
         for (const event of exitAuditEvents) {
-          const details = event.details as Record<string, unknown>;
+          const details = this.parseAuditDetails(event.details, event.id);
           const pairId = details?.pairId as string | undefined;
           if (
             pairId &&
@@ -352,10 +361,15 @@ export class DashboardService {
                 kalshi: pos.pair.kalshiContractId,
                 polymarket: pos.pair.polymarketContractId,
               },
-              entryPrices: pos.entryPrices as {
-                kalshi: string;
-                polymarket: string;
-              },
+              entryPrices: this.parseJsonFieldWithEvent(
+                entryPricesSchema,
+                pos.entryPrices,
+                {
+                  model: 'OpenPosition',
+                  field: 'entryPrices',
+                  recordId: pos.positionId,
+                },
+              ),
               currentPrices: enrichment.data.currentPrices,
               initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
               currentEdge: enrichment.data.currentEdge,
@@ -415,7 +429,15 @@ export class DashboardService {
           kalshi: pos.pair.kalshiContractId,
           polymarket: pos.pair.polymarketContractId,
         },
-        entryPrices: pos.entryPrices as { kalshi: string; polymarket: string },
+        entryPrices: this.parseJsonFieldWithEvent(
+          entryPricesSchema,
+          pos.entryPrices,
+          {
+            model: 'OpenPosition',
+            field: 'entryPrices',
+            recordId: pos.positionId,
+          },
+        ),
         currentPrices: enrichment.data.currentPrices,
         initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
         currentEdge: enrichment.data.currentEdge,
@@ -535,7 +557,7 @@ export class DashboardService {
       const auditEventDtos: AuditEventDto[] = positionAuditEvents.map((e) => {
         // Prisma Json type resolves to JsonValue which includes `any` —
         // safe cast since audit_logs.details is always a JSON object
-        const details = (e.details ?? {}) as unknown as Record<string, unknown>;
+        const details = this.parseAuditDetails(e.details, e.id);
         return {
           id: e.id,
           eventType: e.eventType,
@@ -551,7 +573,7 @@ export class DashboardService {
       const entryReasoning = budgetEvent
         ? this.summarizeAuditEvent(
             'risk.budget.reserved',
-            budgetEvent.details as Record<string, unknown>,
+            this.parseAuditDetails(budgetEvent.details, budgetEvent.id),
           )
         : null;
 
@@ -562,7 +584,10 @@ export class DashboardService {
           (e) => e.eventType === 'execution.exit.triggered',
         );
         if (exitEvent) {
-          const details = (exitEvent.details ?? {}) as Record<string, unknown>;
+          const details = this.parseAuditDetails(
+            exitEvent.details,
+            exitEvent.id,
+          );
           exitType = (details.type as string) ?? 'unknown';
         } else {
           exitType = 'manual';
@@ -589,10 +614,15 @@ export class DashboardService {
         createdAt: pos.createdAt.toISOString(),
         updatedAt: pos.updatedAt.toISOString(),
         initialEdge: new Decimal(pos.expectedEdge.toString()).toString(),
-        entryPrices: pos.entryPrices as {
-          kalshi: string;
-          polymarket: string;
-        },
+        entryPrices: this.parseJsonFieldWithEvent(
+          entryPricesSchema,
+          pos.entryPrices,
+          {
+            model: 'OpenPosition',
+            field: 'entryPrices',
+            recordId: pos.positionId,
+          },
+        ),
         currentPrices: enrichment.data.currentPrices,
         currentEdge: enrichment.data.currentEdge,
         unrealizedPnl: enrichment.data.unrealizedPnl,
@@ -617,6 +647,44 @@ export class DashboardService {
         'warning',
         'DashboardService',
       );
+    }
+  }
+
+  /** Parse AuditLog.details JSON field with Zod validation.
+   *  Uses safeParse to avoid breaking dashboard reads on legacy/flexible audit data. */
+  private parseAuditDetails(
+    value: unknown,
+    _recordId?: string,
+  ): Record<string, unknown> {
+    const result = auditLogDetailsSchema.safeParse(value ?? {});
+    return result.success
+      ? result.data
+      : ((value ?? {}) as Record<string, unknown>);
+  }
+
+  private parseJsonFieldWithEvent<T>(
+    schema: import('zod').ZodSchema<T>,
+    value: unknown,
+    context: { model: string; field: string; recordId?: string },
+  ): T {
+    try {
+      return parseJsonField(schema, value, context);
+    } catch (error) {
+      const zodErrors =
+        error instanceof SystemHealthError
+          ? ((error.metadata?.zodErrors as import('zod').ZodIssue[]) ?? [])
+          : [];
+      this.eventEmitter.emit(
+        EVENT_NAMES.DATA_CORRUPTION_DETECTED,
+        new DataCorruptionDetectedEvent(
+          context.model,
+          context.field,
+          context.recordId,
+          value,
+          zodErrors,
+        ),
+      );
+      throw error;
     }
   }
 

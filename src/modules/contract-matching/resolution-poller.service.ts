@@ -44,11 +44,9 @@ export class ResolutionPollerService {
   }
 
   onModuleInit(): void {
-    const enabled = this.configService.get<string>(
-      'RESOLUTION_POLLER_ENABLED',
-      'true',
-    );
-    if (enabled !== 'true') {
+    const enabled =
+      this.configService.get<boolean>('RESOLUTION_POLLER_ENABLED') ?? true;
+    if (!enabled) {
       this.logger.log({ message: 'Resolution poller disabled' });
       return;
     }
