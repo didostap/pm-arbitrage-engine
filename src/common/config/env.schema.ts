@@ -184,6 +184,13 @@ export const envSchema = z.object({
     .default('true'),
   CALIBRATION_CRON_EXPRESSION: z.string().default('0 0 7 1 */3 *'),
 
+  // Orderbook Staleness (Story 9.1b) — platform-level orderbook data staleness alert threshold
+  ORDERBOOK_STALENESS_THRESHOLD_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(90_000),
+
   // Cluster Classification
   CLUSTER_LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   RISK_CLUSTER_HARD_LIMIT_PCT: decimalString('0.15'),

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PlatformHealthService } from './platform-health.service';
 import { PrismaService } from '../../common/prisma.service';
@@ -8,7 +9,10 @@ import { PlatformId, PlatformHealth } from '../../common/types/platform.type';
 import {
   PlatformDegradedEvent,
   PlatformRecoveredEvent,
+  OrderbookStaleEvent,
+  OrderbookRecoveredEvent,
 } from '../../common/events/platform.events';
+import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { vi } from 'vitest';
 import { DegradationProtocolService } from './degradation-protocol.service';
 
@@ -31,6 +35,13 @@ describe('PlatformHealthService', () => {
     deactivateProtocol: vi.fn(),
   };
 
+  const mockConfigService = {
+    get: vi.fn().mockImplementation((key: string, defaultValue?: unknown) => {
+      if (key === 'ORDERBOOK_STALENESS_THRESHOLD_MS') return 90_000;
+      return defaultValue;
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -41,6 +52,7 @@ describe('PlatformHealthService', () => {
           provide: DegradationProtocolService,
           useValue: mockDegradationService,
         },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -684,6 +696,174 @@ describe('PlatformHealthService', () => {
         (call) => call[0] === 'platform.health.updated',
       );
       expect(healthUpdatedCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Orderbook staleness detection', () => {
+    it('should emit ORDERBOOK_STALE when data age exceeds threshold', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Make Kalshi stale beyond orderbook threshold (91s > 90s)
+      const ninetyOneSecondsAgo = Date.now() - 91_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, ninetyOneSecondsAgo);
+
+      await service.publishHealth();
+
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_STALE,
+      );
+      expect(staleCalls).toHaveLength(1);
+      expect(staleCalls[0]![1]).toBeInstanceOf(OrderbookStaleEvent);
+
+      const event = staleCalls[0]![1] as OrderbookStaleEvent;
+      expect(event.platformId).toBe(PlatformId.KALSHI);
+      expect(event.stalenessMs).toBeGreaterThanOrEqual(91_000);
+      expect(event.thresholdMs).toBe(90_000);
+      expect(event.lastUpdateTimestamp).toBeInstanceOf(Date);
+    });
+
+    it('should NOT re-emit ORDERBOOK_STALE on subsequent ticks', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Make Kalshi stale
+      const ninetyOneSecondsAgo = Date.now() - 91_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, ninetyOneSecondsAgo);
+
+      // Tick 1: should emit
+      await service.publishHealth();
+
+      // Tick 2: should NOT re-emit
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_STALE,
+      );
+      expect(staleCalls).toHaveLength(1); // Only once
+    });
+
+    it('should emit ORDERBOOK_RECOVERED when data resumes', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Keep Polymarket healthy
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Make Kalshi stale first
+      const ninetyOneSecondsAgo = Date.now() - 91_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, ninetyOneSecondsAgo);
+      await service.publishHealth();
+
+      vi.clearAllMocks();
+
+      // Now recover — fresh update
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      const recoveredCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_RECOVERED,
+      );
+      expect(recoveredCalls).toHaveLength(1);
+      expect(recoveredCalls[0]![1]).toBeInstanceOf(OrderbookRecoveredEvent);
+
+      const event = recoveredCalls[0]![1] as OrderbookRecoveredEvent;
+      expect(event.platformId).toBe(PlatformId.KALSHI);
+      expect(event.recoveryTimestamp).toBeInstanceOf(Date);
+      expect(event.downtimeMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should NOT emit ORDERBOOK_STALE when lastUpdateTime is 0 (startup)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Don't record any updates — lastUpdateTime defaults to 0/undefined
+      await service.publishHealth();
+
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_STALE,
+      );
+      expect(staleCalls).toHaveLength(0);
+    });
+
+    it('should track platforms independently', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Make Kalshi stale, Polymarket fresh
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 91_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      await service.publishHealth();
+
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_STALE,
+      );
+      expect(staleCalls).toHaveLength(1);
+      expect((staleCalls[0]![1] as OrderbookStaleEvent).platformId).toBe(
+        PlatformId.KALSHI,
+      );
+    });
+
+    it('should NOT emit ORDERBOOK_STALE when stale < threshold (e.g., 89s < 90s)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // 89s stale — below threshold
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 89_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      await service.publishHealth();
+
+      const staleCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.ORDERBOOK_STALE,
+      );
+      expect(staleCalls).toHaveLength(0);
+    });
+
+    it('should not crash publishHealth when orderbook staleness detection throws', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Force an error by making orderbookStale.get throw
+      const badMap = {
+        get: () => {
+          throw new Error('map exploded');
+        },
+        set: vi.fn(),
+      };
+      service['orderbookStale'] = badMap as unknown as Map<PlatformId, boolean>;
+
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Should not throw
+      await expect(service.publishHealth()).resolves.not.toThrow();
+    });
+  });
+
+  describe('getOrderbookStaleness()', () => {
+    it('should return stale=true with duration when data age exceeds threshold', () => {
+      // Set lastUpdateTime to 91s ago — real-time calculation, no publishHealth() needed
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 91_000);
+
+      const result = service.getOrderbookStaleness(PlatformId.KALSHI);
+      expect(result.stale).toBe(true);
+      expect(result.stalenessMs).toBeGreaterThanOrEqual(91_000);
+    });
+
+    it('should return stale=false when data is fresh', () => {
+      service.recordUpdate(PlatformId.KALSHI, 100);
+
+      const result = service.getOrderbookStaleness(PlatformId.KALSHI);
+      expect(result.stale).toBe(false);
+      expect(result.stalenessMs).toBeUndefined();
+    });
+
+    it('should return stale=false when no data about platform (startup)', () => {
+      const result = service.getOrderbookStaleness(PlatformId.KALSHI);
+      expect(result.stale).toBe(false);
     });
   });
 });

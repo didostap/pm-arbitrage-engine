@@ -96,6 +96,37 @@ export class DataStaleEvent extends BaseEvent {
 }
 
 /**
+ * Event emitted when platform orderbook data exceeds staleness threshold.
+ * [Story 9.1b] Orderbook staleness detection
+ */
+export class OrderbookStaleEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly lastUpdateTimestamp: Date | null,
+    public readonly stalenessMs: number,
+    public readonly thresholdMs: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
+ * Event emitted when platform orderbook data resumes after staleness.
+ * [Story 9.1b] Orderbook staleness recovery
+ */
+export class OrderbookRecoveredEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly recoveryTimestamp: Date,
+    public readonly downtimeMs: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
  * Event emitted when gas estimate changes significantly (>10% delta).
  * [Story 6.0] Gas Estimation
  */

@@ -31,6 +31,12 @@ export const EVENT_NAMES = {
   /** [Story 6.5.0a] Emitted when WebSocket data staleness detected (>30s) */
   DATA_STALE: 'platform.health.data-stale',
 
+  /** [Story 9.1b] Emitted when platform orderbook data exceeds staleness threshold */
+  ORDERBOOK_STALE: 'platform.orderbook.stale',
+
+  /** [Story 9.1b] Emitted when platform orderbook data resumes after staleness */
+  ORDERBOOK_RECOVERED: 'platform.orderbook.recovered',
+
   /** Emitted when order book is normalized and persisted */
   ORDERBOOK_UPDATED: 'orderbook.updated',
 

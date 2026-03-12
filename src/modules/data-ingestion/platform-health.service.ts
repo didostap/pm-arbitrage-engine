@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
@@ -9,6 +10,8 @@ import {
   PlatformDegradedEvent,
   PlatformRecoveredEvent,
   PlatformDisconnectedEvent,
+  OrderbookStaleEvent,
+  OrderbookRecoveredEvent,
 } from '../../common/events/platform.events';
 import { toPlatformEnum } from '../../common/utils';
 import { withCorrelationId } from '../../common/services/correlation-context';
@@ -34,15 +37,26 @@ export class PlatformHealthService {
   private consecutiveUnhealthyTicks: Map<PlatformId, number> = new Map();
   private consecutiveHealthyTicks: Map<PlatformId, number> = new Map();
 
+  private orderbookStale = new Map<PlatformId, boolean>();
+  private orderbookStaleStartTime = new Map<PlatformId, number>();
+  private readonly orderbookStalenessThreshold: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly degradationService: DegradationProtocolService,
+    private readonly configService: ConfigService,
   ) {
-    // Initialize counters for all known platforms
+    this.orderbookStalenessThreshold = this.configService.get<number>(
+      'ORDERBOOK_STALENESS_THRESHOLD_MS',
+      90_000,
+    );
+
+    // Initialize counters and state for all known platforms
     for (const platform of [PlatformId.KALSHI, PlatformId.POLYMARKET]) {
       this.consecutiveUnhealthyTicks.set(platform, 0);
       this.consecutiveHealthyTicks.set(platform, 0);
+      this.orderbookStale.set(platform, false);
     }
   }
 
@@ -130,6 +144,55 @@ export class PlatformHealthService {
           );
         }
 
+        // Orderbook staleness detection (Story 9.1b)
+        try {
+          const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+          const dataAge = Date.now() - lastUpdate;
+          const wasStale = this.orderbookStale.get(platform) ?? false;
+          const isNowStale =
+            lastUpdate > 0 && dataAge > this.orderbookStalenessThreshold;
+
+          if (isNowStale && !wasStale) {
+            // Transition to stale
+            this.orderbookStale.set(platform, true);
+            this.orderbookStaleStartTime.set(platform, Date.now());
+            this.eventEmitter.emit(
+              EVENT_NAMES.ORDERBOOK_STALE,
+              new OrderbookStaleEvent(
+                platform,
+                lastUpdate > 0 ? new Date(lastUpdate) : null,
+                dataAge,
+                this.orderbookStalenessThreshold,
+                correlationId,
+              ),
+            );
+          } else if (!isNowStale && wasStale) {
+            // Transition to recovered
+            const staleStart =
+              this.orderbookStaleStartTime.get(platform) ?? Date.now();
+            const downtimeMs = Date.now() - staleStart;
+            this.orderbookStale.set(platform, false);
+            this.orderbookStaleStartTime.delete(platform);
+            this.eventEmitter.emit(
+              EVENT_NAMES.ORDERBOOK_RECOVERED,
+              new OrderbookRecoveredEvent(
+                platform,
+                new Date(),
+                downtimeMs,
+                correlationId,
+              ),
+            );
+          }
+        } catch (error) {
+          this.logger.error({
+            message: 'Orderbook staleness detection error',
+            module: 'data-ingestion',
+            correlationId,
+            platform,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+
         // Consecutive-check hysteresis for degradation protocol
         try {
           const unhealthyTicks =
@@ -206,6 +269,24 @@ export class PlatformHealthService {
    */
   getPlatformHealth(platformId: PlatformId): PlatformHealth {
     return this.calculateHealth(platformId);
+  }
+
+  /**
+   * Returns real-time orderbook staleness info for a platform.
+   * Calculates staleness on-demand from lastUpdateTime rather than relying on
+   * poll-updated state, eliminating up to 30s detection delay.
+   */
+  getOrderbookStaleness(platform: PlatformId): {
+    stale: boolean;
+    stalenessMs?: number;
+  } {
+    const lastUpdate = this.lastUpdateTime.get(platform) ?? 0;
+    if (lastUpdate === 0) return { stale: false }; // No data yet (startup)
+    const stalenessMs = Date.now() - lastUpdate;
+    if (stalenessMs > this.orderbookStalenessThreshold) {
+      return { stale: true, stalenessMs };
+    }
+    return { stale: false };
   }
 
   /**

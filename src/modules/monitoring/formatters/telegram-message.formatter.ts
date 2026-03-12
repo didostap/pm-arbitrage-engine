@@ -584,6 +584,48 @@ export function formatCalibrationCompleted(event: {
   return smartTruncate(`${header}\n\n${body}${footer}`);
 }
 
+// ─── Story 9.1b: Orderbook Staleness Formatters ──────────────────────────────
+
+export function formatOrderbookStale(event: {
+  platformId: string;
+  lastUpdateTimestamp: Date | null;
+  stalenessMs: number;
+  thresholdMs: number;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.warning} <b>ORDERBOOK STALE</b>`;
+  const body = [
+    `Platform: <code>${escapeHtml(String(event.platformId))}</code>`,
+    `Stale for: <b>${Math.round(event.stalenessMs / 1000)}s</b>`,
+    `Last update: <code>${event.lastUpdateTimestamp?.toISOString() ?? 'never'}</code>`,
+    `Threshold: ${event.thresholdMs / 1000}s`,
+    '',
+    '<b>Action:</b> Check platform API status, WebSocket connection, and connector logs.',
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
+
+export function formatOrderbookRecovered(event: {
+  platformId: string;
+  recoveryTimestamp: Date;
+  downtimeMs: number;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.info} <b>ORDERBOOK RECOVERED</b>`;
+  const body = [
+    `Platform: <code>${escapeHtml(String(event.platformId))}</code>`,
+    `Downtime: <b>${Math.round(event.downtimeMs / 1000)}s</b>`,
+    `Recovered at: <code>${event.recoveryTimestamp.toISOString()}</code>`,
+    '',
+    'Orderbook data flow restored. Detection resumed.',
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
+
 // ─── Event Severity Mapping ───────────────────────────────────────────────────
 
 const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
@@ -602,7 +644,9 @@ const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
   'time.drift.critical': 'warning',
   'time.drift.warning': 'warning',
   'degradation.protocol.activated': 'warning',
+  'platform.orderbook.stale': 'warning',
   // Info (explicitly mapped for completeness — unknown events also default to 'info')
+  'platform.orderbook.recovered': 'info',
   'execution.exit.triggered': 'info',
   'execution.order.filled': 'info',
   'detection.opportunity.identified': 'info',

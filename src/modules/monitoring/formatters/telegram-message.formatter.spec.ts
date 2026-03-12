@@ -20,6 +20,8 @@ import {
   formatResolutionDivergence,
   formatResolutionPollCompleted,
   formatCalibrationCompleted,
+  formatOrderbookStale,
+  formatOrderbookRecovered,
   getEventSeverity,
 } from './telegram-message.formatter.js';
 
@@ -537,5 +539,69 @@ describe('getEventSeverity — Story 8.3 events', () => {
     expect(getEventSeverity('contract.match.calibration.completed')).toBe(
       'info',
     );
+  });
+
+  it('should classify orderbook stale as warning', () => {
+    expect(getEventSeverity('platform.orderbook.stale')).toBe('warning');
+  });
+
+  it('should classify orderbook recovered as info', () => {
+    expect(getEventSeverity('platform.orderbook.recovered')).toBe('info');
+  });
+});
+
+describe('formatOrderbookStale', () => {
+  it('should format orderbook stale event with actionable context', () => {
+    const event = {
+      platformId: 'kalshi',
+      lastUpdateTimestamp: new Date('2026-03-13T10:00:00Z'),
+      stalenessMs: 95_000,
+      thresholdMs: 90_000,
+      timestamp: new Date('2026-03-13T10:01:35Z'),
+      correlationId: 'corr-123',
+    };
+
+    const result = formatOrderbookStale(event);
+
+    expect(result).toContain('ORDERBOOK STALE');
+    expect(result).toContain('kalshi');
+    expect(result).toContain('95s');
+    expect(result).toContain('2026-03-13T10:00:00.000Z');
+    expect(result).toContain('90s');
+    expect(result).toContain('Check platform API status');
+  });
+
+  it('should handle null lastUpdateTimestamp', () => {
+    const event = {
+      platformId: 'polymarket',
+      lastUpdateTimestamp: null,
+      stalenessMs: 100_000,
+      thresholdMs: 90_000,
+      timestamp: new Date(),
+    };
+
+    const result = formatOrderbookStale(event);
+
+    expect(result).toContain('never');
+  });
+});
+
+describe('formatOrderbookRecovered', () => {
+  it('should format orderbook recovered event', () => {
+    const event = {
+      platformId: 'kalshi',
+      recoveryTimestamp: new Date('2026-03-13T10:03:00Z'),
+      downtimeMs: 120_000,
+      timestamp: new Date('2026-03-13T10:03:00Z'),
+      correlationId: 'corr-456',
+    };
+
+    const result = formatOrderbookRecovered(event);
+
+    expect(result).toContain('ORDERBOOK RECOVERED');
+    expect(result).toContain('kalshi');
+    expect(result).toContain('120s');
+    expect(result).toContain('2026-03-13T10:03:00.000Z');
+    expect(result).toContain('data flow restored');
   });
 });

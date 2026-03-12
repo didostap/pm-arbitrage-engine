@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DetectionService } from './detection.service';
 import { ContractPairLoaderService } from '../contract-matching/contract-pair-loader.service';
 import { DegradationProtocolService } from '../data-ingestion/degradation-protocol.service';
+import { PlatformHealthService } from '../data-ingestion/platform-health.service';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
 import { PolymarketConnector } from '../../connectors/polymarket/polymarket.connector';
 import { PlatformId, NormalizedOrderBook } from '../../common/types';
@@ -41,12 +42,18 @@ describe('DetectionService', () => {
   let service: DetectionService;
   let contractPairLoader: { getActivePairs: ReturnType<typeof vi.fn> };
   let degradationService: { isDegraded: ReturnType<typeof vi.fn> };
+  let healthService: {
+    getOrderbookStaleness: ReturnType<typeof vi.fn>;
+  };
   let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
   let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
 
   beforeEach(async () => {
     contractPairLoader = { getActivePairs: vi.fn().mockReturnValue([]) };
     degradationService = { isDegraded: vi.fn().mockReturnValue(false) };
+    healthService = {
+      getOrderbookStaleness: vi.fn().mockReturnValue({ stale: false }),
+    };
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
     polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET);
 
@@ -60,6 +67,10 @@ describe('DetectionService', () => {
         {
           provide: DegradationProtocolService,
           useValue: degradationService,
+        },
+        {
+          provide: PlatformHealthService,
+          useValue: healthService,
         },
         { provide: KalshiConnector, useValue: kalshiConnector },
         { provide: PolymarketConnector, useValue: polymarketConnector },
@@ -574,5 +585,53 @@ describe('DetectionService', () => {
 
     expect(result.pairsSkipped).toBe(1);
     expect(result.pairsEvaluated).toBe(0);
+  });
+
+  // Story 9.1b: Orderbook staleness suppression
+  it('should skip pairs when Kalshi orderbook is stale', async () => {
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
+    healthService.getOrderbookStaleness.mockImplementation((id: PlatformId) =>
+      id === PlatformId.KALSHI
+        ? { stale: true, stalenessMs: 95000 }
+        : { stale: false },
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.pairsSkipped).toBe(1);
+    expect(result.pairsEvaluated).toBe(0);
+    expect(kalshiConnector.getOrderBook).not.toHaveBeenCalled();
+  });
+
+  it('should skip pairs when Polymarket orderbook is stale', async () => {
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
+    healthService.getOrderbookStaleness.mockImplementation((id: PlatformId) =>
+      id === PlatformId.POLYMARKET
+        ? { stale: true, stalenessMs: 120000 }
+        : { stale: false },
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.pairsSkipped).toBe(1);
+    expect(result.pairsEvaluated).toBe(0);
+    expect(polymarketConnector.getOrderBook).not.toHaveBeenCalled();
+  });
+
+  it('should not skip pairs when orderbook is fresh', async () => {
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
+    healthService.getOrderbookStaleness.mockReturnValue({ stale: false });
+
+    kalshiConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),
+    );
+    polymarketConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.pairsSkipped).toBe(0);
+    expect(result.pairsEvaluated).toBe(1);
   });
 });

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ContractPairLoaderService } from '../contract-matching/contract-pair-loader.service';
 import { DegradationProtocolService } from '../data-ingestion/degradation-protocol.service';
+import { PlatformHealthService } from '../data-ingestion/platform-health.service';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
 import { PolymarketConnector } from '../../connectors/polymarket/polymarket.connector';
 import Decimal from 'decimal.js';
@@ -18,6 +19,7 @@ export class DetectionService {
   constructor(
     private readonly contractPairLoader: ContractPairLoaderService,
     private readonly degradationService: DegradationProtocolService,
+    private readonly healthService: PlatformHealthService,
     private readonly kalshiConnector: KalshiConnector,
     private readonly polymarketConnector: PolymarketConnector,
   ) {}
@@ -31,6 +33,45 @@ export class DetectionService {
     const activePairs = await this.contractPairLoader.getActivePairs();
 
     for (const pair of activePairs) {
+      // Story 9.1b: Skip if either platform's orderbook is stale
+      const kalshiStaleness = this.healthService.getOrderbookStaleness(
+        PlatformId.KALSHI,
+      );
+      if (kalshiStaleness.stale) {
+        this.logger.debug({
+          message: 'Skipping pair — orderbook data stale',
+          module: 'arbitrage-detection',
+          correlationId: getCorrelationId(),
+          data: {
+            eventDescription: pair.eventDescription,
+            platformId: PlatformId.KALSHI,
+            skipReason: 'orderbook_stale',
+            stalenessMs: kalshiStaleness.stalenessMs,
+          },
+        });
+        pairsSkipped++;
+        continue;
+      }
+
+      const polymarketStaleness = this.healthService.getOrderbookStaleness(
+        PlatformId.POLYMARKET,
+      );
+      if (polymarketStaleness.stale) {
+        this.logger.debug({
+          message: 'Skipping pair — orderbook data stale',
+          module: 'arbitrage-detection',
+          correlationId: getCorrelationId(),
+          data: {
+            eventDescription: pair.eventDescription,
+            platformId: PlatformId.POLYMARKET,
+            skipReason: 'orderbook_stale',
+            stalenessMs: polymarketStaleness.stalenessMs,
+          },
+        });
+        pairsSkipped++;
+        continue;
+      }
+
       // AC2: Skip if either platform is degraded
       if (this.degradationService.isDegraded(PlatformId.KALSHI)) {
         this.logger.debug({

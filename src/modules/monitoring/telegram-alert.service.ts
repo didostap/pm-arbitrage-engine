@@ -35,6 +35,8 @@ import {
   formatResolutionDivergence,
   formatResolutionPollCompleted,
   formatCalibrationCompleted,
+  formatOrderbookStale,
+  formatOrderbookRecovered,
   getEventSeverity,
 } from './formatters/telegram-message.formatter.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -53,6 +55,8 @@ import type {
 import type {
   PlatformDegradedEvent,
   PlatformRecoveredEvent,
+  OrderbookStaleEvent,
+  OrderbookRecoveredEvent,
 } from '../../common/events/platform.events.js';
 import type {
   TradingHaltedEvent,
@@ -79,7 +83,7 @@ const SEVERITY_PRIORITY: Record<AlertSeverity, number> = {
 };
 
 /**
- * The 14 events that have dedicated Telegram formatters.
+ * The 19 events that have dedicated Telegram formatters.
  * Used by TelegramAlertService.sendEventAlert() for formatter dispatch.
  * NOTE: EventConsumerService uses its own hybrid routing logic (Critical/Warning → always,
  * Info → TELEGRAM_ELIGIBLE_INFO_EVENTS allowlist) rather than this set directly.
@@ -103,6 +107,8 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.RESOLUTION_DIVERGED,
   EVENT_NAMES.RESOLUTION_POLL_COMPLETED,
   EVENT_NAMES.CALIBRATION_COMPLETED,
+  EVENT_NAMES.ORDERBOOK_STALE,
+  EVENT_NAMES.ORDERBOOK_RECOVERED,
 ]);
 
 /**
@@ -174,6 +180,14 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
   [
     EVENT_NAMES.CALIBRATION_COMPLETED,
     (e) => formatCalibrationCompleted(e as CalibrationCompletedEvent),
+  ],
+  [
+    EVENT_NAMES.ORDERBOOK_STALE,
+    (e) => formatOrderbookStale(e as OrderbookStaleEvent),
+  ],
+  [
+    EVENT_NAMES.ORDERBOOK_RECOVERED,
+    (e) => formatOrderbookRecovered(e as OrderbookRecoveredEvent),
   ],
 ]);
 
