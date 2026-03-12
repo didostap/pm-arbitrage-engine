@@ -7,6 +7,9 @@ import { CatalogSyncService } from './catalog-sync.service.js';
 import { PreFilterService } from './pre-filter.service.js';
 import { SCORING_STRATEGY_TOKEN } from '../../common/interfaces/scoring-strategy.interface.js';
 import type { IScoringStrategy } from '../../common/interfaces/scoring-strategy.interface.js';
+import { CLUSTER_CLASSIFIER_TOKEN } from '../../common/interfaces/cluster-classifier.interface.js';
+import type { IClusterClassifier } from '../../common/interfaces/cluster-classifier.interface.js';
+import { ClusterAssignedEvent } from '../../common/events/risk.events.js';
 import type { ContractSummary } from '../../common/interfaces/contract-catalog-provider.interface.js';
 import type { FilterCandidate } from './pre-filter.service.js';
 import { PlatformId } from '../../common/types/platform.type.js';
@@ -59,6 +62,8 @@ export class CandidateDiscoveryService implements OnModuleInit {
     private readonly preFilter: PreFilterService,
     @Inject(SCORING_STRATEGY_TOKEN)
     private readonly scoringStrategy: IScoringStrategy,
+    @Inject(CLUSTER_CLASSIFIER_TOKEN)
+    private readonly clusterClassifier: IClusterClassifier,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
@@ -314,6 +319,8 @@ export class CandidateDiscoveryService implements OnModuleInit {
           kalshiContractId: kalshiContract.contractId,
           polymarketDescription: polyContract.description,
           kalshiDescription: kalshiContract.description,
+          polymarketRawCategory: polyContract.category ?? null,
+          kalshiRawCategory: kalshiContract.category ?? null,
           confidenceScore: result.score,
           resolutionDate:
             polyContract.settlementDate ??
@@ -330,6 +337,43 @@ export class CandidateDiscoveryService implements OnModuleInit {
       });
 
       stats.pairsScored++;
+
+      // Classify into correlation cluster only for tradeable matches
+      // Auto-rejected matches will never become positions — skip LLM cost
+      if (!isBelowReviewThreshold) {
+        try {
+          const assignment = await this.clusterClassifier.classifyMatch(
+            polyContract.category ?? null,
+            kalshiContract.category ?? null,
+            polyContract.description,
+            kalshiContract.description,
+          );
+          await this.prisma.contractMatch.update({
+            where: { matchId: match.matchId },
+            data: { clusterId: assignment.clusterId as string },
+          });
+          this.eventEmitter.emit(
+            EVENT_NAMES.CLUSTER_ASSIGNED,
+            new ClusterAssignedEvent(
+              asMatchId(match.matchId),
+              assignment.clusterId,
+              assignment.clusterName,
+              assignment.wasLlmClassified,
+            ),
+          );
+        } catch (classifyError) {
+          this.logger.warn({
+            message: 'Cluster classification failed for match',
+            data: {
+              matchId: match.matchId,
+              error:
+                classifyError instanceof Error
+                  ? classifyError.message
+                  : String(classifyError),
+            },
+          });
+        }
+      }
 
       if (isAutoApproved) {
         stats.autoApproved++;

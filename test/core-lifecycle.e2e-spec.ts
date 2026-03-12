@@ -44,6 +44,13 @@ describe('Core Lifecycle (e2e)', () => {
       openPosition: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      correlationCluster: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ id: 'uncategorized-id', slug: 'uncategorized' }),
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn(),
+      },
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -110,6 +117,11 @@ describe('Core Lifecycle (e2e)', () => {
       },
       openPosition: {
         findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      correlationCluster: {
+        findUnique: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
       },
     };
 

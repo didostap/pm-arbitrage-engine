@@ -33,6 +33,7 @@ import {
   RISK_ERROR_CODES,
 } from '../../common/errors/risk-limit-error';
 import { randomUUID } from 'crypto';
+import { CorrelationTrackerService } from './correlation-tracker.service';
 import {
   asReservationId,
   asOpportunityId,
@@ -64,6 +65,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
     private readonly prisma: PrismaService,
+    private readonly correlationTracker: CorrelationTrackerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -702,6 +704,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       ),
       dailyPnl: this.dailyPnl,
       dailyLossLimitUsd,
+      clusterExposures: this.correlationTracker.getClusterExposures(),
+      aggregateClusterExposurePct:
+        this.correlationTracker.getAggregateExposurePct(),
     };
   }
 

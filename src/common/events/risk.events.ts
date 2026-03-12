@@ -1,5 +1,10 @@
 import { BaseEvent } from './base.event';
-import type { OpportunityId, ReservationId } from '../types/branded.type';
+import type {
+  ClusterId,
+  MatchId,
+  OpportunityId,
+  ReservationId,
+} from '../types/branded.type';
 
 export class LimitApproachedEvent extends BaseEvent {
   constructor(
@@ -74,6 +79,42 @@ export class BudgetReleasedEvent extends BaseEvent {
     public readonly reservationId: ReservationId,
     public readonly opportunityId: OpportunityId,
     public readonly releasedCapitalUsd: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class ClusterLimitApproachedEvent extends BaseEvent {
+  constructor(
+    public readonly clusterName: string,
+    public readonly clusterId: ClusterId,
+    public readonly currentExposurePct: number,
+    public readonly threshold: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class ClusterOverrideEvent extends BaseEvent {
+  constructor(
+    public readonly matchId: MatchId,
+    public readonly oldClusterId: ClusterId | null,
+    public readonly newClusterId: ClusterId,
+    public readonly rationale: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class ClusterAssignedEvent extends BaseEvent {
+  constructor(
+    public readonly matchId: MatchId,
+    public readonly clusterId: ClusterId,
+    public readonly clusterName: string,
+    public readonly wasLlmClassified: boolean,
     correlationId?: string,
   ) {
     super(correlationId);

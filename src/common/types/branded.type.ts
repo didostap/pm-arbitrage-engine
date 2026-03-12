@@ -15,6 +15,7 @@ export type MatchId = Branded<string, 'MatchId'>;
 export type ContractId = Branded<string, 'ContractId'>;
 export type OpportunityId = Branded<string, 'OpportunityId'>;
 export type ReservationId = Branded<string, 'ReservationId'>;
+export type ClusterId = Branded<string, 'ClusterId'>;
 
 // === Factory Functions (use at system boundaries: Prisma results, REST params, UUID generation) ===
 export const asPositionId = (raw: string): PositionId => raw as PositionId;
@@ -26,6 +27,7 @@ export const asOpportunityId = (raw: string): OpportunityId =>
   raw as OpportunityId;
 export const asReservationId = (raw: string): ReservationId =>
   raw as ReservationId;
+export const asClusterId = (raw: string): ClusterId => raw as ClusterId;
 
 /**
  * Unwrap a branded ID back to a plain string.

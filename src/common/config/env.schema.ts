@@ -183,4 +183,10 @@ export const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('true'),
   CALIBRATION_CRON_EXPRESSION: z.string().default('0 0 7 1 */3 *'),
+
+  // Cluster Classification
+  CLUSTER_LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  RISK_CLUSTER_HARD_LIMIT_PCT: decimalString('0.15'),
+  RISK_CLUSTER_SOFT_LIMIT_PCT: decimalString('0.12'),
+  RISK_AGGREGATE_CLUSTER_LIMIT_PCT: decimalString('0.50'),
 });

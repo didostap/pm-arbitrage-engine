@@ -28,3 +28,5 @@ export {
   KALSHI_CATALOG_TOKEN,
   POLYMARKET_CATALOG_TOKEN,
 } from './contract-catalog-provider.interface.js';
+export type { IClusterClassifier } from './cluster-classifier.interface.js';
+export { CLUSTER_CLASSIFIER_TOKEN } from './cluster-classifier.interface.js';

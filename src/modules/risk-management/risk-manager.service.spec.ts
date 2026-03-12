@@ -13,6 +13,7 @@ import {
   HALT_REASONS as HALT_REASONS_CONST,
 } from './risk-manager.service';
 import { PrismaService } from '../../common/prisma.service';
+import { CorrelationTrackerService } from './correlation-tracker.service';
 import { EVENT_NAMES } from '../../common/events';
 import { RiskLimitError, RISK_ERROR_CODES } from '../../common/errors';
 import { FinancialDecimal } from '../../common/utils/financial-math';
@@ -163,6 +164,14 @@ describe('RiskManagerService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: CorrelationTrackerService,
+          useValue: {
+            getClusterExposures: vi.fn().mockReturnValue([]),
+            getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+            recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
@@ -181,6 +190,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -199,6 +216,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -217,6 +242,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -235,6 +268,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -253,6 +294,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -271,6 +320,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -289,6 +346,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -352,6 +417,14 @@ describe('RiskManagerService', () => {
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -448,6 +521,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -633,6 +714,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -665,6 +754,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -694,6 +791,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -1492,6 +1597,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
@@ -1525,6 +1638,14 @@ describe('RiskManagerService', () => {
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
+          {
+            provide: CorrelationTrackerService,
+            useValue: {
+              getClusterExposures: vi.fn().mockReturnValue([]),
+              getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
+              recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            },
+          },
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);

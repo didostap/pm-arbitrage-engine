@@ -172,6 +172,14 @@ export const EVENT_NAMES = {
   RESOLUTION_POLL_COMPLETED: 'contract.match.resolution.poll_completed',
   /** Emitted when calibration analysis completes */
   CALIBRATION_COMPLETED: 'contract.match.calibration.completed',
+
+  // [Story 9.1] Correlation Cluster Events
+  /** Emitted when any cluster's exposure approaches the hard limit (12% soft threshold) */
+  CLUSTER_LIMIT_APPROACHED: 'risk.cluster.limit_approached',
+  /** Emitted when operator overrides a cluster assignment */
+  CLUSTER_OVERRIDE: 'risk.cluster.override',
+  /** Emitted when a contract match is assigned to a cluster */
+  CLUSTER_ASSIGNED: 'risk.cluster.assigned',
 } as const;
 
 /**

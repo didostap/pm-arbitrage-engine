@@ -1,5 +1,10 @@
 import Decimal from 'decimal.js';
-import type { OpportunityId, PairId, ReservationId } from './branded.type.js';
+import type {
+  ClusterId,
+  OpportunityId,
+  PairId,
+  ReservationId,
+} from './branded.type.js';
 
 export interface RiskDecision {
   approved: boolean;
@@ -11,6 +16,14 @@ export interface RiskDecision {
   overrideRationale?: string;
 }
 
+export interface ClusterExposure {
+  clusterId: ClusterId;
+  clusterName: string;
+  exposureUsd: Decimal;
+  exposurePct: Decimal;
+  pairCount: number;
+}
+
 export interface RiskExposure {
   openPairCount: number;
   totalCapitalDeployed: Decimal;
@@ -18,6 +31,15 @@ export interface RiskExposure {
   availableCapital: Decimal;
   dailyPnl: Decimal;
   dailyLossLimitUsd: Decimal;
+  clusterExposures: ClusterExposure[];
+  aggregateClusterExposurePct: Decimal;
+}
+
+export interface ClusterAssignment {
+  clusterId: ClusterId;
+  clusterName: string;
+  rawCategories: { platform: string; rawCategory: string }[];
+  wasLlmClassified: boolean;
 }
 
 export interface RiskConfig {

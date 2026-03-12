@@ -62,6 +62,35 @@ model PlatformHealthLog {
   @@map("platform_health_logs")
 }
 
+// Correlation cluster for grouping related contract matches by risk factor
+model CorrelationCluster {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  contractMatches ContractMatch[]
+  tagMappings     ClusterTagMapping[]
+
+  @@map("correlation_clusters")
+}
+
+// Maps platform-specific raw categories to correlation clusters for deterministic fast-path classification
+model ClusterTagMapping {
+  id          String   @id @default(uuid())
+  clusterId   String   @map("cluster_id")
+  platform    String // "kalshi" | "polymarket"
+  rawCategory String   @map("raw_category")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  cluster CorrelationCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, platform, rawCategory])
+  @@map("cluster_tag_mappings")
+}
+
 // Contract match pairs tracking operator-approved cross-platform matches
 model ContractMatch {
   matchId                   String    @id @default(uuid()) @map("match_id")
@@ -70,6 +99,8 @@ model ContractMatch {
   kalshiContractId          String    @map("kalshi_contract_id")
   polymarketDescription     String?   @map("polymarket_description")
   kalshiDescription         String?   @map("kalshi_description")
+  polymarketRawCategory     String?   @map("polymarket_raw_category")
+  kalshiRawCategory         String?   @map("kalshi_raw_category")
   operatorApproved          Boolean   @default(false) @map("operator_approved")
   operatorApprovalTimestamp DateTime? @map("operator_approval_timestamp") @db.Timestamptz
   operatorRationale         String?   @map("operator_rationale")
@@ -84,9 +115,11 @@ model ContractMatch {
   resolutionTimestamp       DateTime? @map("resolution_timestamp") @db.Timestamptz
   resolutionDiverged        Boolean?  @map("resolution_diverged")
   divergenceNotes           String?   @map("divergence_notes")
+  clusterId                 String?   @map("cluster_id")
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
+  cluster   CorrelationCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   orders    Order[]
   positions OpenPosition[]
 
@@ -96,6 +129,7 @@ model ContractMatch {
   @@index([resolutionDiverged])
   @@index([confidenceScore])
   @@index([resolutionTimestamp])
+  @@index([clusterId])
   @@map("contract_matches")
 }
 

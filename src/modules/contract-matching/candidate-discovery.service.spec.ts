@@ -12,10 +12,12 @@ import type {
   IScoringStrategy,
   ScoringResult,
 } from '../../common/interfaces/scoring-strategy.interface';
+import type { IClusterClassifier } from '../../common/interfaces/cluster-classifier.interface';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { ConfigService } from '@nestjs/config';
 import type { SchedulerRegistry } from '@nestjs/schedule';
 import type { PrismaService } from '../../common/prisma.service';
+import { asClusterId } from '../../common/types/branded.type';
 
 vi.mock('../../common/services/correlation-context', () => ({
   withCorrelationId: <T>(fn: () => Promise<T>) => fn(),
@@ -55,10 +57,12 @@ describe('CandidateDiscoveryService', () => {
   let catalogSync: { syncCatalogs: ReturnType<typeof vi.fn> };
   let preFilter: { filterCandidates: ReturnType<typeof vi.fn> };
   let scoringStrategy: IScoringStrategy;
+  let clusterClassifier: IClusterClassifier;
   let prisma: {
     contractMatch: {
       findFirst: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
     };
   };
   let eventEmitter: { emit: ReturnType<typeof vi.fn> };
@@ -82,6 +86,16 @@ describe('CandidateDiscoveryService', () => {
     catalogSync = { syncCatalogs: vi.fn() };
     preFilter = { filterCandidates: vi.fn() };
     scoringStrategy = { scoreMatch: vi.fn() };
+    clusterClassifier = {
+      classifyMatch: vi.fn().mockResolvedValue({
+        clusterId: asClusterId('test-cluster-id'),
+        clusterName: 'Test Cluster',
+        rawCategories: [],
+        wasLlmClassified: false,
+      }),
+      getOrCreateCluster: vi.fn(),
+      reassignCluster: vi.fn(),
+    };
     prisma = {
       contractMatch: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -90,6 +104,7 @@ describe('CandidateDiscoveryService', () => {
           .mockImplementation((args: { data: { matchId?: string } }) =>
             Promise.resolve({ matchId: 'new-match-id', ...args.data }),
           ),
+        update: vi.fn().mockResolvedValue({}),
       },
     };
     eventEmitter = { emit: vi.fn() };
@@ -104,6 +119,7 @@ describe('CandidateDiscoveryService', () => {
       catalogSync as unknown as CatalogSyncService,
       preFilter as unknown as PreFilterService,
       scoringStrategy,
+      clusterClassifier,
       prisma as unknown as PrismaService,
       eventEmitter as unknown as EventEmitter2,
       configService,
@@ -126,6 +142,7 @@ describe('CandidateDiscoveryService', () => {
         catalogSync as unknown as CatalogSyncService,
         preFilter as unknown as PreFilterService,
         scoringStrategy,
+        clusterClassifier,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -149,6 +166,7 @@ describe('CandidateDiscoveryService', () => {
         catalogSync as unknown as CatalogSyncService,
         preFilter as unknown as PreFilterService,
         scoringStrategy,
+        clusterClassifier,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -177,6 +195,7 @@ describe('CandidateDiscoveryService', () => {
         catalogSync as unknown as CatalogSyncService,
         preFilter as unknown as PreFilterService,
         scoringStrategy,
+        clusterClassifier,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -243,6 +262,16 @@ describe('CandidateDiscoveryService', () => {
           operatorApproved: true,
         }),
       });
+      // Cluster classification called for auto-approved match
+      expect(clusterClassifier.classifyMatch).toHaveBeenCalledTimes(1);
+      expect(prisma.contractMatch.update).toHaveBeenCalledWith({
+        where: { matchId: 'new-match-id' },
+        data: { clusterId: 'test-cluster-id' },
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        EVENT_NAMES.CLUSTER_ASSIGNED,
+        expect.anything(),
+      );
       // Events: MatchApproved + MatchAutoApproved + DiscoveryRunCompleted
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.MATCH_APPROVED,
@@ -291,6 +320,8 @@ describe('CandidateDiscoveryService', () => {
           operatorRationale: null,
         }),
       });
+      // Cluster classification still runs for pending-review matches
+      expect(clusterClassifier.classifyMatch).toHaveBeenCalledTimes(1);
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.MATCH_PENDING_REVIEW,
         expect.anything(),
@@ -638,6 +669,13 @@ describe('CandidateDiscoveryService', () => {
         }),
       });
 
+      // Cluster classification skipped for auto-rejected matches (no LLM cost)
+      expect(clusterClassifier.classifyMatch).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.CLUSTER_ASSIGNED,
+        expect.anything(),
+      );
+
       // No match events emitted for auto-rejected
       expect(eventEmitter.emit).not.toHaveBeenCalledWith(
         EVENT_NAMES.MATCH_PENDING_REVIEW,
@@ -830,6 +868,7 @@ describe('CandidateDiscoveryService', () => {
           catalogSync as unknown as CatalogSyncService,
           preFilter as unknown as PreFilterService,
           scoringStrategy,
+          clusterClassifier,
           prisma as unknown as PrismaService,
           eventEmitter as unknown as EventEmitter2,
           configService,
@@ -983,6 +1022,7 @@ describe('CandidateDiscoveryService', () => {
           catalogSync as unknown as CatalogSyncService,
           preFilter as unknown as PreFilterService,
           scoringStrategy,
+          clusterClassifier,
           prisma as unknown as PrismaService,
           eventEmitter as unknown as EventEmitter2,
           configService,
@@ -1066,6 +1106,8 @@ describe('CandidateDiscoveryService', () => {
           ),
         }),
       });
+      // No cluster classification for auto-rejected
+      expect(clusterClassifier.classifyMatch).not.toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
         expect.objectContaining({
@@ -1078,7 +1120,7 @@ describe('CandidateDiscoveryService', () => {
       );
     });
 
-    it('should pending-review at score 40 (exactly minReviewThreshold)', async () => {
+    it('should pending-review at score 40 (exactly minReviewThreshold) and classify cluster', async () => {
       (
         scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
       ).mockResolvedValueOnce(makeScoringResult(40));
@@ -1091,6 +1133,8 @@ describe('CandidateDiscoveryService', () => {
           operatorRationale: null,
         }),
       });
+      // Score 40 is at the boundary — classification DOES run
+      expect(clusterClassifier.classifyMatch).toHaveBeenCalledTimes(1);
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.MATCH_PENDING_REVIEW,
         expect.anything(),
@@ -1178,6 +1222,7 @@ describe('CandidateDiscoveryService', () => {
         catalogSync as unknown as CatalogSyncService,
         preFilter as unknown as PreFilterService,
         scoringStrategy,
+        clusterClassifier,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,

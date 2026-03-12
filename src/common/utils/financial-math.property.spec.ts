@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FinancialMath, FinancialDecimal } from './financial-math';
 import { FeeSchedule, PlatformId } from '../types/platform.type';
 import { RiskManagerService } from '../../modules/risk-management/risk-manager.service';
+import { CorrelationTrackerService } from '../../modules/risk-management/correlation-tracker.service';
 import { PrismaService } from '../prisma.service';
 
 // ── Arbitraries ──
@@ -400,12 +401,24 @@ describe('Composition chain end-to-end property tests', () => {
           }),
         };
 
+        const mockCorrelationTracker = {
+          getClusterExposures: vi.fn().mockReturnValue([]),
+          getAggregateExposurePct: vi
+            .fn()
+            .mockReturnValue(new FinancialDecimal(0)),
+          recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+        };
+
         const module = await Test.createTestingModule({
           providers: [
             RiskManagerService,
             { provide: ConfigService, useValue: mockConfig },
             { provide: EventEmitter2, useValue: { emit: vi.fn() } },
             { provide: PrismaService, useValue: mockPrisma },
+            {
+              provide: CorrelationTrackerService,
+              useValue: mockCorrelationTracker,
+            },
           ],
         }).compile();
 

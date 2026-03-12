@@ -62,3 +62,6 @@ export const orderBookLevelsSchema = z.array(
 
 // AuditLog.details — flexible JSON object
 export const auditLogDetailsSchema = z.record(z.unknown());
+
+// ClusterTagMapping.platform — only valid PlatformId values
+export const clusterPlatformSchema = z.enum(['kalshi', 'polymarket']);
