@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsEnum,
   IsInt,
+  IsUUID,
   Min,
   Max,
 } from 'class-validator';
@@ -80,9 +81,20 @@ export class MatchListQueryDto {
   @IsOptional()
   @IsEnum(ResolutionStatusFilter)
   resolution?: ResolutionStatusFilter;
+
+  @ApiPropertyOptional({ description: 'Filter by correlation cluster ID' })
+  @IsOptional()
+  @IsUUID()
+  clusterId?: string;
 }
 
 // ─── Response DTOs ───────────────────────────────────────────────────────────
+
+export class ClusterSummaryDto {
+  @ApiProperty({ description: 'Cluster ID' }) id!: string;
+  @ApiProperty({ description: 'Cluster name' }) name!: string;
+  @ApiProperty({ description: 'Cluster slug' }) slug!: string;
+}
 
 export class MatchSummaryDto {
   @ApiProperty() matchId!: string;
@@ -118,6 +130,38 @@ export class MatchSummaryDto {
   resolutionDiverged!: boolean | null;
   @ApiProperty({ nullable: true, type: String })
   divergenceNotes!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  polymarketRawCategory!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  kalshiRawCategory!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'First traded timestamp (ISO 8601)',
+  })
+  firstTradedTimestamp!: string | null;
+  @ApiProperty({ description: 'Total number of trading cycles' })
+  totalCyclesTraded!: number;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Primary leg platform',
+  })
+  primaryLeg!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Resolution date (ISO 8601)',
+  })
+  resolutionDate!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  resolutionCriteriaHash!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: () => ClusterSummaryDto,
+    description: 'Correlation cluster',
+  })
+  cluster!: ClusterSummaryDto | null;
   @ApiProperty() createdAt!: string;
   @ApiProperty() updatedAt!: string;
 }
@@ -142,6 +186,17 @@ export class MatchListResponseDto {
 export class MatchDetailResponseDto {
   @ApiProperty({ type: MatchSummaryDto })
   data!: MatchSummaryDto;
+
+  @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
+  timestamp!: string;
+}
+
+export class ClusterListResponseDto {
+  @ApiProperty({ type: [ClusterSummaryDto] })
+  data!: ClusterSummaryDto[];
+
+  @ApiProperty({ description: 'Total count' })
+  count!: number;
 
   @ApiProperty({ description: 'Response timestamp (ISO 8601)' })
   timestamp!: string;

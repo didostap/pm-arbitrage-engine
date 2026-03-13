@@ -27,6 +27,7 @@ import {
   MatchListResponseDto,
   MatchDetailResponseDto,
   MatchActionResponseDto,
+  ClusterListResponseDto,
 } from './dto/match-approval.dto';
 import {
   SystemHealthError,
@@ -59,12 +60,21 @@ export class MatchApprovalController {
       page,
       limit,
       query.resolution,
+      query.clusterId,
     );
 
     return {
       ...result,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('clusters')
+  @ApiOperation({ summary: 'List all correlation clusters' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async listClusters(): Promise<ClusterListResponseDto> {
+    const data = await this.matchApprovalService.listClusters();
+    return { data, count: data.length, timestamp: new Date().toISOString() };
   }
 
   @Get(':id')

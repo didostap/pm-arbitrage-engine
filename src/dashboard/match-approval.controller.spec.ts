@@ -30,6 +30,14 @@ function buildMatchDto(
     resolutionTimestamp: null,
     resolutionDiverged: null,
     divergenceNotes: null,
+    polymarketRawCategory: null,
+    kalshiRawCategory: null,
+    firstTradedTimestamp: null,
+    totalCyclesTraded: 0,
+    primaryLeg: null,
+    resolutionDate: null,
+    resolutionCriteriaHash: null,
+    cluster: null,
     createdAt: '2026-03-01T00:00:00.000Z',
     updatedAt: '2026-03-01T00:00:00.000Z',
     ...overrides,
@@ -43,6 +51,7 @@ describe('MatchApprovalController', () => {
     getMatchById: ReturnType<typeof vi.fn>;
     approveMatch: ReturnType<typeof vi.fn>;
     rejectMatch: ReturnType<typeof vi.fn>;
+    listClusters: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -51,6 +60,7 @@ describe('MatchApprovalController', () => {
       getMatchById: vi.fn(),
       approveMatch: vi.fn(),
       rejectMatch: vi.fn(),
+      listClusters: vi.fn(),
     };
 
     controller = new MatchApprovalController(
@@ -70,7 +80,13 @@ describe('MatchApprovalController', () => {
 
       const result = await controller.listMatches({});
 
-      expect(service.listMatches).toHaveBeenCalledWith('all', 1, 20, undefined);
+      expect(service.listMatches).toHaveBeenCalledWith(
+        'all',
+        1,
+        20,
+        undefined,
+        undefined,
+      );
       expect(result.data).toHaveLength(1);
       expect(result.count).toBe(1);
       expect(result.timestamp).toBeDefined();
@@ -91,6 +107,7 @@ describe('MatchApprovalController', () => {
         1,
         20,
         undefined,
+        undefined,
       );
     });
 
@@ -104,7 +121,13 @@ describe('MatchApprovalController', () => {
 
       await controller.listMatches({ page: 2, limit: 50 });
 
-      expect(service.listMatches).toHaveBeenCalledWith('all', 2, 50, undefined);
+      expect(service.listMatches).toHaveBeenCalledWith(
+        'all',
+        2,
+        50,
+        undefined,
+        undefined,
+      );
     });
   });
 
@@ -168,6 +191,23 @@ describe('MatchApprovalController', () => {
       await expect(
         controller.approveMatch('match-1', { rationale: 'retry' }),
       ).rejects.toThrow(HttpException);
+    });
+  });
+
+  describe('GET /api/matches/clusters', () => {
+    it('should return clusters with count and timestamp', async () => {
+      const clusters = [
+        { id: 'c1', name: 'Crypto', slug: 'crypto' },
+        { id: 'c2', name: 'Politics', slug: 'politics' },
+      ];
+      service.listClusters.mockResolvedValue(clusters);
+
+      const result = await controller.listClusters();
+
+      expect(service.listClusters).toHaveBeenCalled();
+      expect(result.data).toEqual(clusters);
+      expect(result.count).toBe(2);
+      expect(result.timestamp).toBeDefined();
     });
   });
 

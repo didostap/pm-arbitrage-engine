@@ -8,9 +8,16 @@ import {
 import { EVENT_NAMES } from '../common/events';
 import { MatchApprovedEvent } from '../common/events/match-approved.event';
 import { MatchRejectedEvent } from '../common/events/match-rejected.event';
-import type { MatchSummaryDto } from './dto/match-approval.dto';
-import type { ContractMatch } from '@prisma/client';
+import type {
+  ClusterSummaryDto,
+  MatchSummaryDto,
+} from './dto/match-approval.dto';
+import type { ContractMatch, CorrelationCluster } from '@prisma/client';
 import { asMatchId, asContractId } from '../common/types/branded.type';
+
+type ContractMatchWithCluster = ContractMatch & {
+  cluster: CorrelationCluster | null;
+};
 
 @Injectable()
 export class MatchApprovalService {
@@ -26,6 +33,7 @@ export class MatchApprovalService {
     page: number,
     limit: number,
     resolution?: 'resolved' | 'unresolved' | 'diverged',
+    clusterId?: string,
   ): Promise<{
     data: MatchSummaryDto[];
     count: number;
@@ -35,12 +43,14 @@ export class MatchApprovalService {
     const where = {
       ...this.buildWhereFilter(status),
       ...this.buildResolutionFilter(resolution),
+      ...(clusterId ? { clusterId } : {}),
     };
     const skip = (page - 1) * limit;
 
     const [matches, count] = await Promise.all([
       this.prisma.contractMatch.findMany({
         where,
+        include: { cluster: true },
         orderBy: [{ operatorApproved: 'asc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
@@ -59,6 +69,7 @@ export class MatchApprovalService {
   async getMatchById(matchId: string): Promise<MatchSummaryDto> {
     const match = await this.prisma.contractMatch.findUnique({
       where: { matchId },
+      include: { cluster: true },
     });
 
     if (!match) {
@@ -110,6 +121,7 @@ export class MatchApprovalService {
 
     const updated = await this.prisma.contractMatch.findUnique({
       where: { matchId },
+      include: { cluster: true },
     });
 
     if (!updated) {
@@ -167,6 +179,7 @@ export class MatchApprovalService {
 
     const updated = await this.prisma.contractMatch.update({
       where: { matchId },
+      include: { cluster: true },
       data: {
         operatorApproved: false,
         operatorRationale: rationale,
@@ -190,6 +203,13 @@ export class MatchApprovalService {
     });
 
     return this.toSummaryDto(updated);
+  }
+
+  async listClusters(): Promise<ClusterSummaryDto[]> {
+    const clusters = await this.prisma.correlationCluster.findMany({
+      orderBy: { name: 'asc' },
+    });
+    return clusters.map((c) => ({ id: c.id, name: c.name, slug: c.slug }));
   }
 
   private buildWhereFilter(status: string): Record<string, unknown> {
@@ -218,7 +238,7 @@ export class MatchApprovalService {
     }
   }
 
-  private toSummaryDto(match: ContractMatch): MatchSummaryDto {
+  private toSummaryDto(match: ContractMatchWithCluster): MatchSummaryDto {
     return {
       matchId: match.matchId,
       polymarketContractId: match.polymarketContractId,
@@ -236,6 +256,20 @@ export class MatchApprovalService {
       resolutionTimestamp: match.resolutionTimestamp?.toISOString() ?? null,
       resolutionDiverged: match.resolutionDiverged ?? null,
       divergenceNotes: match.divergenceNotes ?? null,
+      polymarketRawCategory: match.polymarketRawCategory ?? null,
+      kalshiRawCategory: match.kalshiRawCategory ?? null,
+      firstTradedTimestamp: match.firstTradedTimestamp?.toISOString() ?? null,
+      totalCyclesTraded: match.totalCyclesTraded,
+      primaryLeg: match.primaryLeg ?? null,
+      resolutionDate: match.resolutionDate?.toISOString() ?? null,
+      resolutionCriteriaHash: match.resolutionCriteriaHash ?? null,
+      cluster: match.cluster
+        ? {
+            id: match.cluster.id,
+            name: match.cluster.name,
+            slug: match.cluster.slug,
+          }
+        : null,
       createdAt: match.createdAt.toISOString(),
       updatedAt: match.updatedAt.toISOString(),
     };

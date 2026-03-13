@@ -12,14 +12,28 @@ function buildMockMatch(overrides: Record<string, unknown> = {}) {
   return {
     matchId: 'match-1',
     polymarketContractId: 'poly-123',
+    polymarketClobTokenId: null,
     kalshiContractId: 'kalshi-456',
     polymarketDescription: 'Will X happen?',
     kalshiDescription: 'Will X happen by date?',
+    polymarketRawCategory: null,
+    kalshiRawCategory: null,
     operatorApproved: false,
     operatorApprovalTimestamp: null,
     operatorRationale: null,
-    primaryLeg: 'KALSHI',
+    confidenceScore: null,
+    polymarketResolution: null,
+    kalshiResolution: null,
+    resolutionTimestamp: null,
+    resolutionDiverged: null,
+    divergenceNotes: null,
+    firstTradedTimestamp: null,
+    totalCyclesTraded: 0,
+    primaryLeg: null,
     resolutionDate: null,
+    resolutionCriteriaHash: null,
+    clusterId: null,
+    cluster: null,
     createdAt: new Date('2026-03-01'),
     updatedAt: new Date('2026-03-01'),
     ...overrides,
@@ -36,6 +50,9 @@ describe('MatchApprovalService', () => {
       updateMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
+    correlationCluster: {
+      findMany: ReturnType<typeof vi.fn>;
+    };
   };
   let emitter: { emit: ReturnType<typeof vi.fn> };
 
@@ -47,6 +64,9 @@ describe('MatchApprovalService', () => {
         findUnique: vi.fn(),
         updateMany: vi.fn(),
         update: vi.fn(),
+      },
+      correlationCluster: {
+        findMany: vi.fn(),
       },
     };
     emitter = { emit: vi.fn() };
@@ -202,6 +222,61 @@ describe('MatchApprovalService', () => {
       expect(dto.divergenceNotes).toBeNull();
     });
 
+    it('should map 8 new fields (categories, trading, resolution, cluster) to DTO', async () => {
+      const match = buildMockMatch({
+        polymarketRawCategory: 'politics',
+        kalshiRawCategory: 'Politics',
+        firstTradedTimestamp: new Date('2026-03-05'),
+        totalCyclesTraded: 42,
+        primaryLeg: 'kalshi',
+        resolutionDate: new Date('2026-06-01'),
+        resolutionCriteriaHash: 'abc123',
+        cluster: {
+          id: 'cluster-1',
+          name: 'US Politics',
+          slug: 'us-politics',
+          description: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.polymarketRawCategory).toBe('politics');
+      expect(dto.kalshiRawCategory).toBe('Politics');
+      expect(dto.firstTradedTimestamp).toBe('2026-03-05T00:00:00.000Z');
+      expect(dto.totalCyclesTraded).toBe(42);
+      expect(dto.primaryLeg).toBe('kalshi');
+      expect(dto.resolutionDate).toBe('2026-06-01T00:00:00.000Z');
+      expect(dto.resolutionCriteriaHash).toBe('abc123');
+      expect(dto.cluster).toEqual({
+        id: 'cluster-1',
+        name: 'US Politics',
+        slug: 'us-politics',
+      });
+    });
+
+    it('should map null cluster to null in DTO', async () => {
+      const match = buildMockMatch({ cluster: null });
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.cluster).toBeNull();
+      expect(dto.polymarketRawCategory).toBeNull();
+      expect(dto.firstTradedTimestamp).toBeNull();
+      expect(dto.totalCyclesTraded).toBe(0);
+      expect(dto.primaryLeg).toBeNull();
+      expect(dto.resolutionDate).toBeNull();
+      expect(dto.resolutionCriteriaHash).toBeNull();
+    });
+
     it('should filter by resolution=resolved', async () => {
       prisma.contractMatch.findMany.mockResolvedValue([]);
       prisma.contractMatch.count.mockResolvedValue(0);
@@ -237,6 +312,45 @@ describe('MatchApprovalService', () => {
       expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { resolutionDiverged: true },
+        }),
+      );
+    });
+
+    it('should filter by clusterId when provided', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20, undefined, 'cluster-abc');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { clusterId: 'cluster-abc' },
+        }),
+      );
+    });
+
+    it('should not include clusterId in where when not provided', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20);
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+        }),
+      );
+    });
+
+    it('should combine status and clusterId filters', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('approved', 1, 20, undefined, 'cluster-xyz');
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { operatorApproved: true, clusterId: 'cluster-xyz' },
         }),
       );
     });
@@ -371,6 +485,7 @@ describe('MatchApprovalService', () => {
 
       expect(prisma.contractMatch.update).toHaveBeenCalledWith({
         where: { matchId: 'match-1' },
+        include: { cluster: true },
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({
           operatorApproved: false,
@@ -438,6 +553,48 @@ describe('MatchApprovalService', () => {
       ).rejects.toMatchObject({
         code: SYSTEM_HEALTH_ERROR_CODES.MATCH_ALREADY_APPROVED,
       });
+    });
+  });
+
+  describe('listClusters', () => {
+    it('should return all clusters sorted by name', async () => {
+      const clusters = [
+        {
+          id: 'c1',
+          name: 'Crypto',
+          slug: 'crypto',
+          description: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'c2',
+          name: 'Politics',
+          slug: 'politics',
+          description: 'US politics',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ];
+      prisma.correlationCluster.findMany.mockResolvedValue(clusters);
+
+      const result = await service.listClusters();
+
+      expect(result).toEqual([
+        { id: 'c1', name: 'Crypto', slug: 'crypto' },
+        { id: 'c2', name: 'Politics', slug: 'politics' },
+      ]);
+      expect(prisma.correlationCluster.findMany).toHaveBeenCalledWith({
+        orderBy: { name: 'asc' },
+      });
+    });
+
+    it('should return empty array when no clusters exist', async () => {
+      prisma.correlationCluster.findMany.mockResolvedValue([]);
+
+      const result = await service.listClusters();
+
+      expect(result).toEqual([]);
     });
   });
 });
