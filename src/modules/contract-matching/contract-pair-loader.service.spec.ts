@@ -695,6 +695,56 @@ describe('ContractPairLoaderService', () => {
       expect(dbPair!.clusterId).toBe('cluster-economics');
     });
 
+    it('should propagate confidenceScore from DB match', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-conf',
+          polymarketContractId: 'db-poly-conf',
+          polymarketClobTokenId: 'db-clob-conf',
+          kalshiContractId: 'db-kalshi-conf',
+          polymarketDescription: 'Confidence Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+          confidenceScore: 90,
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-conf');
+      expect(dbPair!.confidenceScore).toBe(90);
+    });
+
+    it('should set confidenceScore to null when DB match has null confidenceScore', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-noconf',
+          polymarketContractId: 'db-poly-noconf',
+          polymarketClobTokenId: 'db-clob-noconf',
+          kalshiContractId: 'db-kalshi-noconf',
+          polymarketDescription: 'No Confidence Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+          confidenceScore: null,
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-noconf');
+      expect(dbPair!.confidenceScore).toBeNull();
+    });
+
     it('should set clusterId to undefined when DB match has null clusterId', async () => {
       mockFsWithContent(VALID_YAML_CONTENT);
       const service = await createService();
@@ -728,6 +778,17 @@ describe('ContractPairLoaderService', () => {
       const pairs = service.getYamlPairs();
       for (const pair of pairs) {
         expect(pair.resolutionDate).toBeNull();
+      }
+    });
+
+    it('should set confidenceScore to null for YAML-loaded pairs', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getYamlPairs();
+      for (const pair of pairs) {
+        expect(pair.confidenceScore).toBeNull();
       }
     });
   });

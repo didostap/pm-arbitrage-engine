@@ -733,7 +733,7 @@ describe('RiskManagerService', () => {
         expect(decision.approved).toBe(true);
         expect(logSpy).toHaveBeenCalledWith(
           expect.objectContaining({
-            message: expect.stringContaining('cluster info extraction'),
+            message: expect.stringContaining('pair context extraction'),
           }),
         );
       });
@@ -762,6 +762,183 @@ describe('RiskManagerService', () => {
         // projected: 0.14 + 20/10000 = 0.142 < 0.15 → should approve
         expect(decision.approved).toBe(true);
         expect(decision.adjustedMaxPositionSizeUsd).toBeDefined();
+      });
+    });
+
+    describe('confidence-adjusted position sizing', () => {
+      function makeConfidenceOpportunity(
+        confidenceScore: number | null,
+        clusterId?: string,
+      ): EnrichedOpportunity {
+        return makeEnrichedOpportunity({
+          dislocation: {
+            ...makeEnrichedOpportunity().dislocation,
+            pairConfig: makePair({ confidenceScore, clusterId }),
+          },
+        });
+      }
+
+      it('should reduce position size to 90% for 90% confidence (AC #1)', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(90),
+        );
+        expect(decision.approved).toBe(true);
+        // base = 10000 * 0.03 = 300, 90% → 270
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(270);
+      });
+
+      it('should reduce position size to 85% for 85% confidence (AC #1)', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(85),
+        );
+        expect(decision.approved).toBe(true);
+        // base = 300, 85% → 255
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(255);
+      });
+
+      it('should handle non-integer confidence: 87.5% → 87.5% of base', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(87.5),
+        );
+        expect(decision.approved).toBe(true);
+        // base = 300, 87.5% → 262.5
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(262.5);
+      });
+
+      it('should set position size to 0 for 0% confidence (approved with zero size)', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(0),
+        );
+        // base = 300, 0% → 0 — approved but effectively blocks trade
+        expect(decision.approved).toBe(true);
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(0);
+        expect(decision.confidenceScore).toBe(0);
+      });
+
+      it('should use full base size for null confidence (AC #2)', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(null),
+        );
+        expect(decision.approved).toBe(true);
+        // base = 300, null → no adjustment
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+      });
+
+      it('should use full base size for 100% confidence', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(100),
+        );
+        expect(decision.approved).toBe(true);
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+      });
+
+      it('should treat out-of-range confidence (-10) as null with warning', async () => {
+        const warnSpy = vi.spyOn(service['logger'], 'warn');
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(-10),
+        );
+        expect(decision.approved).toBe(true);
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('Invalid confidence score'),
+          }),
+        );
+      });
+
+      it('should treat out-of-range confidence (150) as null with warning', async () => {
+        const warnSpy = vi.spyOn(service['logger'], 'warn');
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(150),
+        );
+        expect(decision.approved).toBe(true);
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('Invalid confidence score'),
+          }),
+        );
+      });
+
+      it('should compose confidence + cluster soft-limit tapering', async () => {
+        // 80% confidence + cluster at 13% (soft-limit zone)
+        // base = 300
+        // after confidence = 300 * 0.80 = 240
+        // cluster taper = 240 * (1 - 13%/15%) = 240 * (1 - 0.8667) = 240 * 0.1333 = 32
+        const correlationTracker = (service as any).correlationTracker;
+        correlationTracker.getClusterExposures.mockReturnValue([
+          {
+            clusterId: 'cluster-1',
+            clusterName: 'Economics',
+            exposureUsd: new Decimal(1300),
+            exposurePct: new Decimal(0.13),
+            pairCount: 2,
+          },
+        ]);
+        correlationTracker.getAggregateExposurePct.mockReturnValue(
+          new Decimal(0.13),
+        );
+
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(80, 'cluster-1'),
+        );
+        expect(decision.approved).toBe(true);
+        // 300 * 0.80 * (1 - 0.13/0.15) = 300 * 0.80 * 0.13333... = 32
+        const expected = new FinancialDecimal(300)
+          .mul(new FinancialDecimal(0.8))
+          .mul(new Decimal(1).minus(new Decimal(0.13).div(new Decimal(0.15))));
+        expect(decision.maxPositionSizeUsd.toFixed(2)).toBe(
+          expected.toFixed(2),
+        );
+      });
+
+      it('should use full base size when extraction returns null (fail-open)', async () => {
+        // Pass null to trigger extraction failure
+        const decision = await service.validatePosition(null);
+        expect(decision.approved).toBe(true);
+        expect(decision.maxPositionSizeUsd.toNumber()).toBe(300);
+      });
+
+      it('should populate confidenceScore in RiskDecision when present (even at 100%)', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(100),
+        );
+        expect(decision.confidenceScore).toBe(100);
+      });
+
+      it('should populate confidenceAdjustedSizeUsd only when confidence < 100', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(90),
+        );
+        expect(decision.confidenceAdjustedSizeUsd).toBeDefined();
+        expect(decision.confidenceAdjustedSizeUsd!.toNumber()).toBe(270);
+      });
+
+      it('should NOT populate confidenceAdjustedSizeUsd at 100% confidence', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(100),
+        );
+        expect(decision.confidenceAdjustedSizeUsd).toBeUndefined();
+      });
+
+      it('should NOT populate confidence fields when confidence is null', async () => {
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(null),
+        );
+        expect(decision.confidenceScore).toBeUndefined();
+        expect(decision.confidenceAdjustedSizeUsd).toBeUndefined();
+      });
+
+      it('should populate confidence fields on rejection paths (max open pairs)', async () => {
+        (service as any).openPositionCount = 10;
+        const decision = await service.validatePosition(
+          makeConfidenceOpportunity(90),
+        );
+        expect(decision.approved).toBe(false);
+        expect(decision.reason).toContain('Max open pairs');
+        expect(decision.confidenceScore).toBe(90);
+        expect(decision.confidenceAdjustedSizeUsd).toBeDefined();
+        expect(decision.confidenceAdjustedSizeUsd!.toNumber()).toBe(270);
       });
     });
   });

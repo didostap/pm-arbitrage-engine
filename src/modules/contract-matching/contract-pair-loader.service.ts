@@ -132,6 +132,7 @@ export class ContractPairLoaderService implements OnModuleInit {
       matchId: match.matchId,
       resolutionDate: match.resolutionDate ?? null,
       clusterId: match.clusterId ?? undefined,
+      confidenceScore: match.confidenceScore ?? null,
     };
   }
 
@@ -257,6 +258,7 @@ export class ContractPairLoaderService implements OnModuleInit {
       ),
       primaryLeg: dto.primaryLeg ?? PrimaryLeg.KALSHI,
       resolutionDate: null,
+      confidenceScore: null,
     };
   }
 }

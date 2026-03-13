@@ -36,6 +36,8 @@ export interface RiskDecision {
   adjustedMaxPositionSizeUsd?: Decimal;
   clusterExposurePct?: Decimal;
   triageRecommendations?: TriageRecommendation[];
+  confidenceScore?: number;
+  confidenceAdjustedSizeUsd?: Decimal;
 }
 
 export interface ClusterExposure {

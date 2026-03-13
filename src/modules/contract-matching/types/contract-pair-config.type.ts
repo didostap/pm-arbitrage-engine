@@ -13,4 +13,5 @@ export interface ContractPairConfig {
   matchId?: string;
   resolutionDate?: Date | null;
   clusterId?: string;
+  confidenceScore?: number | null;
 }

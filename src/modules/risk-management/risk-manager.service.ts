@@ -359,6 +359,41 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       new FinancialDecimal(this.config.maxPositionPct),
     );
 
+    // [Story 9.3] Confidence-adjusted position sizing
+    const pairContext = this.extractPairContext(opportunity);
+    let rawConfidence = pairContext?.confidenceScore ?? null;
+
+    // Validate range — treat out-of-bounds as null (fail-open)
+    if (rawConfidence != null && (rawConfidence < 0 || rawConfidence > 100)) {
+      this.logger.warn({
+        message:
+          'Invalid confidence score out of [0,100] range, treating as null',
+        data: { rawConfidence },
+      });
+      rawConfidence = null;
+    }
+
+    const confidenceMultiplier =
+      rawConfidence != null
+        ? new FinancialDecimal(rawConfidence).div(100)
+        : new FinancialDecimal(1);
+    const confidenceAdjustedSizeUsd =
+      rawConfidence != null && rawConfidence < 100
+        ? maxPositionSizeUsd.mul(confidenceMultiplier)
+        : undefined;
+    maxPositionSizeUsd = maxPositionSizeUsd.mul(confidenceMultiplier);
+
+    if (rawConfidence != null && rawConfidence < 100) {
+      this.logger.log({
+        message: 'Confidence-adjusted position sizing applied',
+        data: {
+          confidenceScore: rawConfidence,
+          multiplier: confidenceMultiplier.toFixed(4),
+          adjustedSizeUsd: maxPositionSizeUsd.toFixed(2),
+        },
+      });
+    }
+
     // Check max open pairs limit (including reserved slots)
     const effectiveOpenPairs =
       this.openPositionCount + this.getReservedPositionSlots();
@@ -376,6 +411,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         reason: `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
         maxPositionSizeUsd,
         currentOpenPairs: this.openPositionCount,
+        ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+        ...(confidenceAdjustedSizeUsd !== undefined && {
+          confidenceAdjustedSizeUsd,
+        }),
       };
     }
 
@@ -399,15 +438,18 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         reason: `Insufficient available capital (${availableCapital.toFixed(2)} < ${maxPositionSizeUsd.toFixed(2)})`,
         maxPositionSizeUsd,
         currentOpenPairs: this.openPositionCount,
+        ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+        ...(confidenceAdjustedSizeUsd !== undefined && {
+          confidenceAdjustedSizeUsd,
+        }),
       };
     }
 
     // === [Story 9.2] Cluster limit enforcement ===
-    const clusterInfo = this.extractClusterInfo(opportunity);
     let adjustedMaxPositionSizeUsd: Decimal | undefined;
     let clusterExposurePctResult: Decimal | undefined;
 
-    if (clusterInfo) {
+    if (pairContext) {
       const hardLimitPct = new FinancialDecimal(
         this.configService.get<string>('RISK_CLUSTER_HARD_LIMIT_PCT', '0.15'),
       );
@@ -444,11 +486,15 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           reason: `Rejected: aggregate cluster exposure ${aggregateExposurePct.mul(100).toFixed(1)}% >= ${aggregateLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
           currentOpenPairs: this.openPositionCount,
+          ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+          ...(confidenceAdjustedSizeUsd !== undefined && {
+            confidenceAdjustedSizeUsd,
+          }),
         };
       }
 
       // Find cluster exposure for this opportunity's cluster
-      const clusterId = clusterInfo.clusterId;
+      const clusterId = pairContext.clusterId;
       const clusterExposures = this.correlationTracker.getClusterExposures();
       let clusterExposurePct: Decimal;
 
@@ -522,6 +568,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           currentOpenPairs: this.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
+          ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+          ...(confidenceAdjustedSizeUsd !== undefined && {
+            confidenceAdjustedSizeUsd,
+          }),
         };
       }
 
@@ -589,6 +639,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           currentOpenPairs: this.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
+          ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+          ...(confidenceAdjustedSizeUsd !== undefined && {
+            confidenceAdjustedSizeUsd,
+          }),
         };
       }
     }
@@ -619,6 +673,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       ...(clusterExposurePctResult !== undefined && {
         clusterExposurePct: clusterExposurePctResult,
       }),
+      ...(rawConfidence != null && { confidenceScore: rawConfidence }),
+      ...(confidenceAdjustedSizeUsd !== undefined && {
+        confidenceAdjustedSizeUsd,
+      }),
     };
   }
 
@@ -632,13 +690,13 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     return 'Position sizing limit';
   }
 
-  private extractClusterInfo(
+  private extractPairContext(
     opportunity: unknown,
-  ): { matchId?: string; clusterId?: string } | null {
+  ): { matchId?: string; clusterId?: string; confidenceScore?: number } | null {
     if (!opportunity || typeof opportunity !== 'object') {
       this.logger.warn({
         message:
-          'Skipping cluster info extraction: opportunity is not an object',
+          'Skipping pair context extraction: opportunity is not an object',
       });
       return null;
     }
@@ -649,7 +707,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       | undefined;
     if (!pairConfig) {
       this.logger.warn({
-        message: 'Skipping cluster info extraction: no pairConfig found',
+        message: 'Skipping pair context extraction: no pairConfig found',
       });
       return null;
     }
@@ -659,6 +717,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       clusterId:
         typeof pairConfig.clusterId === 'string'
           ? pairConfig.clusterId
+          : undefined,
+      confidenceScore:
+        typeof pairConfig.confidenceScore === 'number'
+          ? pairConfig.confidenceScore
           : undefined,
     };
   }
