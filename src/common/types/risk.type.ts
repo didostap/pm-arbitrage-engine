@@ -3,8 +3,27 @@ import type {
   ClusterId,
   OpportunityId,
   PairId,
+  PositionId,
   ReservationId,
 } from './branded.type.js';
+
+export interface TriageRecommendation {
+  positionId: PositionId;
+  pairId: PairId;
+  expectedEdge: Decimal;
+  capitalDeployed: Decimal;
+  suggestedAction: 'close';
+  reason: string;
+}
+
+export interface TriageRecommendationDto {
+  positionId: string;
+  pairId: string;
+  expectedEdge: string;
+  capitalDeployed: string;
+  suggestedAction: 'close';
+  reason: string;
+}
 
 export interface RiskDecision {
   approved: boolean;
@@ -14,6 +33,9 @@ export interface RiskDecision {
   dailyPnl?: Decimal;
   overrideApplied?: boolean;
   overrideRationale?: string;
+  adjustedMaxPositionSizeUsd?: Decimal;
+  clusterExposurePct?: Decimal;
+  triageRecommendations?: TriageRecommendation[];
 }
 
 export interface ClusterExposure {

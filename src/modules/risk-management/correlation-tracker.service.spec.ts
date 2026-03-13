@@ -201,6 +201,94 @@ describe('CorrelationTrackerService', () => {
     });
   });
 
+  describe('getTriageRecommendations', () => {
+    it('should return positions sorted by ascending expectedEdge', async () => {
+      prisma.openPosition.findMany.mockResolvedValue([
+        {
+          positionId: 'pos-high-edge',
+          expectedEdge: 0.05,
+          sizes: { polymarket: '100', kalshi: '50' },
+          entryPrices: { polymarket: '0.60', kalshi: '0.45' },
+          pairId: 'pair-1',
+        },
+        {
+          positionId: 'pos-low-edge',
+          expectedEdge: 0.02,
+          sizes: { polymarket: '80', kalshi: '40' },
+          entryPrices: { polymarket: '0.55', kalshi: '0.50' },
+          pairId: 'pair-2',
+        },
+        {
+          positionId: 'pos-mid-edge',
+          expectedEdge: 0.03,
+          sizes: { polymarket: '60', kalshi: '30' },
+          entryPrices: { polymarket: '0.50', kalshi: '0.40' },
+          pairId: 'pair-3',
+        },
+      ]);
+
+      const result = await service.getTriageRecommendations('cluster-1');
+
+      expect(result).toHaveLength(3);
+      expect(result[0]!.positionId).toBe('pos-low-edge');
+      expect(result[1]!.positionId).toBe('pos-mid-edge');
+      expect(result[2]!.positionId).toBe('pos-high-edge');
+      expect(result[0]!.suggestedAction).toBe('close');
+      expect(result[0]!.reason).toBe('Lowest remaining edge in cluster');
+    });
+
+    it('should return empty array for cluster with no positions', async () => {
+      prisma.openPosition.findMany.mockResolvedValue([]);
+
+      const result = await service.getTriageRecommendations('cluster-empty');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should calculate capitalDeployed correctly', async () => {
+      prisma.openPosition.findMany.mockResolvedValue([
+        {
+          positionId: 'pos-1',
+          expectedEdge: 0.04,
+          sizes: { polymarket: '100', kalshi: '50' },
+          entryPrices: { polymarket: '0.60', kalshi: '0.45' },
+          pairId: 'pair-1',
+        },
+      ]);
+
+      const result = await service.getTriageRecommendations('cluster-1');
+
+      expect(result).toHaveLength(1);
+      // 100*0.60 + 50*0.45 = 60 + 22.5 = 82.5
+      expect(result[0]!.capitalDeployed.eq(new Decimal('82.5'))).toBe(true);
+    });
+
+    it('should handle corrupted position data gracefully', async () => {
+      prisma.openPosition.findMany.mockResolvedValue([
+        {
+          positionId: 'pos-good',
+          expectedEdge: 0.04,
+          sizes: { polymarket: '100', kalshi: '50' },
+          entryPrices: { polymarket: '0.60', kalshi: '0.45' },
+          pairId: 'pair-1',
+        },
+        {
+          positionId: 'pos-bad',
+          expectedEdge: 0.02,
+          sizes: 'not-valid-json',
+          entryPrices: { polymarket: '0.60', kalshi: '0.45' },
+          pairId: 'pair-2',
+        },
+      ]);
+
+      const result = await service.getTriageRecommendations('cluster-1');
+
+      // Should skip the corrupted position and return only the good one
+      expect(result).toHaveLength(1);
+      expect(result[0]!.positionId).toBe('pos-good');
+    });
+  });
+
   describe('getAggregateExposurePct', () => {
     it('should return zero initially', () => {
       expect(service.getAggregateExposurePct().eq(new Decimal(0))).toBe(true);

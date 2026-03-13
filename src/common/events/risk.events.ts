@@ -5,6 +5,7 @@ import type {
   OpportunityId,
   ReservationId,
 } from '../types/branded.type';
+import type { TriageRecommendationDto } from '../types/risk.type';
 
 export class LimitApproachedEvent extends BaseEvent {
   constructor(
@@ -115,6 +116,29 @@ export class ClusterAssignedEvent extends BaseEvent {
     public readonly clusterId: ClusterId,
     public readonly clusterName: string,
     public readonly wasLlmClassified: boolean,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class ClusterLimitBreachedEvent extends BaseEvent {
+  constructor(
+    public readonly clusterName: string,
+    public readonly clusterId: ClusterId,
+    public readonly currentExposurePct: number,
+    public readonly hardLimitPct: number,
+    public readonly triageRecommendations: TriageRecommendationDto[],
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class AggregateClusterLimitBreachedEvent extends BaseEvent {
+  constructor(
+    public readonly aggregateExposurePct: number,
+    public readonly aggregateLimitPct: number,
     correlationId?: string,
   ) {
     super(correlationId);

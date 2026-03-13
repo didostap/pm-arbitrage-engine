@@ -8,6 +8,8 @@ import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
+  ClusterLimitBreachedEvent,
+  AggregateClusterLimitBreachedEvent,
 } from '../common/events/risk.events';
 import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
@@ -165,6 +167,38 @@ export class DashboardEventMapperService {
         matchId: event.matchId,
         status: 'rejected',
         confidenceScore: null,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapClusterLimitBreachedAlert(
+    event: ClusterLimitBreachedEvent,
+  ): WsEventEnvelope<WsAlertNewPayload> {
+    return {
+      event: WS_EVENTS.ALERT_NEW,
+      data: {
+        id: `alert-cluster-breach-${event.clusterId}-${event.correlationId ?? Date.now()}`,
+        type: 'cluster_limit_breached',
+        severity: 'critical',
+        message: `Cluster "${event.clusterName}" exposure ${(event.currentExposurePct * 100).toFixed(1)}% breached ${(event.hardLimitPct * 100).toFixed(0)}% limit`,
+        timestamp: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapAggregateClusterLimitBreachedAlert(
+    event: AggregateClusterLimitBreachedEvent,
+  ): WsEventEnvelope<WsAlertNewPayload> {
+    return {
+      event: WS_EVENTS.ALERT_NEW,
+      data: {
+        id: `alert-cluster-aggregate-${event.correlationId ?? Date.now()}`,
+        type: 'aggregate_cluster_limit_breached',
+        severity: 'critical',
+        message: `Aggregate cluster exposure ${(event.aggregateExposurePct * 100).toFixed(1)}% breached ${(event.aggregateLimitPct * 100).toFixed(0)}% limit`,
+        timestamp: new Date().toISOString(),
       },
       timestamp: new Date().toISOString(),
     };

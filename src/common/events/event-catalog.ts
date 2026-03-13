@@ -186,6 +186,12 @@ export const EVENT_NAMES = {
   CLUSTER_OVERRIDE: 'risk.cluster.override',
   /** Emitted when a contract match is assigned to a cluster */
   CLUSTER_ASSIGNED: 'risk.cluster.assigned',
+
+  // [Story 9.2] Cluster Limit Enforcement Events
+  /** Emitted when a cluster's hard limit (15%) would be breached by a new position */
+  CLUSTER_LIMIT_BREACHED: 'risk.cluster.limit_breached',
+  /** Emitted when aggregate exposure across all clusters exceeds the aggregate limit (50%) */
+  AGGREGATE_CLUSTER_LIMIT_BREACHED: 'risk.cluster.aggregate_breached',
 } as const;
 
 /**

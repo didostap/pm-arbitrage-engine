@@ -5,9 +5,14 @@ import Decimal from 'decimal.js';
 import { PrismaService } from '../../common/prisma.service.js';
 import {
   asClusterId,
+  asPairId,
+  asPositionId,
   type ClusterId,
 } from '../../common/types/branded.type.js';
-import type { ClusterExposure } from '../../common/types/risk.type.js';
+import type {
+  ClusterExposure,
+  TriageRecommendation,
+} from '../../common/types/risk.type.js';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import { ClusterLimitApproachedEvent } from '../../common/events/risk.events.js';
 import {
@@ -168,6 +173,75 @@ export class CorrelationTrackerService {
       (sum, e) => sum.plus(e.exposurePct),
       new Decimal(0),
     );
+  }
+
+  /**
+   * Get triage recommendations for a cluster: positions sorted by ascending expectedEdge.
+   * Lowest edge = highest priority to close to free budget.
+   */
+  async getTriageRecommendations(
+    clusterId: string,
+  ): Promise<TriageRecommendation[]> {
+    const positions = await this.prisma.openPosition.findMany({
+      where: {
+        status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
+        pair: { clusterId },
+      },
+      select: {
+        positionId: true,
+        expectedEdge: true,
+        sizes: true,
+        entryPrices: true,
+        pairId: true,
+      },
+    });
+
+    const recommendations: TriageRecommendation[] = [];
+
+    for (const pos of positions) {
+      try {
+        const sizes = parseJsonField(sizesSchema, pos.sizes, {
+          model: 'OpenPosition',
+          field: 'sizes',
+          recordId: pos.positionId,
+        });
+        const entryPrices = parseJsonField(entryPricesSchema, pos.entryPrices, {
+          model: 'OpenPosition',
+          field: 'entryPrices',
+          recordId: pos.positionId,
+        });
+
+        const polyCapital = new Decimal(sizes.polymarket).mul(
+          new Decimal(entryPrices.polymarket),
+        );
+        const kalshiCapital = new Decimal(sizes.kalshi).mul(
+          new Decimal(entryPrices.kalshi),
+        );
+        const capitalDeployed = polyCapital.plus(kalshiCapital);
+
+        recommendations.push({
+          positionId: asPositionId(pos.positionId),
+          pairId: asPairId(pos.pairId),
+          expectedEdge: new Decimal(pos.expectedEdge.toString()),
+          capitalDeployed,
+          suggestedAction: 'close',
+          reason: 'Lowest remaining edge in cluster',
+        });
+      } catch (error) {
+        this.logger.warn({
+          message: 'Skipping position with corrupted data in triage calc',
+          data: {
+            positionId: pos.positionId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+    }
+
+    // Sort ascending by expectedEdge (lowest = first to close)
+    recommendations.sort((a, b) => a.expectedEdge.cmp(b.expectedEdge));
+
+    return recommendations;
   }
 
   // === Event listeners for recalculation triggers ===

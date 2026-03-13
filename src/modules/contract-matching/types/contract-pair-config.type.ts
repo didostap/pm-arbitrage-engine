@@ -12,4 +12,5 @@ export interface ContractPairConfig {
   primaryLeg: 'kalshi' | 'polymarket';
   matchId?: string;
   resolutionDate?: Date | null;
+  clusterId?: string;
 }

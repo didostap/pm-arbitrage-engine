@@ -19,6 +19,8 @@ import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
   LimitBreachedEvent,
   LimitApproachedEvent,
+  ClusterLimitBreachedEvent,
+  AggregateClusterLimitBreachedEvent,
 } from '../common/events/risk.events';
 import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
@@ -128,6 +130,20 @@ export class DashboardGateway
   @OnEvent(EVENT_NAMES.MATCH_REJECTED)
   handleMatchRejected(event: MatchRejectedEvent): void {
     const envelope = this.mapper.mapMatchRejectedEvent(event);
+    this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.CLUSTER_LIMIT_BREACHED)
+  handleClusterLimitBreached(event: ClusterLimitBreachedEvent): void {
+    const envelope = this.mapper.mapClusterLimitBreachedAlert(event);
+    this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED)
+  handleAggregateClusterLimitBreached(
+    event: AggregateClusterLimitBreachedEvent,
+  ): void {
+    const envelope = this.mapper.mapAggregateClusterLimitBreachedAlert(event);
     this.broadcast(envelope);
   }
 

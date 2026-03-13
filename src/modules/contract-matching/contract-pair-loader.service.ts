@@ -131,6 +131,7 @@ export class ContractPairLoaderService implements OnModuleInit {
       primaryLeg: (match.primaryLeg as 'kalshi' | 'polymarket') ?? 'kalshi',
       matchId: match.matchId,
       resolutionDate: match.resolutionDate ?? null,
+      clusterId: match.clusterId ?? undefined,
     };
   }
 

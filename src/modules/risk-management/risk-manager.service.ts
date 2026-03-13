@@ -10,6 +10,8 @@ import {
   RiskConfig,
   RiskDecision,
   RiskExposure,
+  type TriageRecommendation,
+  type TriageRecommendationDto,
 } from '../../common/types/risk.type';
 import { ConfigValidationError } from '../../common/errors/config-validation-error';
 import {
@@ -24,6 +26,9 @@ import {
   TradingHaltedEvent,
   TradingResumedEvent,
   DataCorruptionDetectedEvent,
+  ClusterLimitApproachedEvent,
+  ClusterLimitBreachedEvent,
+  AggregateClusterLimitBreachedEvent,
 } from '../../common/events';
 import { FinancialDecimal } from '../../common/utils/financial-math';
 import { PrismaService } from '../../common/prisma.service';
@@ -35,6 +40,7 @@ import {
 import { randomUUID } from 'crypto';
 import { CorrelationTrackerService } from './correlation-tracker.service';
 import {
+  asClusterId,
   asReservationId,
   asOpportunityId,
   type OpportunityId,
@@ -337,21 +343,21 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
   }
 
-  validatePosition(_opportunity: unknown): Promise<RiskDecision> {
+  async validatePosition(opportunity: unknown): Promise<RiskDecision> {
     // FIRST: Check daily loss halt (Story 4.2) — before any other computation
     if (this.isTradingHalted()) {
-      return Promise.resolve({
+      return {
         approved: false,
         reason: 'Trading halted: daily loss limit breached',
         maxPositionSizeUsd: new FinancialDecimal(0),
         currentOpenPairs: this.openPositionCount,
         dailyPnl: this.dailyPnl,
-      });
+      };
     }
 
-    const maxPositionSizeUsd = new FinancialDecimal(
-      this.config.bankrollUsd,
-    ).mul(new FinancialDecimal(this.config.maxPositionPct));
+    let maxPositionSizeUsd = new FinancialDecimal(this.config.bankrollUsd).mul(
+      new FinancialDecimal(this.config.maxPositionPct),
+    );
 
     // Check max open pairs limit (including reserved slots)
     const effectiveOpenPairs =
@@ -365,12 +371,12 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           maxOpenPairs: this.config.maxOpenPairs,
         },
       });
-      return Promise.resolve({
+      return {
         approved: false,
         reason: `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
         maxPositionSizeUsd,
         currentOpenPairs: this.openPositionCount,
-      });
+      };
     }
 
     // Check available capital (including reserved capital) — cheap pre-screen
@@ -388,12 +394,203 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           reservedCapital: reservedCapital.toString(),
         },
       });
-      return Promise.resolve({
+      return {
         approved: false,
         reason: `Insufficient available capital (${availableCapital.toFixed(2)} < ${maxPositionSizeUsd.toFixed(2)})`,
         maxPositionSizeUsd,
         currentOpenPairs: this.openPositionCount,
-      });
+      };
+    }
+
+    // === [Story 9.2] Cluster limit enforcement ===
+    const clusterInfo = this.extractClusterInfo(opportunity);
+    let adjustedMaxPositionSizeUsd: Decimal | undefined;
+    let clusterExposurePctResult: Decimal | undefined;
+
+    if (clusterInfo) {
+      const hardLimitPct = new FinancialDecimal(
+        this.configService.get<string>('RISK_CLUSTER_HARD_LIMIT_PCT', '0.15'),
+      );
+      const softLimitPct = new FinancialDecimal(
+        this.configService.get<string>('RISK_CLUSTER_SOFT_LIMIT_PCT', '0.12'),
+      );
+      const aggregateLimitPct = new FinancialDecimal(
+        this.configService.get<string>(
+          'RISK_AGGREGATE_CLUSTER_LIMIT_PCT',
+          '0.50',
+        ),
+      );
+
+      // Step A: Aggregate limit check (50%)
+      const aggregateExposurePct =
+        this.correlationTracker.getAggregateExposurePct();
+      if (aggregateExposurePct.gte(aggregateLimitPct)) {
+        this.logger.warn({
+          message: 'Opportunity rejected: aggregate cluster limit exceeded',
+          data: {
+            aggregateExposurePct: aggregateExposurePct.toString(),
+            aggregateLimitPct: aggregateLimitPct.toString(),
+          },
+        });
+        this.eventEmitter.emit(
+          EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
+          new AggregateClusterLimitBreachedEvent(
+            aggregateExposurePct.toNumber(),
+            aggregateLimitPct.toNumber(),
+          ),
+        );
+        return {
+          approved: false,
+          reason: `Rejected: aggregate cluster exposure ${aggregateExposurePct.mul(100).toFixed(1)}% >= ${aggregateLimitPct.mul(100).toFixed(0)}% limit`,
+          maxPositionSizeUsd,
+          currentOpenPairs: this.openPositionCount,
+        };
+      }
+
+      // Find cluster exposure for this opportunity's cluster
+      const clusterId = clusterInfo.clusterId;
+      const clusterExposures = this.correlationTracker.getClusterExposures();
+      let clusterExposurePct: Decimal;
+
+      if (clusterId) {
+        const clusterEntry = clusterExposures.find(
+          (e) => (e.clusterId as string) === clusterId,
+        );
+        clusterExposurePct = clusterEntry
+          ? clusterEntry.exposurePct
+          : new Decimal(0);
+      } else {
+        // Uncategorized fallback: look for cluster named "Uncategorized"
+        const uncategorized = clusterExposures.find(
+          (e) => e.clusterName === 'Uncategorized',
+        );
+        clusterExposurePct = uncategorized
+          ? uncategorized.exposurePct
+          : new Decimal(0);
+      }
+
+      // Effective cluster ID for triage queries and events
+      // When clusterId is null (Uncategorized fallback), use actual DB cluster ID
+      const uncategorizedClusterId = clusterExposures.find(
+        (e) => e.clusterName === 'Uncategorized',
+      )?.clusterId as string | undefined;
+      const effectiveClusterId: string | null = clusterId
+        ? clusterId
+        : (uncategorizedClusterId ?? null);
+
+      // Helper to resolve cluster name from exposures
+      const resolveClusterName = (): string =>
+        clusterExposures.find(
+          (e) => (e.clusterId as string) === effectiveClusterId,
+        )?.clusterName ?? 'Unknown';
+
+      // Step B: Soft-limit size adjustment (12–15%)
+      if (clusterExposurePct.gte(hardLimitPct)) {
+        // Already over hard limit — skip to rejection
+        const { triage, triageDtos } =
+          await this.fetchTriageWithDtos(effectiveClusterId);
+
+        const clusterName = resolveClusterName();
+
+        this.logger.warn({
+          message:
+            'Opportunity rejected: cluster already at or above hard limit',
+          data: {
+            clusterId: effectiveClusterId,
+            clusterExposurePct: clusterExposurePct.toString(),
+            hardLimitPct: hardLimitPct.toString(),
+          },
+        });
+
+        if (effectiveClusterId) {
+          this.eventEmitter.emit(
+            EVENT_NAMES.CLUSTER_LIMIT_BREACHED,
+            new ClusterLimitBreachedEvent(
+              clusterName,
+              asClusterId(effectiveClusterId),
+              clusterExposurePct.toNumber(),
+              hardLimitPct.toNumber(),
+              triageDtos,
+            ),
+          );
+        }
+
+        return {
+          approved: false,
+          reason: `Rejected: cluster hard limit — exposure ${clusterExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
+          maxPositionSizeUsd,
+          currentOpenPairs: this.openPositionCount,
+          clusterExposurePct,
+          triageRecommendations: triage,
+        };
+      }
+
+      if (
+        clusterExposurePct.gte(softLimitPct) &&
+        clusterExposurePct.lt(hardLimitPct)
+      ) {
+        // In soft-limit zone — taper position size
+        const adjustmentFactor = new Decimal(1).minus(
+          clusterExposurePct.div(hardLimitPct),
+        );
+        maxPositionSizeUsd = maxPositionSizeUsd.mul(adjustmentFactor);
+        adjustedMaxPositionSizeUsd = maxPositionSizeUsd;
+        clusterExposurePctResult = clusterExposurePct;
+
+        if (effectiveClusterId) {
+          this.eventEmitter.emit(
+            EVENT_NAMES.CLUSTER_LIMIT_APPROACHED,
+            new ClusterLimitApproachedEvent(
+              resolveClusterName(),
+              asClusterId(effectiveClusterId),
+              clusterExposurePct.toNumber(),
+              softLimitPct.toNumber(),
+            ),
+          );
+        }
+      }
+
+      // Step C: Hard limit projection check (15%)
+      const projectedExposurePct = clusterExposurePct.plus(
+        maxPositionSizeUsd.div(bankrollUsd),
+      );
+      if (projectedExposurePct.gte(hardLimitPct)) {
+        const { triage, triageDtos } =
+          await this.fetchTriageWithDtos(effectiveClusterId);
+
+        this.logger.warn({
+          message:
+            'Opportunity rejected: projected cluster exposure breaches hard limit',
+          data: {
+            clusterId: effectiveClusterId,
+            currentPct: clusterExposurePct.toString(),
+            projectedPct: projectedExposurePct.toString(),
+            hardLimitPct: hardLimitPct.toString(),
+          },
+        });
+
+        if (effectiveClusterId) {
+          this.eventEmitter.emit(
+            EVENT_NAMES.CLUSTER_LIMIT_BREACHED,
+            new ClusterLimitBreachedEvent(
+              resolveClusterName(),
+              asClusterId(effectiveClusterId),
+              clusterExposurePct.toNumber(),
+              hardLimitPct.toNumber(),
+              triageDtos,
+            ),
+          );
+        }
+
+        return {
+          approved: false,
+          reason: `Rejected: cluster hard limit — projected ${projectedExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
+          maxPositionSizeUsd,
+          currentOpenPairs: this.openPositionCount,
+          clusterExposurePct,
+          triageRecommendations: triage,
+        };
+      }
     }
 
     // Check if approaching limit (80% threshold)
@@ -411,12 +608,18 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
-    return Promise.resolve({
+    return {
       approved: true,
       reason: 'Position within risk limits',
       maxPositionSizeUsd,
       currentOpenPairs: this.openPositionCount,
-    });
+      ...(adjustedMaxPositionSizeUsd !== undefined && {
+        adjustedMaxPositionSizeUsd,
+      }),
+      ...(clusterExposurePctResult !== undefined && {
+        clusterExposurePct: clusterExposurePctResult,
+      }),
+    };
   }
 
   private determineRejectionReason(): string | null {
@@ -427,6 +630,61 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
     // Position sizing is always a potential rejection for override context
     return 'Position sizing limit';
+  }
+
+  private extractClusterInfo(
+    opportunity: unknown,
+  ): { matchId?: string; clusterId?: string } | null {
+    if (!opportunity || typeof opportunity !== 'object') {
+      this.logger.warn({
+        message:
+          'Skipping cluster info extraction: opportunity is not an object',
+      });
+      return null;
+    }
+    const opp = opportunity as Record<string, unknown>;
+    const dislocation = opp.dislocation as Record<string, unknown> | undefined;
+    const pairConfig = dislocation?.pairConfig as
+      | Record<string, unknown>
+      | undefined;
+    if (!pairConfig) {
+      this.logger.warn({
+        message: 'Skipping cluster info extraction: no pairConfig found',
+      });
+      return null;
+    }
+    return {
+      matchId:
+        typeof pairConfig.matchId === 'string' ? pairConfig.matchId : undefined,
+      clusterId:
+        typeof pairConfig.clusterId === 'string'
+          ? pairConfig.clusterId
+          : undefined,
+    };
+  }
+
+  private async fetchTriageWithDtos(
+    effectiveClusterId: string | null,
+  ): Promise<{
+    triage: TriageRecommendation[];
+    triageDtos: TriageRecommendationDto[];
+  }> {
+    if (!effectiveClusterId) {
+      return { triage: [], triageDtos: [] };
+    }
+    const triage =
+      await this.correlationTracker.getTriageRecommendations(
+        effectiveClusterId,
+      );
+    const triageDtos: TriageRecommendationDto[] = triage.map((t) => ({
+      positionId: t.positionId as string,
+      pairId: t.pairId as string,
+      expectedEdge: t.expectedEdge.toString(),
+      capitalDeployed: t.capitalDeployed.toString(),
+      suggestedAction: t.suggestedAction,
+      reason: t.reason,
+    }));
+    return { triage, triageDtos };
   }
 
   async processOverride(

@@ -670,6 +670,56 @@ describe('ContractPairLoaderService', () => {
       expect(dbPair!.resolutionDate).toBeNull();
     });
 
+    it('should populate clusterId from DB match', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-cluster',
+          polymarketContractId: 'db-poly-cluster',
+          polymarketClobTokenId: 'db-clob-cluster',
+          kalshiContractId: 'db-kalshi-cluster',
+          polymarketDescription: 'Cluster Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+          clusterId: 'cluster-economics',
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-cluster');
+      expect(dbPair!.clusterId).toBe('cluster-economics');
+    });
+
+    it('should set clusterId to undefined when DB match has null clusterId', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-nocluster',
+          polymarketContractId: 'db-poly-nocluster',
+          polymarketClobTokenId: 'db-clob-nocluster',
+          kalshiContractId: 'db-kalshi-nocluster',
+          polymarketDescription: 'No Cluster Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+          clusterId: null,
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-nocluster');
+      expect(dbPair!.clusterId).toBeUndefined();
+    });
+
     it('should set resolutionDate to null for YAML-loaded pairs', async () => {
       mockFsWithContent(VALID_YAML_CONTENT);
       const service = await createService();

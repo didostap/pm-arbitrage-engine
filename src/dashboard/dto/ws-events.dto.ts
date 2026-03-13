@@ -24,7 +24,12 @@ export interface WsExecutionCompletePayload {
 
 export interface WsAlertNewPayload {
   id: string;
-  type: 'single_leg_exposure' | 'risk_limit_breached' | 'risk_limit_approached';
+  type:
+    | 'single_leg_exposure'
+    | 'risk_limit_breached'
+    | 'risk_limit_approached'
+    | 'cluster_limit_breached'
+    | 'aggregate_cluster_limit_breached';
   severity: 'critical' | 'warning' | 'info';
   message: string;
   timestamp: string;

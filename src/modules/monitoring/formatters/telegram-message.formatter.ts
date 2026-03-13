@@ -1,7 +1,6 @@
 import Decimal from 'decimal.js';
 import { BaseEvent } from '../../../common/events/base.event.js';
-
-export type AlertSeverity = 'critical' | 'warning' | 'info';
+import type { AlertSeverity } from '../event-severity.js';
 
 const SEVERITY_EMOJI: Record<AlertSeverity, string> = {
   critical: '\u{1F534}',
@@ -626,37 +625,57 @@ export function formatOrderbookRecovered(event: {
   return smartTruncate(`${header}\n\n${body}${footer}`);
 }
 
-// ─── Event Severity Mapping ───────────────────────────────────────────────────
+export function formatClusterLimitBreached(event: {
+  clusterName: string;
+  clusterId: string;
+  currentExposurePct: number;
+  hardLimitPct: number;
+  triageRecommendations: {
+    positionId: string;
+    pairId: string;
+    expectedEdge: string;
+    capitalDeployed: string;
+    suggestedAction: string;
+    reason: string;
+  }[];
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.critical} <b>🚨 CLUSTER LIMIT BREACHED</b>`;
+  const body = [
+    `Cluster: <code>${escapeHtml(event.clusterName)}</code>`,
+    `Exposure: <code>${(event.currentExposurePct * 100).toFixed(1)}%</code>`,
+    `Hard Limit: <code>${(event.hardLimitPct * 100).toFixed(0)}%</code>`,
+  ].join('\n');
 
-const EVENT_SEVERITY_MAP: Record<string, AlertSeverity> = {
-  // Critical
-  'execution.single_leg.exposure': 'critical',
-  'risk.limit.breached': 'critical',
-  'system.trading.halted': 'critical',
-  'system.health.critical': 'critical',
-  'system.reconciliation.discrepancy': 'critical',
-  'time.drift.halt': 'critical',
-  'contract.match.resolution.diverged': 'critical',
-  // Warning
-  'execution.order.failed': 'warning',
-  'risk.limit.approached': 'warning',
-  'platform.health.degraded': 'warning',
-  'time.drift.critical': 'warning',
-  'time.drift.warning': 'warning',
-  'degradation.protocol.activated': 'warning',
-  'platform.orderbook.stale': 'warning',
-  // Info (explicitly mapped for completeness — unknown events also default to 'info')
-  'platform.orderbook.recovered': 'info',
-  'execution.exit.triggered': 'info',
-  'execution.order.filled': 'info',
-  'detection.opportunity.identified': 'info',
-  'execution.single_leg.resolved': 'info',
-  'platform.health.recovered': 'info',
-  'system.trading.resumed': 'info',
-  'contract.match.resolution.poll_completed': 'info',
-  'contract.match.calibration.completed': 'info',
-};
+  const top3 = event.triageRecommendations.slice(0, 3);
+  const triage =
+    top3.length > 0
+      ? '\n\n<b>Triage (close to free budget):</b>\n' +
+        top3
+          .map(
+            (r, i) =>
+              `${i + 1}. Edge: <code>${r.expectedEdge}</code> | Capital: <code>$${r.capitalDeployed}</code>`,
+          )
+          .join('\n')
+      : '';
 
-export function getEventSeverity(eventName: string): AlertSeverity {
-  return EVENT_SEVERITY_MAP[eventName] ?? 'info';
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${triage}${footer}`);
+}
+
+export function formatAggregateClusterLimitBreached(event: {
+  aggregateExposurePct: number;
+  aggregateLimitPct: number;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.critical} <b>🚨 AGGREGATE CLUSTER LIMIT BREACHED</b>`;
+  const body = [
+    `Aggregate Exposure: <code>${(event.aggregateExposurePct * 100).toFixed(1)}%</code>`,
+    `Limit: <code>${(event.aggregateLimitPct * 100).toFixed(0)}%</code>`,
+    'No new positions allowed until aggregate drops below limit.',
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
 }

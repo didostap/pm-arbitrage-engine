@@ -171,6 +171,7 @@ describe('RiskManagerService', () => {
             getClusterExposures: vi.fn().mockReturnValue([]),
             getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
             recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+            getTriageRecommendations: vi.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -482,6 +483,286 @@ describe('RiskManagerService', () => {
           message: 'Opportunity rejected: max open pairs exceeded',
         }),
       );
+    });
+
+    describe('cluster limit enforcement', () => {
+      function makeClusteredOpportunity(
+        clusterId?: string,
+      ): EnrichedOpportunity {
+        return makeEnrichedOpportunity({
+          dislocation: {
+            ...makeEnrichedOpportunity().dislocation,
+            pairConfig: makePair({ clusterId }),
+          },
+        });
+      }
+
+      function setupCorrelationTracker(
+        clusterExposures: {
+          clusterId: string;
+          clusterName: string;
+          exposurePct: number;
+          exposureUsd?: number;
+        }[] = [],
+        aggregatePct = 0,
+        triageRecommendations: unknown[] = [],
+      ) {
+        const tracker = (service as any).correlationTracker;
+        tracker.getClusterExposures.mockReturnValue(
+          clusterExposures.map((c) => ({
+            clusterId: c.clusterId,
+            clusterName: c.clusterName,
+            exposureUsd: new Decimal(c.exposureUsd ?? 0),
+            exposurePct: new Decimal(c.exposurePct),
+            pairCount: 1,
+          })),
+        );
+        tracker.getAggregateExposurePct.mockReturnValue(
+          new Decimal(aggregatePct),
+        );
+        if (tracker.getTriageRecommendations) {
+          tracker.getTriageRecommendations.mockResolvedValue(
+            triageRecommendations,
+          );
+        }
+      }
+
+      it('should approve when cluster below soft limit (< 12%)', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.05,
+            },
+          ],
+          0.05,
+        );
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        expect(decision.approved).toBe(true);
+        expect(decision.adjustedMaxPositionSizeUsd).toBeUndefined();
+      });
+
+      it('should approve with adjusted size when in soft-limit zone (12-15%)', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.13,
+            },
+          ],
+          0.13,
+        );
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        expect(decision.approved).toBe(true);
+        // adjustedSize = base * (1 - 0.13/0.15) = 300 * 0.1333... = 40
+        expect(decision.adjustedMaxPositionSizeUsd).toBeDefined();
+        expect(decision.adjustedMaxPositionSizeUsd!.toNumber()).toBeCloseTo(
+          40,
+          0,
+        );
+        expect(decision.clusterExposurePct).toBeDefined();
+        expect(decision.clusterExposurePct!.toNumber()).toBe(0.13);
+      });
+
+      it('should emit ClusterLimitApproachedEvent when in soft-limit zone', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.13,
+            },
+          ],
+          0.13,
+        );
+        await service.validatePosition(makeClusteredOpportunity('cluster-1'));
+        expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.CLUSTER_LIMIT_APPROACHED,
+          expect.objectContaining({
+            clusterName: 'Economics',
+            clusterId: 'cluster-1',
+          }),
+        );
+      });
+
+      it('should reject when hard limit (15%) would be breached by base size', async () => {
+        // Below soft limit (10%), base size 300 (3% of 10000)
+        // projected: 0.10 + 300/10000 = 0.10 + 0.03 = 0.13 → approve (< 0.15)
+        // So we need cluster at e.g. 12.5% with base size 300: projected = 0.125 + 0.03 = 0.155 → breach!
+        // But wait — at 12.5% we're in soft-limit zone, taper: 300 * (1 - 0.125/0.15) = 300 * 0.1667 = 50
+        // projected: 0.125 + 50/10000 = 0.13 → approve
+        // Use a scenario where cluster is already at 15% (at hard limit) → immediate rejection
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.15,
+            },
+          ],
+          0.15,
+          [
+            {
+              positionId: 'pos-1',
+              pairId: 'pair-1',
+              expectedEdge: new Decimal('0.02'),
+              capitalDeployed: new Decimal('800'),
+              suggestedAction: 'close',
+              reason: 'Lowest remaining edge in cluster',
+            },
+          ],
+        );
+
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        expect(decision.approved).toBe(false);
+        expect(decision.reason).toContain('cluster hard limit');
+        expect(decision.triageRecommendations).toBeDefined();
+        expect(decision.triageRecommendations).toHaveLength(1);
+      });
+
+      it('should emit ClusterLimitBreachedEvent when hard limit breached', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.15,
+            },
+          ],
+          0.15,
+          [
+            {
+              positionId: 'pos-1',
+              pairId: 'pair-1',
+              expectedEdge: new Decimal('0.02'),
+              capitalDeployed: new Decimal('800'),
+              suggestedAction: 'close',
+              reason: 'Lowest remaining edge in cluster',
+            },
+          ],
+        );
+
+        await service.validatePosition(makeClusteredOpportunity('cluster-1'));
+        expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.CLUSTER_LIMIT_BREACHED,
+          expect.objectContaining({
+            clusterName: 'Economics',
+            clusterId: 'cluster-1',
+          }),
+        );
+      });
+
+      it('should reject when aggregate limit (50%) exceeded', async () => {
+        setupCorrelationTracker([], 0.51);
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        expect(decision.approved).toBe(false);
+        expect(decision.reason).toContain('aggregate cluster');
+      });
+
+      it('should emit AggregateClusterLimitBreachedEvent when aggregate exceeded', async () => {
+        setupCorrelationTracker([], 0.51);
+        await service.validatePosition(makeClusteredOpportunity('cluster-1'));
+        expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+          EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
+          expect.objectContaining({
+            aggregateExposurePct: expect.any(Number),
+            aggregateLimitPct: expect.any(Number),
+          }),
+        );
+      });
+
+      it('should handle null clusterId (Uncategorized fallback)', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'uncat-id',
+              clusterName: 'Uncategorized',
+              exposurePct: 0.05,
+            },
+          ],
+          0.05,
+        );
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity(undefined),
+        );
+        expect(decision.approved).toBe(true);
+      });
+
+      it('should reject immediately when cluster already over hard limit (>= 15%)', async () => {
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.16,
+            },
+          ],
+          0.16,
+          [
+            {
+              positionId: 'pos-1',
+              pairId: 'pair-1',
+              expectedEdge: new Decimal('0.02'),
+              capitalDeployed: new Decimal('800'),
+              suggestedAction: 'close',
+              reason: 'Lowest remaining edge in cluster',
+            },
+          ],
+        );
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        expect(decision.approved).toBe(false);
+        expect(decision.reason).toContain('cluster hard limit');
+      });
+
+      it('should warn and skip cluster checks when extraction fails', async () => {
+        const logSpy = vi.spyOn(service['logger'], 'warn');
+        // Pass a non-object to trigger extraction failure
+        const decision = await service.validatePosition('not-an-object');
+        expect(decision.approved).toBe(true);
+        expect(logSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining('cluster info extraction'),
+          }),
+        );
+      });
+
+      it('should approve with tapered size when soft-limit tapering keeps projected exposure below hard limit', async () => {
+        // cluster at 14%, base size = 300 (3% of 10000)
+        // soft-limit taper: 300 * (1 - 0.14/0.15) = 300 * 0.0667 = 20
+        // projected: 0.14 + 20/10000 = 0.14 + 0.002 = 0.142 < 0.15 → approve
+        // But at 14.8%: 300 * (1 - 0.148/0.15) = 300 * 0.0133 = 4
+        // projected: 0.148 + 4/10000 = 0.1484 < 0.15 → still approve
+        // So let's test that tapered size keeps it below hard limit
+        setupCorrelationTracker(
+          [
+            {
+              clusterId: 'cluster-1',
+              clusterName: 'Economics',
+              exposurePct: 0.14,
+            },
+          ],
+          0.14,
+        );
+        const decision = await service.validatePosition(
+          makeClusteredOpportunity('cluster-1'),
+        );
+        // At 14%, taper: 300 * (1 - 14/15) = 300 * 0.0667 = 20
+        // projected: 0.14 + 20/10000 = 0.142 < 0.15 → should approve
+        expect(decision.approved).toBe(true);
+        expect(decision.adjustedMaxPositionSizeUsd).toBeDefined();
+      });
     });
   });
 

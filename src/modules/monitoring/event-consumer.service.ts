@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EVENT_NAMES } from '../../common/events/event-catalog.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
-import type { AlertSeverity } from './formatters/telegram-message.formatter.js';
+import { type AlertSeverity, classifyEventSeverity } from './event-severity.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
 import {
   CsvTradeLogService,
@@ -19,30 +19,6 @@ import {
 import { AuditLogService } from './audit-log.service.js';
 import Decimal from 'decimal.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
-
-/**
- * Centralized severity mapping for ALL domain events.
- * Source of truth — replaces getEventSeverity() in telegram-message.formatter.ts.
- */
-const CRITICAL_EVENTS = new Set<string>([
-  EVENT_NAMES.SINGLE_LEG_EXPOSURE,
-  EVENT_NAMES.LIMIT_BREACHED,
-  EVENT_NAMES.SYSTEM_TRADING_HALTED,
-  EVENT_NAMES.SYSTEM_HEALTH_CRITICAL,
-  EVENT_NAMES.RECONCILIATION_DISCREPANCY,
-  EVENT_NAMES.TIME_DRIFT_HALT,
-  EVENT_NAMES.RESOLUTION_DIVERGED,
-]);
-
-const WARNING_EVENTS = new Set<string>([
-  EVENT_NAMES.EXECUTION_FAILED,
-  EVENT_NAMES.LIMIT_APPROACHED,
-  EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
-  EVENT_NAMES.TIME_DRIFT_CRITICAL,
-  EVENT_NAMES.TIME_DRIFT_WARNING,
-  EVENT_NAMES.DEGRADATION_PROTOCOL_ACTIVATED,
-  EVENT_NAMES.ORDERBOOK_STALE,
-]);
 
 /**
  * Info-level events that have Telegram formatters and are operationally important.
@@ -277,9 +253,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   classifyEventSeverity(eventName: string): AlertSeverity {
-    if (CRITICAL_EVENTS.has(eventName)) return 'critical';
-    if (WARNING_EVENTS.has(eventName)) return 'warning';
-    return 'info';
+    return classifyEventSeverity(eventName);
   }
 
   getMetrics(): EventConsumerMetrics {

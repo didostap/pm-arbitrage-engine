@@ -22,8 +22,8 @@ import {
   formatCalibrationCompleted,
   formatOrderbookStale,
   formatOrderbookRecovered,
-  getEventSeverity,
 } from './telegram-message.formatter.js';
+import { classifyEventSeverity } from '../event-severity.js';
 
 describe('escapeHtml', () => {
   it('should escape <, >, and &', () => {
@@ -354,21 +354,23 @@ describe('formatTestAlert', () => {
   });
 });
 
-describe('getEventSeverity', () => {
+describe('classifyEventSeverity', () => {
   it('should return critical for single leg exposure', () => {
-    expect(getEventSeverity('execution.single_leg.exposure')).toBe('critical');
+    expect(classifyEventSeverity('execution.single_leg.exposure')).toBe(
+      'critical',
+    );
   });
 
   it('should return warning for execution failed', () => {
-    expect(getEventSeverity('execution.order.failed')).toBe('warning');
+    expect(classifyEventSeverity('execution.order.failed')).toBe('warning');
   });
 
   it('should return info for order filled', () => {
-    expect(getEventSeverity('execution.order.filled')).toBe('info');
+    expect(classifyEventSeverity('execution.order.filled')).toBe('info');
   });
 
   it('should default to info for unknown events', () => {
-    expect(getEventSeverity('unknown.event')).toBe('info');
+    expect(classifyEventSeverity('unknown.event')).toBe('info');
   });
 });
 
@@ -522,31 +524,31 @@ describe('formatCalibrationCompleted', () => {
   });
 });
 
-describe('getEventSeverity — Story 8.3 events', () => {
+describe('classifyEventSeverity — Story 8.3 events', () => {
   it('should classify resolution diverged as critical', () => {
-    expect(getEventSeverity('contract.match.resolution.diverged')).toBe(
+    expect(classifyEventSeverity('contract.match.resolution.diverged')).toBe(
       'critical',
     );
   });
 
   it('should classify resolution poll completed as info', () => {
-    expect(getEventSeverity('contract.match.resolution.poll_completed')).toBe(
-      'info',
-    );
+    expect(
+      classifyEventSeverity('contract.match.resolution.poll_completed'),
+    ).toBe('info');
   });
 
   it('should classify calibration completed as info', () => {
-    expect(getEventSeverity('contract.match.calibration.completed')).toBe(
+    expect(classifyEventSeverity('contract.match.calibration.completed')).toBe(
       'info',
     );
   });
 
   it('should classify orderbook stale as warning', () => {
-    expect(getEventSeverity('platform.orderbook.stale')).toBe('warning');
+    expect(classifyEventSeverity('platform.orderbook.stale')).toBe('warning');
   });
 
   it('should classify orderbook recovered as info', () => {
-    expect(getEventSeverity('platform.orderbook.recovered')).toBe('info');
+    expect(classifyEventSeverity('platform.orderbook.recovered')).toBe('info');
   });
 });
 
