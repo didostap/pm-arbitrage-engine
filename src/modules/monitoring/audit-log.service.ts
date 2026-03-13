@@ -91,7 +91,29 @@ export class AuditLogService implements OnModuleInit {
       entries[0]!.createdAt,
     );
 
-    let expectedPreviousHash = entryBefore?.currentHash ?? GENESIS_HASH;
+    let expectedPreviousHash: string;
+
+    if (entryBefore) {
+      // Normal case — verify first entry chains from the prior entry
+      expectedPreviousHash = entryBefore.currentHash;
+    } else if (entries[0]!.previousHash === GENESIS_HASH) {
+      // Fresh database — first entry ever, verify against genesis
+      expectedPreviousHash = GENESIS_HASH;
+    } else {
+      // Post-pruning — prior entries deleted, oldest retained = chain anchor
+      // Setting expected = actual effectively SKIPS validation for this entry only.
+      // The anchor's previousHash pointed to a now-pruned row — we can't verify it,
+      // so we trust it and start chain verification from entry[1] onward.
+      expectedPreviousHash = entries[0]!.previousHash;
+      this.logger.debug({
+        message: 'Chain verification starting at post-pruning anchor',
+        module: 'monitoring',
+        data: {
+          anchorId: entries[0]!.id,
+          anchorTimestamp: entries[0]!.createdAt.toISOString(),
+        },
+      });
+    }
 
     for (const entry of entries) {
       // Verify previousHash matches expected

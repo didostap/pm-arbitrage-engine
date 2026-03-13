@@ -20,6 +20,7 @@ describe('AuditLogRepository', () => {
       create: ReturnType<typeof vi.fn>;
       findFirst: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
     };
   };
 
@@ -29,6 +30,7 @@ describe('AuditLogRepository', () => {
         create: vi.fn().mockResolvedValue(mockAuditLog),
         findFirst: vi.fn().mockResolvedValue(mockAuditLog),
         findMany: vi.fn().mockResolvedValue([mockAuditLog]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 5 }),
       },
     };
 
@@ -117,5 +119,16 @@ describe('AuditLogRepository', () => {
       where: { createdAt: { lt: date } },
       orderBy: { createdAt: 'desc' },
     });
+  });
+
+  it('should deleteOlderThan() calling deleteMany with correct where clause', async () => {
+    const cutoffDate = new Date('2026-01-08T03:00:00Z');
+
+    const count = await repository.deleteOlderThan(cutoffDate);
+
+    expect(mockPrisma.auditLog.deleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: cutoffDate } },
+    });
+    expect(count).toBe(5);
   });
 });

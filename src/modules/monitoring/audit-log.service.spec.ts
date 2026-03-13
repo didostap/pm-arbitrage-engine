@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Logger } from '@nestjs/common';
 import { AuditLogService } from './audit-log.service.js';
@@ -42,6 +42,10 @@ describe('AuditLogService', () => {
   });
 
   describe('hash chain logic', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('should use genesis hash for first entry', async () => {
       await service.append({
         eventType: 'execution.order.filled',
@@ -109,8 +113,6 @@ describe('AuditLogService', () => {
       ).currentHash;
 
       expect(hash1).toBe(hash2);
-
-      vi.useRealTimers();
     });
 
     it('should produce different hashes for different inputs', async () => {
@@ -175,8 +177,6 @@ describe('AuditLogService', () => {
       ).currentHash;
 
       expect(hash1).toBe(hash2);
-
-      vi.useRealTimers();
     });
   });
 
@@ -419,6 +419,117 @@ describe('AuditLogService', () => {
       );
 
       expect(result.valid).toBe(false);
+    });
+
+    it('should succeed when findJustBefore returns null and first entry previousHash !== GENESIS_HASH (post-pruning anchor)', async () => {
+      // Simulate: prior entries were pruned. First retained entry's previousHash
+      // points to a now-deleted row, not GENESIS_HASH.
+      await service.append({
+        eventType: 'event-1',
+        module: 'test',
+        details: { a: 1 },
+      });
+      await service.append({
+        eventType: 'event-2',
+        module: 'test',
+        details: { b: 2 },
+      });
+      await service.append({
+        eventType: 'event-3',
+        module: 'test',
+        details: { c: 3 },
+      });
+
+      const allEntries = mockRepo.create.mock.calls.map(
+        (call: unknown[], idx: number) => ({
+          ...(call[0] as Record<string, unknown>),
+          id: `audit-${idx}`,
+        }),
+      );
+
+      // Simulate pruning: only return entries 1 and 2 (entry 0 was pruned).
+      // Entry 1's previousHash points to entry 0's currentHash (now-deleted).
+      const retainedEntries = [allEntries[1], allEntries[2]];
+      mockRepo.findByDateRange.mockResolvedValue(retainedEntries);
+      mockRepo.findJustBefore.mockResolvedValue(null); // pruned, nothing before
+
+      const result = await service.verifyChain(
+        new Date('2026-01-15'),
+        new Date('2026-01-16'),
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.entriesChecked).toBe(2);
+    });
+
+    it('should still work normally when findJustBefore returns null and first entry has GENESIS_HASH (fresh database)', async () => {
+      // Fresh DB: first entry ever has previousHash = GENESIS_HASH
+      await service.append({
+        eventType: 'event-1',
+        module: 'test',
+        details: { a: 1 },
+      });
+
+      const entries = mockRepo.create.mock.calls.map(
+        (call: unknown[], idx: number) => ({
+          ...(call[0] as Record<string, unknown>),
+          id: `audit-${idx}`,
+        }),
+      );
+
+      mockRepo.findByDateRange.mockResolvedValue(entries);
+      mockRepo.findJustBefore.mockResolvedValue(null);
+
+      const result = await service.verifyChain(
+        new Date('2026-01-15'),
+        new Date('2026-01-16'),
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.entriesChecked).toBe(1);
+    });
+
+    it('should detect genuine chain break within retained window even after pruning', async () => {
+      await service.append({
+        eventType: 'event-1',
+        module: 'test',
+        details: { a: 1 },
+      });
+      await service.append({
+        eventType: 'event-2',
+        module: 'test',
+        details: { b: 2 },
+      });
+      await service.append({
+        eventType: 'event-3',
+        module: 'test',
+        details: { c: 3 },
+      });
+
+      const allEntries = mockRepo.create.mock.calls.map(
+        (call: unknown[], idx: number) => ({
+          ...(call[0] as Record<string, unknown>),
+          id: `audit-${idx}`,
+        }),
+      );
+
+      // Simulate pruning (entry 0 deleted), retain entries 1 and 2
+      const retainedEntries = [allEntries[1], allEntries[2]];
+      // Tamper with entry 2's details to create a genuine break
+      (retainedEntries[1] as Record<string, unknown>).details = {
+        tampered: true,
+      };
+
+      mockRepo.findByDateRange.mockResolvedValue(retainedEntries);
+      mockRepo.findJustBefore.mockResolvedValue(null);
+
+      const result = await service.verifyChain(
+        new Date('2026-01-15'),
+        new Date('2026-01-16'),
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.brokenAtId).toBe('audit-2');
     });
   });
 });

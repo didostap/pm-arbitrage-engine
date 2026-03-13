@@ -199,4 +199,7 @@ export const envSchema = z.object({
   RISK_CLUSTER_HARD_LIMIT_PCT: decimalString('0.15'),
   RISK_CLUSTER_SOFT_LIMIT_PCT: decimalString('0.12'),
   RISK_AGGREGATE_CLUSTER_LIMIT_PCT: decimalString('0.50'),
+
+  // Audit Log Retention (Story 9.6) — 0 = disabled (for Phase 1+ 7-year retention compliance)
+  AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(7),
 });

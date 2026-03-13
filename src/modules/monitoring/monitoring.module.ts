@@ -7,6 +7,7 @@ import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { DailySummaryService } from './daily-summary.service.js';
 import { TradeExportController } from './trade-export.controller.js';
 import { AuditLogService } from './audit-log.service.js';
+import { AuditLogRetentionService } from './audit-log-retention.service.js';
 import { AuditLogRepository } from '../../persistence/repositories/audit-log.repository.js';
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
 import { PositionRepository } from '../../persistence/repositories/position.repository.js';
@@ -20,6 +21,7 @@ import { PositionRepository } from '../../persistence/repositories/position.repo
     CsvTradeLogService,
     DailySummaryService,
     AuditLogService,
+    AuditLogRetentionService,
     AuditLogRepository,
     OrderRepository,
     PositionRepository,

@@ -14,4 +14,6 @@ export const MONITORING_ERROR_CODES = {
   AUDIT_HASH_CHAIN_BROKEN: 4011,
   /** Date range exceeds allowed maximum */
   INVALID_DATE_RANGE: 4012,
+  /** Audit log retention pruning failed */
+  AUDIT_LOG_PRUNE_FAILED: 4013,
 } as const;

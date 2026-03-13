@@ -15,3 +15,12 @@ export class AuditChainBrokenEvent {
     public readonly timestamp: Date = new Date(),
   ) {}
 }
+
+export class AuditLogPrunedEvent {
+  constructor(
+    public readonly prunedCount: number,
+    public readonly cutoffDate: string,
+    public readonly retentionDays: number,
+    public readonly timestamp: Date = new Date(),
+  ) {}
+}
