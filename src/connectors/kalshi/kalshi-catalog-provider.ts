@@ -180,7 +180,7 @@ export class KalshiCatalogProvider implements IContractCatalogProvider {
       contractId: market.ticker,
       title,
       description: parts.join('\n'),
-      category: event.series_ticker || event.category,
+      category: event.category || event.series_ticker,
       settlementDate,
       platform: PlatformId.KALSHI,
     };

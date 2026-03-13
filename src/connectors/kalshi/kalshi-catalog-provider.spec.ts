@@ -93,7 +93,7 @@ describe('KalshiCatalogProvider', () => {
     expect(contract.description).toBe(
       'Will Bitcoin hit $100k?\nBefore Jan 1, 2026', // event title + market detail
     );
-    expect(contract.category).toBe('CRYPTO');
+    expect(contract.category).toBe('Crypto');
     expect(contract.settlementDate).toEqual(new Date('2026-12-31T00:00:00Z'));
     expect(contract.platform).toBe(PlatformId.KALSHI);
   });
@@ -187,7 +187,7 @@ describe('KalshiCatalogProvider', () => {
     );
   });
 
-  it('should use category when series_ticker is empty', async () => {
+  it('should prefer category over series_ticker', async () => {
     mockGetEvents.mockResolvedValueOnce({
       data: {
         events: [
