@@ -268,6 +268,29 @@ describe('EdgeCalculatorService', () => {
     );
   });
 
+  it('includes matchId in OpportunityFilteredEvent opts', () => {
+    // Force below threshold with low grossEdge
+    configService.get.mockImplementation(
+      (key: string, defaultValue: number) => {
+        if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0.135;
+        if (key === 'DETECTION_POSITION_SIZE_USD') return 50;
+        return defaultValue;
+      },
+    );
+
+    const dislocation = makeDislocation({
+      grossEdge: new FinancialDecimal(0.03),
+    });
+    service.processDislocations([dislocation]);
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.OPPORTUNITY_FILTERED,
+      expect.objectContaining({
+        matchId: 'match-uuid-1',
+      }),
+    );
+  });
+
   // ========================================================================
   // Emits OpportunityIdentifiedEvent for passing dislocations
   // ========================================================================
@@ -290,6 +313,7 @@ describe('EdgeCalculatorService', () => {
           grossEdge: expect.any(Number),
           buyPrice: expect.any(Number),
           sellPrice: expect.any(Number),
+          matchId: 'match-uuid-1',
         }),
       }),
     );
@@ -704,6 +728,15 @@ describe('EdgeCalculatorService', () => {
     expect(result.filtered).toHaveLength(1);
     expect(result.filtered[0]?.reason).toContain('annualized_return_');
     expect(result.filtered[0]?.reason).toContain('below_');
+
+    // Verify filtered event carries matchId and annualizedReturn in opts
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.OPPORTUNITY_FILTERED,
+      expect.objectContaining({
+        matchId: 'match-uuid-1',
+        annualizedReturn: expect.any(Number),
+      }),
+    );
   });
 
   // ========================================================================

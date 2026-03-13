@@ -32,6 +32,9 @@ function buildMockMatch(overrides: Record<string, unknown> = {}) {
     primaryLeg: null,
     resolutionDate: null,
     resolutionCriteriaHash: null,
+    lastAnnualizedReturn: null,
+    lastNetEdge: null,
+    lastComputedAt: null,
     clusterId: null,
     cluster: null,
     createdAt: new Date('2026-03-01'),
@@ -351,6 +354,90 @@ describe('MatchApprovalService', () => {
       expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { operatorApproved: true, clusterId: 'cluster-xyz' },
+        }),
+      );
+    });
+
+    it('should map APR Decimal fields to number in toSummaryDto', async () => {
+      const match = buildMockMatch({
+        lastAnnualizedReturn: { toNumber: () => 0.42 },
+        lastNetEdge: { toNumber: () => 0.025 },
+        lastComputedAt: new Date('2026-03-13T10:00:00Z'),
+      });
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.lastAnnualizedReturn).toBe(0.42);
+      expect(dto.lastNetEdge).toBe(0.025);
+      expect(dto.lastComputedAt).toBe('2026-03-13T10:00:00.000Z');
+    });
+
+    it('should map null APR fields to null in toSummaryDto', async () => {
+      const match = buildMockMatch();
+      prisma.contractMatch.findMany.mockResolvedValue([match]);
+      prisma.contractMatch.count.mockResolvedValue(1);
+
+      const result = await service.listMatches('all', 1, 20);
+      const dto = result.data[0]!;
+
+      expect(dto.lastAnnualizedReturn).toBeNull();
+      expect(dto.lastNetEdge).toBeNull();
+      expect(dto.lastComputedAt).toBeNull();
+    });
+
+    it('should use default orderBy when no sortBy provided', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20);
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ operatorApproved: 'asc' }, { createdAt: 'desc' }],
+        }),
+      );
+    });
+
+    it('should use dynamic orderBy with nulls last when sortBy provided', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches(
+        'all',
+        1,
+        20,
+        undefined,
+        undefined,
+        'lastAnnualizedReturn' as never,
+        'desc' as never,
+      );
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ lastAnnualizedReturn: { sort: 'desc', nulls: 'last' } }],
+        }),
+      );
+    });
+
+    it('should default to desc order when sortBy provided without order', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches(
+        'all',
+        1,
+        20,
+        undefined,
+        undefined,
+        'lastNetEdge' as never,
+      );
+
+      expect(prisma.contractMatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ lastNetEdge: { sort: 'desc', nulls: 'last' } }],
         }),
       );
     });

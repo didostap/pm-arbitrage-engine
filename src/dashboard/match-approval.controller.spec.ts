@@ -8,6 +8,8 @@ import {
 } from '../common/errors/system-health-error';
 import {
   MatchStatusFilter,
+  MatchSortField,
+  SortOrder,
   type MatchSummaryDto,
 } from './dto/match-approval.dto';
 
@@ -37,6 +39,9 @@ function buildMatchDto(
     primaryLeg: null,
     resolutionDate: null,
     resolutionCriteriaHash: null,
+    lastAnnualizedReturn: null,
+    lastNetEdge: null,
+    lastComputedAt: null,
     cluster: null,
     createdAt: '2026-03-01T00:00:00.000Z',
     updatedAt: '2026-03-01T00:00:00.000Z',
@@ -86,6 +91,8 @@ describe('MatchApprovalController', () => {
         20,
         undefined,
         undefined,
+        undefined,
+        undefined,
       );
       expect(result.data).toHaveLength(1);
       expect(result.count).toBe(1);
@@ -108,6 +115,8 @@ describe('MatchApprovalController', () => {
         20,
         undefined,
         undefined,
+        undefined,
+        undefined,
       );
     });
 
@@ -127,6 +136,32 @@ describe('MatchApprovalController', () => {
         50,
         undefined,
         undefined,
+        undefined,
+        undefined,
+      );
+    });
+
+    it('should pass sortBy and order to service', async () => {
+      service.listMatches.mockResolvedValue({
+        data: [],
+        count: 0,
+        page: 1,
+        limit: 20,
+      });
+
+      await controller.listMatches({
+        sortBy: MatchSortField.LAST_ANNUALIZED_RETURN,
+        order: SortOrder.DESC,
+      });
+
+      expect(service.listMatches).toHaveBeenCalledWith(
+        'all',
+        1,
+        20,
+        undefined,
+        undefined,
+        MatchSortField.LAST_ANNUALIZED_RETURN,
+        SortOrder.DESC,
       );
     });
   });

@@ -19,13 +19,19 @@ export class OpportunityIdentifiedEvent extends BaseEvent {
  * Emitted when an opportunity is filtered out (below threshold or negative edge).
  */
 export class OpportunityFilteredEvent extends BaseEvent {
+  public readonly matchId?: string;
+  public readonly annualizedReturn: number | null;
+
   constructor(
     public readonly pairEventDescription: string,
     public readonly netEdge: Decimal,
     public readonly threshold: Decimal,
     public readonly reason: string,
     correlationId?: string,
+    opts?: { matchId?: string; annualizedReturn?: number | null },
   ) {
     super(correlationId);
+    this.matchId = opts?.matchId;
+    this.annualizedReturn = opts?.annualizedReturn ?? null;
   }
 }

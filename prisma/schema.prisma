@@ -116,6 +116,9 @@ model ContractMatch {
   resolutionDiverged        Boolean?  @map("resolution_diverged")
   divergenceNotes           String?   @map("divergence_notes")
   clusterId                 String?   @map("cluster_id")
+  lastAnnualizedReturn      Decimal?  @map("last_annualized_return") @db.Decimal(20, 8)
+  lastNetEdge               Decimal?  @map("last_net_edge") @db.Decimal(20, 8)
+  lastComputedAt            DateTime? @map("last_computed_at") @db.Timestamptz
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -130,6 +133,9 @@ model ContractMatch {
   @@index([confidenceScore])
   @@index([resolutionTimestamp])
   @@index([clusterId])
+  @@index([lastAnnualizedReturn])
+  @@index([lastNetEdge])
+  @@index([lastComputedAt])
   @@map("contract_matches")
 }
 

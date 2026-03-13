@@ -11,6 +11,7 @@ import { AuditLogRetentionService } from './audit-log-retention.service.js';
 import { AuditLogRepository } from '../../persistence/repositories/audit-log.repository.js';
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
 import { PositionRepository } from '../../persistence/repositories/position.repository.js';
+import { MatchAprUpdaterService } from './match-apr-updater.service.js';
 
 @Module({
   imports: [ConfigModule, PersistenceModule],
@@ -25,6 +26,7 @@ import { PositionRepository } from '../../persistence/repositories/position.repo
     AuditLogRepository,
     OrderRepository,
     PositionRepository,
+    MatchAprUpdaterService,
   ],
   exports: [
     TelegramAlertService,

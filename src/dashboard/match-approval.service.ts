@@ -11,6 +11,8 @@ import { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import type {
   ClusterSummaryDto,
   MatchSummaryDto,
+  MatchSortField,
+  SortOrder,
 } from './dto/match-approval.dto';
 import type { ContractMatch, CorrelationCluster } from '@prisma/client';
 import { asMatchId, asContractId } from '../common/types/branded.type';
@@ -34,6 +36,8 @@ export class MatchApprovalService {
     limit: number,
     resolution?: 'resolved' | 'unresolved' | 'diverged',
     clusterId?: string,
+    sortBy?: MatchSortField,
+    order?: SortOrder,
   ): Promise<{
     data: MatchSummaryDto[];
     count: number;
@@ -47,11 +51,15 @@ export class MatchApprovalService {
     };
     const skip = (page - 1) * limit;
 
+    const orderBy = sortBy
+      ? [{ [sortBy]: { sort: order ?? 'desc', nulls: 'last' } }]
+      : [{ operatorApproved: 'asc' as const }, { createdAt: 'desc' as const }];
+
     const [matches, count] = await Promise.all([
       this.prisma.contractMatch.findMany({
         where,
         include: { cluster: true },
-        orderBy: [{ operatorApproved: 'asc' }, { createdAt: 'desc' }],
+        orderBy,
         skip,
         take: limit,
       }),
@@ -263,6 +271,9 @@ export class MatchApprovalService {
       primaryLeg: match.primaryLeg ?? null,
       resolutionDate: match.resolutionDate?.toISOString() ?? null,
       resolutionCriteriaHash: match.resolutionCriteriaHash ?? null,
+      lastAnnualizedReturn: match.lastAnnualizedReturn?.toNumber() ?? null,
+      lastNetEdge: match.lastNetEdge?.toNumber() ?? null,
+      lastComputedAt: match.lastComputedAt?.toISOString() ?? null,
       cluster: match.cluster
         ? {
             id: match.cluster.id,

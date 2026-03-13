@@ -221,6 +221,8 @@ export class EdgeCalculatorService implements OnModuleInit {
           netEdge,
           effectiveThreshold,
           reason,
+          undefined,
+          { matchId: dislocation.pairConfig.matchId },
         ),
       );
 
@@ -266,6 +268,7 @@ export class EdgeCalculatorService implements OnModuleInit {
         buyPrice: dislocation.buyPrice.toNumber(),
         sellPrice: dislocation.sellPrice.toNumber(),
         pairId: dislocation.pairConfig.eventDescription,
+        matchId: dislocation.pairConfig.matchId ?? null,
         positionSizeUsd: this.positionSizeUsd.toNumber(),
         feeBreakdown: {
           buyFeeCost: feeBreakdown.buyFeeCost.toNumber(),
@@ -310,6 +313,8 @@ export class EdgeCalculatorService implements OnModuleInit {
           netEdge,
           threshold,
           reason,
+          undefined,
+          { matchId: dislocation.pairConfig.matchId },
         ),
       );
       return { passed: false, annualizedReturn: null };
@@ -345,6 +350,8 @@ export class EdgeCalculatorService implements OnModuleInit {
           netEdge,
           threshold,
           reason,
+          undefined,
+          { matchId: dislocation.pairConfig.matchId },
         ),
       );
       return { passed: false, annualizedReturn: null };
@@ -382,6 +389,11 @@ export class EdgeCalculatorService implements OnModuleInit {
           netEdge,
           threshold,
           reason,
+          undefined,
+          {
+            matchId: dislocation.pairConfig.matchId,
+            annualizedReturn: annualizedReturn.toNumber(),
+          },
         ),
       );
       return { passed: false, annualizedReturn };

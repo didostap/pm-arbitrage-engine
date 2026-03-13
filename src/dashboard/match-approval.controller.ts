@@ -61,6 +61,8 @@ export class MatchApprovalController {
       limit,
       query.resolution,
       query.clusterId,
+      query.sortBy,
+      query.order,
     );
 
     return {

@@ -49,6 +49,24 @@ export enum ResolutionStatusFilter {
   DIVERGED = 'diverged',
 }
 
+export enum MatchSortField {
+  CREATED_AT = 'createdAt',
+  UPDATED_AT = 'updatedAt',
+  CONFIDENCE_SCORE = 'confidenceScore',
+  RESOLUTION_DATE = 'resolutionDate',
+  TOTAL_CYCLES_TRADED = 'totalCyclesTraded',
+  OPERATOR_APPROVED = 'operatorApproved',
+  FIRST_TRADED_TIMESTAMP = 'firstTradedTimestamp',
+  LAST_ANNUALIZED_RETURN = 'lastAnnualizedReturn',
+  LAST_NET_EDGE = 'lastNetEdge',
+  LAST_COMPUTED_AT = 'lastComputedAt',
+}
+
+export enum SortOrder {
+  ASC = 'asc',
+  DESC = 'desc',
+}
+
 export class MatchListQueryDto {
   @ApiPropertyOptional({
     enum: MatchStatusFilter,
@@ -86,6 +104,22 @@ export class MatchListQueryDto {
   @IsOptional()
   @IsUUID()
   clusterId?: string;
+
+  @ApiPropertyOptional({
+    enum: MatchSortField,
+    description: 'Field to sort by',
+  })
+  @IsOptional()
+  @IsEnum(MatchSortField)
+  sortBy?: MatchSortField;
+
+  @ApiPropertyOptional({
+    enum: SortOrder,
+    description: 'Sort direction (default: desc when sortBy is provided)',
+  })
+  @IsOptional()
+  @IsEnum(SortOrder)
+  order?: SortOrder;
 }
 
 // ─── Response DTOs ───────────────────────────────────────────────────────────
@@ -162,6 +196,24 @@ export class MatchSummaryDto {
     description: 'Correlation cluster',
   })
   cluster!: ClusterSummaryDto | null;
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    description: 'Last computed annualized return (decimal, e.g. 0.42 = 42%)',
+  })
+  lastAnnualizedReturn!: number | null;
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    description: 'Last computed net edge (decimal)',
+  })
+  lastNetEdge!: number | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Timestamp of last APR computation (ISO 8601)',
+  })
+  lastComputedAt!: string | null;
   @ApiProperty() createdAt!: string;
   @ApiProperty() updatedAt!: string;
 }
