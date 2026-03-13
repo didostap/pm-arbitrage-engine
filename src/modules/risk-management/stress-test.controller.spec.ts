@@ -91,6 +91,7 @@ describe('StressTestController', () => {
       expect(mockStressTestService.runSimulation).toHaveBeenCalledWith(
         'operator',
       );
+      expect(response.data.runTimestamp).toBeDefined();
       expect(response.data.numScenarios).toBe(1050);
       expect(response.data.var95).toBe('150.50000000');
       expect(response.timestamp).toBeDefined();
@@ -132,6 +133,7 @@ describe('StressTestController', () => {
 
       const response = await controller.getLatestResult();
 
+      expect(response.data.runTimestamp).toBe('2026-03-13T00:00:00.000Z');
       expect(response.data.numScenarios).toBe(1050);
       expect(response.data.var95).toBe('150.5');
       expect(response.timestamp).toBeDefined();

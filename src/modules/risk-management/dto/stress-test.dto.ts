@@ -2,6 +2,12 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class StressTestResultDto {
   @ApiProperty({
+    description: 'Timestamp of the stress test run (ISO 8601)',
+    type: String,
+  })
+  runTimestamp!: string;
+
+  @ApiProperty({
     description: 'Total scenarios simulated (random + synthetic)',
   })
   numScenarios!: number;

@@ -43,6 +43,7 @@ export class StressTestController {
 
     return {
       data: {
+        runTimestamp: new Date().toISOString(),
         numScenarios: result.numScenarios,
         numPositions: result.numPositions,
         bankrollUsd: result.bankrollUsd.toFixed(8),
@@ -89,6 +90,7 @@ export class StressTestController {
 
     return {
       data: {
+        runTimestamp: latest.timestamp.toISOString(),
         numScenarios: latest.numScenarios,
         numPositions: latest.numPositions,
         bankrollUsd: latest.bankrollUsd.toString(),
