@@ -194,6 +194,12 @@ export const EVENT_NAMES = {
   CLUSTER_LIMIT_BREACHED: 'risk.cluster.limit_breached',
   /** Emitted when aggregate exposure across all clusters exceeds the aggregate limit (50%) */
   AGGREGATE_CLUSTER_LIMIT_BREACHED: 'risk.cluster.aggregate_breached',
+
+  // [Story 9.4] Stress Testing Events
+  /** Emitted when Monte Carlo stress test run completes */
+  STRESS_TEST_COMPLETED: 'risk.stress_test.completed',
+  /** Emitted when stress test indicates risk parameters are too loose */
+  STRESS_TEST_ALERT: 'risk.stress_test.alert',
 } as const;
 
 /**

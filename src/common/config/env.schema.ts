@@ -202,4 +202,9 @@ export const envSchema = z.object({
 
   // Audit Log Retention (Story 9.6) — 0 = disabled (for Phase 1+ 7-year retention compliance)
   AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(7),
+
+  // Stress Testing (Story 9.4) — Monte Carlo simulation parameters
+  STRESS_TEST_SCENARIOS: z.coerce.number().int().positive().default(1000),
+  STRESS_TEST_DEFAULT_DAILY_VOL: decimalString('0.03'),
+  STRESS_TEST_MIN_SNAPSHOTS: z.coerce.number().int().positive().default(30),
 });

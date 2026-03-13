@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { BaseEvent } from './base.event';
 import type {
   ClusterId,
@@ -139,6 +140,33 @@ export class AggregateClusterLimitBreachedEvent extends BaseEvent {
   constructor(
     public readonly aggregateExposurePct: number,
     public readonly aggregateLimitPct: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class StressTestCompletedEvent extends BaseEvent {
+  constructor(
+    public readonly numScenarios: number,
+    public readonly numPositions: number,
+    public readonly var95: Decimal,
+    public readonly var99: Decimal,
+    public readonly worstCaseLoss: Decimal,
+    public readonly drawdown20PctProbability: Decimal,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+export class StressTestAlertEvent extends BaseEvent {
+  constructor(
+    public readonly var95: Decimal,
+    public readonly var99: Decimal,
+    public readonly worstCaseLoss: Decimal,
+    public readonly drawdown20PctProbability: Decimal,
+    public readonly suggestions: string[],
     correlationId?: string,
   ) {
     super(correlationId);

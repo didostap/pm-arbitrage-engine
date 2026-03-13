@@ -104,3 +104,27 @@ export interface ExecutionQueueResult {
   committed: boolean;
   error?: string;
 }
+
+export interface StressTestResult {
+  numScenarios: number;
+  numPositions: number;
+  bankrollUsd: Decimal;
+  var95: Decimal;
+  var99: Decimal;
+  worstCaseLoss: Decimal;
+  drawdown15PctProbability: Decimal;
+  drawdown20PctProbability: Decimal;
+  drawdown25PctProbability: Decimal;
+  alertEmitted: boolean;
+  suggestions: string[];
+  scenarioDetails: {
+    percentiles: Record<string, string>;
+    syntheticResults: { name: string; portfolioPnl: string }[];
+    volatilities: {
+      contractId: string;
+      platform: string;
+      vol: string;
+      source: string;
+    }[];
+  };
+}

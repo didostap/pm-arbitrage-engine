@@ -279,3 +279,26 @@ model CalibrationRun {
   @@index([timestamp])
   @@map("calibration_runs")
 }
+
+// Monte Carlo stress test results for portfolio risk validation (Story 9.4)
+model StressTestRun {
+  id                        String   @id @default(cuid())
+  timestamp                 DateTime @db.Timestamptz
+  numScenarios              Int      @map("num_scenarios")
+  numPositions              Int      @map("num_positions")
+  bankrollUsd               Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
+  var95                     Decimal  @db.Decimal(20, 8)
+  var99                     Decimal  @db.Decimal(20, 8)
+  worstCaseLoss             Decimal  @map("worst_case_loss") @db.Decimal(20, 8)
+  drawdown15PctProbability  Decimal  @map("drawdown_15pct_probability") @db.Decimal(10, 6)
+  drawdown20PctProbability  Decimal  @map("drawdown_20pct_probability") @db.Decimal(10, 6)
+  drawdown25PctProbability  Decimal  @map("drawdown_25pct_probability") @db.Decimal(10, 6)
+  alertEmitted              Boolean  @default(false) @map("alert_emitted")
+  suggestions               Json?    // string[] — parameter tightening suggestions when alert fires
+  scenarioDetails           Json     @map("scenario_details") // { percentiles, syntheticResults, volatilities }
+  triggeredBy               String   @map("triggered_by") // "cron" | "operator"
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([timestamp])
+  @@map("stress_test_runs")
+}

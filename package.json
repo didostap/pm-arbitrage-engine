@@ -46,6 +46,7 @@
     "prisma": "6",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "simple-statistics": "^7.8.9",
     "uuid": "^13.0.0",
     "viem": "^2.45.3",
     "ws": "^8.19.0",
