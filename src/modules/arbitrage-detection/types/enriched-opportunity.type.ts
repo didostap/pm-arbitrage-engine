@@ -25,5 +25,6 @@ export interface EnrichedOpportunity {
   feeBreakdown: FeeBreakdown;
   liquidityDepth: LiquidityDepth;
   recommendedPositionSize: null;
+  annualizedReturn: Decimal | null;
   enrichedAt: Date;
 }

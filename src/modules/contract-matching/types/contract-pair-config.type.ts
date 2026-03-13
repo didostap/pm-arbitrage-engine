@@ -11,4 +11,5 @@ export interface ContractPairConfig {
   operatorVerificationTimestamp: Date;
   primaryLeg: 'kalshi' | 'polymarket';
   matchId?: string;
+  resolutionDate?: Date | null;
 }

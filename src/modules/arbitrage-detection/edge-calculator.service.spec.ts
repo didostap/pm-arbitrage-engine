@@ -37,11 +37,13 @@ function makeOrderBook(
 function makePair(overrides?: Partial<ContractPairConfig>): ContractPairConfig {
   return {
     polymarketContractId: 'poly-contract-1',
+    polymarketClobTokenId: 'poly-clob-token-1',
     kalshiContractId: 'kalshi-contract-1',
     eventDescription: 'Will event X happen?',
     operatorVerificationTimestamp: new Date(),
     primaryLeg: 'kalshi',
     matchId: 'match-uuid-1',
+    resolutionDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days out (keeps annualized return high for existing tests)
     ...overrides,
   };
 }
@@ -609,5 +611,212 @@ describe('EdgeCalculatorService', () => {
     // gasFraction = 0.30 / 300 = 0.001
     const gasFraction = result.opportunities[0]?.feeBreakdown.gasFraction;
     expect(gasFraction!.toNumber()).toBeCloseTo(0.001, 6);
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: filters when resolutionDate is null
+  // ========================================================================
+  it('filters opportunity when resolutionDate is null', () => {
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
+      grossEdge: new FinancialDecimal(0.1),
+      pairConfig: makePair({ resolutionDate: null }),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(0);
+    expect(result.filtered).toHaveLength(1);
+    expect(result.filtered[0]?.reason).toBe('no_resolution_date');
+    expect(result.filtered[0]?.threshold).toBe('N/A');
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.OPPORTUNITY_FILTERED,
+      expect.objectContaining({ reason: 'no_resolution_date' }),
+    );
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: filters when resolutionDate is undefined
+  // ========================================================================
+  it('filters opportunity when resolutionDate is undefined', () => {
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
+      grossEdge: new FinancialDecimal(0.1),
+      pairConfig: makePair({ resolutionDate: undefined }),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(0);
+    expect(result.filtered).toHaveLength(1);
+    expect(result.filtered[0]?.reason).toBe('no_resolution_date');
+    expect(result.filtered[0]?.threshold).toBe('N/A');
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: filters when resolution date is in the past
+  // ========================================================================
+  it('filters opportunity when resolution date is in the past', () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
+      grossEdge: new FinancialDecimal(0.1),
+      pairConfig: makePair({ resolutionDate: yesterday }),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(0);
+    expect(result.filtered).toHaveLength(1);
+    expect(result.filtered[0]?.reason).toBe('resolution_date_passed');
+    expect(result.filtered[0]?.threshold).toBe('N/A');
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.OPPORTUNITY_FILTERED,
+      expect.objectContaining({ reason: 'resolution_date_passed' }),
+    );
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: filters when annualized return below threshold
+  // ========================================================================
+  it('filters opportunity when annualized return below threshold', () => {
+    // resolutionDate 180 days out, net edge ~1% → annualized ≈ 2.03% < 15%
+    const futureDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+    configService.get.mockImplementation(
+      (key: string, defaultValue: number) => {
+        if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0.13;
+        if (key === 'DETECTION_POSITION_SIZE_USD') return 50;
+        return defaultValue;
+      },
+    );
+
+    const dislocation = makeDislocation({
+      grossEdge: new FinancialDecimal(0.03),
+      pairConfig: makePair({ resolutionDate: futureDate }),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(0);
+    expect(result.filtered).toHaveLength(1);
+    expect(result.filtered[0]?.reason).toContain('annualized_return_');
+    expect(result.filtered[0]?.reason).toContain('below_');
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: passes when annualized return meets threshold
+  // ========================================================================
+  it('passes opportunity when annualized return meets threshold', () => {
+    // resolutionDate 7 days out, net edge ~3% → annualized ≈ 156% >> 15%
+    const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
+      grossEdge: new FinancialDecimal(0.1),
+      pairConfig: makePair({ resolutionDate: futureDate }),
+    });
+
+    const result = service.processDislocations([dislocation]);
+
+    expect(result.opportunities).toHaveLength(1);
+    expect(result.opportunities[0]?.annualizedReturn).toBeDefined();
+    expect(
+      result.opportunities[0]?.annualizedReturn!.toNumber(),
+    ).toBeGreaterThan(0.15);
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: startup logs annualized return threshold
+  // ========================================================================
+  it('startup logs annualized return threshold', () => {
+    // onModuleInit is called during beforeEach → verify log was emitted
+    // Re-init to test explicitly
+    service.onModuleInit();
+    // No throw = config is valid
+    expect(configService.get).toHaveBeenCalledWith(
+      'MIN_ANNUALIZED_RETURN',
+      '0.15',
+    );
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: rejects negative MIN_ANNUALIZED_RETURN at startup
+  // ========================================================================
+  it('rejects negative MIN_ANNUALIZED_RETURN at startup', async () => {
+    const negativeConfigService = {
+      get: vi
+        .fn()
+        .mockImplementation((key: string, defaultValue: number | string) => {
+          if (key === 'MIN_ANNUALIZED_RETURN') return '-0.05';
+          return defaultValue;
+        }),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        EdgeCalculatorService,
+        { provide: ConfigService, useValue: negativeConfigService },
+        { provide: DegradationProtocolService, useValue: degradationService },
+        { provide: KalshiConnector, useValue: kalshiConnector },
+        { provide: PolymarketConnector, useValue: polymarketConnector },
+        { provide: EventEmitter2, useValue: eventEmitter },
+      ],
+    }).compile();
+
+    await expect(module.init()).rejects.toThrow('must not be negative');
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: rejects MIN_ANNUALIZED_RETURN > 10.0 at startup
+  // ========================================================================
+  it('rejects MIN_ANNUALIZED_RETURN above 10.0 at startup', async () => {
+    const highConfigService = {
+      get: vi
+        .fn()
+        .mockImplementation((key: string, defaultValue: number | string) => {
+          if (key === 'MIN_ANNUALIZED_RETURN') return '15.0';
+          return defaultValue;
+        }),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        EdgeCalculatorService,
+        { provide: ConfigService, useValue: highConfigService },
+        { provide: DegradationProtocolService, useValue: degradationService },
+        { provide: KalshiConnector, useValue: kalshiConnector },
+        { provide: PolymarketConnector, useValue: polymarketConnector },
+        { provide: EventEmitter2, useValue: eventEmitter },
+      ],
+    }).compile();
+
+    await expect(module.init()).rejects.toThrow('must not exceed 10.0');
+  });
+
+  // ========================================================================
+  // Capital Efficiency Gate: annualizedReturn included in OpportunityIdentifiedEvent
+  // ========================================================================
+  it('includes annualizedReturn in OpportunityIdentifiedEvent payload', () => {
+    const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const dislocation = makeDislocation({
+      buyPrice: new FinancialDecimal(0.2),
+      sellPrice: new FinancialDecimal(0.3),
+      grossEdge: new FinancialDecimal(0.1),
+      pairConfig: makePair({ resolutionDate: futureDate }),
+    });
+
+    service.processDislocations([dislocation]);
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      expect.objectContaining({
+        opportunity: expect.objectContaining({
+          annualizedReturn: expect.any(Number),
+        }),
+      }),
+    );
   });
 });

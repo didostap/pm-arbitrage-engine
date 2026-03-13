@@ -130,6 +130,7 @@ export class ContractPairLoaderService implements OnModuleInit {
         match.operatorApprovalTimestamp ?? match.createdAt,
       primaryLeg: (match.primaryLeg as 'kalshi' | 'polymarket') ?? 'kalshi',
       matchId: match.matchId,
+      resolutionDate: match.resolutionDate ?? null,
     };
   }
 
@@ -254,6 +255,7 @@ export class ContractPairLoaderService implements OnModuleInit {
         dto.operatorVerificationTimestamp,
       ),
       primaryLeg: dto.primaryLeg ?? PrimaryLeg.KALSHI,
+      resolutionDate: null,
     };
   }
 }

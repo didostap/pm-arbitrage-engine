@@ -619,5 +619,66 @@ describe('ContractPairLoaderService', () => {
       const dbPair = pairs.find((p) => p.polymarketContractId === 'db-poly-5');
       expect(dbPair!.matchId).toBe('specific-uuid-123');
     });
+
+    it('should populate resolutionDate from DB match', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const resolutionDate = new Date('2026-06-15');
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-res',
+          polymarketContractId: 'db-poly-res',
+          polymarketClobTokenId: 'db-clob-res',
+          kalshiContractId: 'db-kalshi-res',
+          polymarketDescription: 'Resolution Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+          resolutionDate,
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-res');
+      expect(dbPair!.resolutionDate).toEqual(resolutionDate);
+    });
+
+    it('should set resolutionDate to null when DB match has no resolution date', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      mockFindMany.mockResolvedValue([
+        {
+          matchId: 'db-match-nores',
+          polymarketContractId: 'db-poly-nores',
+          polymarketClobTokenId: 'db-clob-nores',
+          kalshiContractId: 'db-kalshi-nores',
+          polymarketDescription: 'No Resolution Event',
+          kalshiDescription: null,
+          operatorApprovalTimestamp: new Date(),
+          primaryLeg: 'kalshi',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const pairs = await service.getActivePairs();
+      const dbPair = pairs.find((p) => p.matchId === 'db-match-nores');
+      expect(dbPair!.resolutionDate).toBeNull();
+    });
+
+    it('should set resolutionDate to null for YAML-loaded pairs', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getYamlPairs();
+      for (const pair of pairs) {
+        expect(pair.resolutionDate).toBeNull();
+      }
+    });
   });
 });

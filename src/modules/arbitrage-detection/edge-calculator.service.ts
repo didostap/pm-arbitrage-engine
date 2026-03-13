@@ -12,6 +12,7 @@ import {
 } from '../../common/events';
 import { PlatformId, FeeSchedule } from '../../common/types';
 import { FinancialMath, FinancialDecimal } from '../../common/utils';
+import { ConfigValidationError } from '../../common/errors';
 import { getCorrelationId } from '../../common/services/correlation-context';
 import { RawDislocation } from './types/raw-dislocation.type';
 import {
@@ -40,6 +41,7 @@ export class EdgeCalculatorService implements OnModuleInit {
     this.validateConfig('DETECTION_MIN_EDGE_THRESHOLD', 0.008);
     this.validateConfig('DETECTION_GAS_ESTIMATE_USD', 0.3);
     this.validateConfig('DETECTION_POSITION_SIZE_USD', 300);
+    this.validateMinAnnualizedReturn();
     this.logger.log('Edge calculator configuration validated');
   }
 
@@ -55,6 +57,33 @@ export class EdgeCalculatorService implements OnModuleInit {
         `EdgeCalculatorService: ${key} must not be negative, got ${value}`,
       );
     }
+  }
+
+  private validateMinAnnualizedReturn(): void {
+    const value = new FinancialDecimal(
+      this.configService.get<string>('MIN_ANNUALIZED_RETURN', '0.15'),
+    );
+    if (value.isNeg()) {
+      throw new ConfigValidationError(
+        `EdgeCalculatorService: MIN_ANNUALIZED_RETURN must not be negative, got ${value.toString()}`,
+        [`MIN_ANNUALIZED_RETURN: ${value.toString()} is negative`],
+      );
+    }
+    if (value.gt(10)) {
+      throw new ConfigValidationError(
+        `EdgeCalculatorService: MIN_ANNUALIZED_RETURN must not exceed 10.0 (1000%), got ${value.toString()}`,
+        [`MIN_ANNUALIZED_RETURN: ${value.toString()} exceeds maximum 10.0`],
+      );
+    }
+    this.logger.log(
+      `Capital efficiency gate: MIN_ANNUALIZED_RETURN = ${value.mul(100).toFixed(0)}%`,
+    );
+  }
+
+  private get minAnnualizedReturn(): Decimal {
+    return new FinancialDecimal(
+      this.configService.get<string>('MIN_ANNUALIZED_RETURN', '0.15'),
+    );
   }
 
   private get minEdgeThreshold(): Decimal {
@@ -198,6 +227,15 @@ export class EdgeCalculatorService implements OnModuleInit {
       return;
     }
 
+    // Capital efficiency gate (FR-AD-08): resolution date + annualized return
+    const { passed, annualizedReturn } = this.checkCapitalEfficiency(
+      dislocation,
+      netEdge,
+      pairEventDescription,
+      filtered,
+    );
+    if (!passed) return;
+
     const feeBreakdown = this.buildFeeBreakdown(
       dislocation,
       buyFeeSchedule,
@@ -212,6 +250,7 @@ export class EdgeCalculatorService implements OnModuleInit {
       feeBreakdown,
       liquidityDepth,
       recommendedPositionSize: null,
+      annualizedReturn,
       enrichedAt: new Date(),
     };
 
@@ -235,9 +274,120 @@ export class EdgeCalculatorService implements OnModuleInit {
           totalCosts: feeBreakdown.totalCosts.toNumber(),
         },
         liquidityDepth,
+        annualizedReturn: annualizedReturn?.toNumber() ?? null,
         enrichedAt: enriched.enrichedAt,
       }),
     );
+  }
+
+  private checkCapitalEfficiency(
+    dislocation: RawDislocation,
+    netEdge: Decimal,
+    pairEventDescription: string,
+    filtered: FilteredDislocation[],
+  ): { passed: boolean; annualizedReturn: Decimal | null } {
+    const resolutionDate = dislocation.pairConfig.resolutionDate;
+    const threshold = this.minAnnualizedReturn;
+
+    // Gate 1: Resolution date required
+    if (!resolutionDate) {
+      const reason = 'no_resolution_date';
+      filtered.push({
+        pairEventDescription,
+        netEdge: netEdge.toString(),
+        threshold: 'N/A',
+        reason,
+      });
+      this.logger.debug({
+        message: `Opportunity filtered: ${pairEventDescription} — no resolution date`,
+        correlationId: getCorrelationId(),
+        data: { pairEventDescription, reason },
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.OPPORTUNITY_FILTERED,
+        new OpportunityFilteredEvent(
+          pairEventDescription,
+          netEdge,
+          threshold,
+          reason,
+        ),
+      );
+      return { passed: false, annualizedReturn: null };
+    }
+
+    // Gate 2: Resolution date must be in the future
+    const now = new Date();
+    const daysToResolution = new FinancialDecimal(
+      resolutionDate.getTime() - now.getTime(),
+    ).div(86_400_000);
+
+    if (daysToResolution.lte(0)) {
+      const reason = 'resolution_date_passed';
+      filtered.push({
+        pairEventDescription,
+        netEdge: netEdge.toString(),
+        threshold: 'N/A',
+        reason,
+      });
+      this.logger.debug({
+        message: `Opportunity filtered: ${pairEventDescription} — resolution date in the past`,
+        correlationId: getCorrelationId(),
+        data: {
+          pairEventDescription,
+          resolutionDate: resolutionDate.toISOString(),
+          reason,
+        },
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.OPPORTUNITY_FILTERED,
+        new OpportunityFilteredEvent(
+          pairEventDescription,
+          netEdge,
+          threshold,
+          reason,
+        ),
+      );
+      return { passed: false, annualizedReturn: null };
+    }
+
+    // Gate 3: Annualized return threshold
+    const annualizedReturn = netEdge.mul(
+      new FinancialDecimal(365).div(daysToResolution),
+    );
+
+    if (annualizedReturn.lt(threshold)) {
+      const reason = `annualized_return_${annualizedReturn.mul(100).toFixed(1)}%_below_${threshold.mul(100).toFixed(0)}%_minimum`;
+      filtered.push({
+        pairEventDescription,
+        netEdge: netEdge.toString(),
+        threshold: threshold.toString(),
+        reason,
+      });
+      this.logger.debug({
+        message: `Opportunity filtered: ${pairEventDescription} — annualized return below threshold`,
+        correlationId: getCorrelationId(),
+        data: {
+          pairEventDescription,
+          annualizedReturn: annualizedReturn.toString(),
+          threshold: threshold.toString(),
+          daysToResolution: daysToResolution.toFixed(1),
+          resolutionDate: resolutionDate.toISOString(),
+          reason,
+        },
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.OPPORTUNITY_FILTERED,
+        new OpportunityFilteredEvent(
+          pairEventDescription,
+          netEdge,
+          threshold,
+          reason,
+        ),
+      );
+      return { passed: false, annualizedReturn };
+    }
+
+    return { passed: true, annualizedReturn };
   }
 
   private buildFeeBreakdown(

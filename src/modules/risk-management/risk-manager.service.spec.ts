@@ -100,6 +100,7 @@ function makeEnrichedOpportunity(
       sellBestBidSize: 100,
     },
     recommendedPositionSize: null,
+    annualizedReturn: new Decimal('1.56'),
     enrichedAt: new Date(),
     ...overrides,
   };
