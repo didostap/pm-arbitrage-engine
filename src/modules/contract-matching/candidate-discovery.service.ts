@@ -328,6 +328,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
             null,
           operatorApproved: isAutoApproved,
           operatorApprovalTimestamp: isAutoApproved ? new Date() : null,
+          primaryLeg: 'kalshi',
           operatorRationale: isAutoApproved
             ? `Auto-approved by discovery pipeline (score: ${result.score}, model: ${result.model}, escalated: ${result.escalated})`
             : isBelowReviewThreshold
