@@ -105,7 +105,7 @@ describe('MatchAprUpdaterService', () => {
       expect(mockPrisma.contractMatch.update).not.toHaveBeenCalled();
     });
 
-    it('should handle null annualizedReturn (only set netEdge and timestamp)', async () => {
+    it('should null out lastAnnualizedReturn when annualizedReturn is null', async () => {
       const enrichedAt = new Date('2026-03-13T11:00:00Z');
       const event = new OpportunityIdentifiedEvent({
         matchId: 'match-2',
@@ -123,8 +123,31 @@ describe('MatchAprUpdaterService', () => {
         | undefined;
       const data = call?.['data'] as Record<string, unknown> | undefined;
       expect(data).toBeDefined();
-      expect(data).not.toHaveProperty('lastAnnualizedReturn');
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
       expect(data?.['lastNetEdge']).toBe('0.01');
+      expect(data?.['lastComputedAt']).toEqual(enrichedAt);
+    });
+
+    it('should null out lastNetEdge when netEdge is null', async () => {
+      const enrichedAt = new Date('2026-03-13T12:00:00Z');
+      const event = new OpportunityIdentifiedEvent({
+        matchId: 'match-ne',
+        netEdge: null,
+        annualizedReturn: 0.25,
+        enrichedAt,
+        pairId: 'test-pair',
+      });
+
+      emitter.emit(EVENT_NAMES.OPPORTUNITY_IDENTIFIED, event);
+      await tick();
+
+      const call = mockPrisma.contractMatch.update.mock.calls[0]?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      const data = call?.['data'] as Record<string, unknown> | undefined;
+      expect(data).toBeDefined();
+      expect(data?.['lastNetEdge']).toBeNull();
+      expect(data?.['lastAnnualizedReturn']).toBe('0.25');
       expect(data?.['lastComputedAt']).toEqual(enrichedAt);
     });
 
@@ -177,8 +200,7 @@ describe('MatchAprUpdaterService', () => {
       const data = call?.['data'] as Record<string, unknown>;
       expect(data['lastNetEdge']).toBe('0.015');
       expect(data['lastComputedAt']).toBeInstanceOf(Date);
-      // annualizedReturn is null — should NOT be set (preserving previous value)
-      expect(data).not.toHaveProperty('lastAnnualizedReturn');
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
     });
 
     it('should set annualizedReturn when provided (APR-threshold-filtered)', async () => {
@@ -244,12 +266,73 @@ describe('MatchAprUpdaterService', () => {
       );
     });
 
-    it('should preserve null annualizedReturn (not overwrite DB value)', async () => {
+    it('should null out APR on negative_edge filtered event', async () => {
       const event = new OpportunityFilteredEvent(
         'BTC > $100k',
-        new Decimal('0.015'),
+        new Decimal('-0.005'),
+        new Decimal('0.008'),
+        'negative_edge',
+        undefined,
+        { matchId: 'match-neg', annualizedReturn: null },
+      );
+
+      emitter.emit(EVENT_NAMES.OPPORTUNITY_FILTERED, event);
+      await tick();
+
+      const call = mockPrisma.contractMatch.update.mock.calls[0]?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      const data = call?.['data'] as Record<string, unknown>;
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
+      expect(data?.['lastNetEdge']).toBe('-0.005');
+    });
+
+    it('should null out APR on no_resolution_date filtered event', async () => {
+      const event = new OpportunityFilteredEvent(
+        'BTC > $100k',
+        new Decimal('0.02'),
         new Decimal('0.008'),
         'no_resolution_date',
+        undefined,
+        { matchId: 'match-nrd', annualizedReturn: null },
+      );
+
+      emitter.emit(EVENT_NAMES.OPPORTUNITY_FILTERED, event);
+      await tick();
+
+      const call = mockPrisma.contractMatch.update.mock.calls[0]?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      const data = call?.['data'] as Record<string, unknown>;
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
+    });
+
+    it('should null out APR on resolution_date_passed filtered event', async () => {
+      const event = new OpportunityFilteredEvent(
+        'BTC > $100k',
+        new Decimal('0.01'),
+        new Decimal('0.008'),
+        'resolution_date_passed',
+        undefined,
+        { matchId: 'match-rdp', annualizedReturn: null },
+      );
+
+      emitter.emit(EVENT_NAMES.OPPORTUNITY_FILTERED, event);
+      await tick();
+
+      const call = mockPrisma.contractMatch.update.mock.calls[0]?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      const data = call?.['data'] as Record<string, unknown>;
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
+    });
+
+    it('should null out lastAnnualizedReturn when event has no computed APR (below_threshold)', async () => {
+      const event = new OpportunityFilteredEvent(
+        'BTC > $100k',
+        new Decimal('0.006'),
+        new Decimal('0.008'),
+        'below_threshold',
         undefined,
         { matchId: 'match-5', annualizedReturn: null },
       );
@@ -262,7 +345,7 @@ describe('MatchAprUpdaterService', () => {
         | undefined;
       const data = call?.['data'] as Record<string, unknown>;
       expect(data).toBeDefined();
-      expect(data).not.toHaveProperty('lastAnnualizedReturn');
+      expect(data?.['lastAnnualizedReturn']).toBeNull();
     });
   });
 });

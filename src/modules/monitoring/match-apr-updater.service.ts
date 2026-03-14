@@ -7,6 +7,30 @@ import type {
   OpportunityFilteredEvent,
 } from '../../common/events/detection.events.js';
 
+/**
+ * Fields extracted from OpportunityIdentifiedEvent.opportunity (Record<string, unknown>).
+ * Local typed accessor — the event class uses a generic record for extensibility.
+ */
+interface MatchAprFields {
+  matchId?: string | null;
+  netEdge?: number | null;
+  annualizedReturn?: number | null;
+  enrichedAt?: Date | null;
+}
+
+/**
+ * Persists APR and net-edge data from detection events onto contract_matches rows.
+ *
+ * Both handlers write lastNetEdge and lastAnnualizedReturn unconditionally —
+ * either the freshly computed value or null. This prevents stale data from a
+ * prior detection cycle persisting alongside fresh values from the current cycle.
+ *
+ * OpportunityFilteredEvent emission sites (edge-calculator.service.ts):
+ *   - negative_edge / below_threshold (enrichDislocation ~L217): no annualizedReturn
+ *   - no_resolution_date (checkCapitalEfficiency ~L309): no annualizedReturn
+ *   - resolution_date_passed (checkCapitalEfficiency ~L346): no annualizedReturn
+ *   - annualized_return_below_threshold (checkCapitalEfficiency ~L385): passes computed value
+ */
 @Injectable()
 export class MatchAprUpdaterService {
   private readonly logger = new Logger(MatchAprUpdaterService.name);
@@ -17,28 +41,16 @@ export class MatchAprUpdaterService {
   async handleOpportunityIdentified(
     event: OpportunityIdentifiedEvent,
   ): Promise<void> {
-    const matchId = event.opportunity['matchId'] as string | null | undefined;
+    const { matchId, netEdge, annualizedReturn, enrichedAt } =
+      event.opportunity as MatchAprFields;
     if (!matchId) return;
 
-    const netEdge = event.opportunity['netEdge'] as number | null | undefined;
-    const annualizedReturn = event.opportunity['annualizedReturn'] as
-      | number
-      | null
-      | undefined;
-    const enrichedAt = event.opportunity['enrichedAt'] as
-      | Date
-      | null
-      | undefined;
-
-    const data: Record<string, unknown> = {};
-
-    if (netEdge != null) {
-      data['lastNetEdge'] = String(netEdge);
-    }
-    if (annualizedReturn != null) {
-      data['lastAnnualizedReturn'] = String(annualizedReturn);
-    }
-    data['lastComputedAt'] = enrichedAt ?? new Date();
+    const data: Record<string, unknown> = {
+      lastNetEdge: netEdge != null ? String(netEdge) : null,
+      lastAnnualizedReturn:
+        annualizedReturn != null ? String(annualizedReturn) : null,
+      lastComputedAt: enrichedAt ?? new Date(),
+    };
 
     try {
       await this.prisma.contractMatch.update({
@@ -62,18 +74,11 @@ export class MatchAprUpdaterService {
     if (!matchId) return;
 
     const data: Record<string, unknown> = {
+      lastNetEdge: String(event.netEdge),
+      lastAnnualizedReturn:
+        event.annualizedReturn != null ? String(event.annualizedReturn) : null,
       lastComputedAt: new Date(),
     };
-
-    // netEdge is a Decimal instance on OpportunityFilteredEvent
-    if (event.netEdge != null) {
-      data['lastNetEdge'] = event.netEdge.toString();
-    }
-
-    // Only set annualizedReturn if non-null — preserve previously-persisted value
-    if (event.annualizedReturn != null) {
-      data['lastAnnualizedReturn'] = String(event.annualizedReturn);
-    }
 
     try {
       await this.prisma.contractMatch.update({
