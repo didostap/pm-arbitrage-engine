@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { FinancialMath } from '../../common/utils/financial-math';
 import {
   SL_MULTIPLIER,
-  TP_RATIO,
+  computeTakeProfitThreshold,
 } from '../../common/constants/exit-thresholds';
 
 export interface ThresholdEvalInput {
@@ -161,15 +161,10 @@ export class ThresholdEvaluatorService {
       };
     }
 
-    // Priority 2: Take-profit — journey-based with floor (6.5.5j)
-    // max(0, entryCostBaseline + 0.80 * (scaledInitialEdge - entryCostBaseline))
-    const takeProfitThreshold = Decimal.max(
-      new Decimal(0),
-      entryCostBaseline.plus(
-        scaledInitialEdge
-          .minus(entryCostBaseline)
-          .mul(new Decimal(TP_RATIO.toString())),
-      ),
+    // Priority 2: Take-profit — journey-based with edge-relative fallback (6.5.5j, 9-18)
+    const takeProfitThreshold = computeTakeProfitThreshold(
+      entryCostBaseline,
+      scaledInitialEdge,
     );
     if (currentPnl.gte(takeProfitThreshold)) {
       return {

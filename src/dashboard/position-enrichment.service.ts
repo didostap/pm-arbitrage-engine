@@ -7,7 +7,7 @@ import { FinancialMath } from '../common/utils/financial-math.js';
 import { getResidualSize } from '../common/utils/residual-size.js';
 import {
   SL_MULTIPLIER,
-  TP_RATIO,
+  computeTakeProfitThreshold,
 } from '../common/constants/exit-thresholds.js';
 
 /** Position shape from findByStatusWithOrders() — includes pair + both orders */
@@ -261,14 +261,10 @@ export class PositionEnrichmentService {
     const stopLossThreshold = thresholdBaseline.plus(
       scaledInitialEdge.mul(SL_MULTIPLIER),
     );
-    // Journey-based TP with floor (6.5.5j)
-    const takeProfitThreshold = Decimal.max(
-      new Decimal(0),
-      thresholdBaseline.plus(
-        scaledInitialEdge
-          .minus(thresholdBaseline)
-          .mul(new Decimal(TP_RATIO.toString())),
-      ),
+    // Journey-based TP with edge-relative fallback (6.5.5j, 9-18)
+    const takeProfitThreshold = computeTakeProfitThreshold(
+      thresholdBaseline,
+      scaledInitialEdge,
     );
 
     const slDenom = thresholdBaseline.minus(stopLossThreshold);

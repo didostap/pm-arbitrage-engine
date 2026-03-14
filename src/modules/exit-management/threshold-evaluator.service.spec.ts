@@ -591,5 +591,72 @@ describe('ThresholdEvaluatorService', () => {
       const result = service.evaluate(input);
       expect(result.triggered).toBe(false);
     });
+
+    it('should use edge-relative TP fallback when baseline dominates edge (9-18)', () => {
+      // Real bug case: baseline=-$8.05, scaledInitialEdge=$1.13 (legSize=44.55)
+      // Journey: -8.05 + (1.13+8.05)*0.80 = -8.05+7.344 = -0.706 ≤ 0
+      // Fallback: max(0, 1.13*0.80) = $0.904
+      //
+      // OLD behavior: max(0, -0.706) = $0.00 → TP fires at breakeven
+      // NEW behavior: fallback $0.904 → TP fires at real profit
+      //
+      // Setup: legSize=44.55, initialEdge=0.02536 → scaledInitialEdge=1.12939..≈1.13
+      // entryCostBaseline ≈ -8.05 via spread+fees
+      // Use zero fees and big spread to produce baseline ≈ -8.05 cleanly:
+      //   kalshi buy@0.50, close=0.4097 → spread=0.0903*44.55=4.023
+      //   poly sell@0.50, close=0.5904 → spread=0.0904*44.55=4.027
+      //   baseline ≈ -(4.023+4.027) = -8.05
+      const input = makeInput({
+        initialEdge: new Decimal('0.02536'),
+        kalshiEntryPrice: new Decimal('0.50'),
+        polymarketEntryPrice: new Decimal('0.50'),
+        kalshiSize: new Decimal('44.55'),
+        polymarketSize: new Decimal('44.55'),
+        entryClosePriceKalshi: new Decimal('0.4097'),
+        entryClosePricePolymarket: new Decimal('0.5904'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        // currentPnl=$0.00 (breakeven) — should NOT trigger TP under new formula
+        // kalshi buy@0.50, sell@0.50 → 0, poly sell@0.50, buy@0.50 → 0
+        // exit fees with zero fees: 0
+        currentKalshiPrice: new Decimal('0.50'),
+        currentPolymarketPrice: new Decimal('0.50'),
+        kalshiFeeDecimal: new Decimal('0'),
+        polymarketFeeDecimal: new Decimal('0'),
+      });
+      const result = service.evaluate(input);
+      // currentPnl = 0 < 0.904 → does NOT trigger TP (old formula: 0 >= 0 → TRIGGERS)
+      expect(result.triggered).toBe(false);
+      expect(result.currentPnl.toFixed(2)).toBe('0.00');
+    });
+
+    it('should trigger TP via edge-relative fallback when P&L exceeds fallback threshold (9-18)', () => {
+      // Same setup but with prices that give P&L above fallback threshold (0.904)
+      const input = makeInput({
+        initialEdge: new Decimal('0.02536'),
+        kalshiEntryPrice: new Decimal('0.50'),
+        polymarketEntryPrice: new Decimal('0.50'),
+        kalshiSize: new Decimal('44.55'),
+        polymarketSize: new Decimal('44.55'),
+        entryClosePriceKalshi: new Decimal('0.4097'),
+        entryClosePricePolymarket: new Decimal('0.5904'),
+        entryKalshiFeeRate: new Decimal('0'),
+        entryPolymarketFeeRate: new Decimal('0'),
+        // Need currentPnl ≥ 0.904
+        // kalshi buy@0.50, sell@0.52 → (0.52-0.50)*44.55 = 0.891
+        // poly sell@0.50, buy@0.50 → 0
+        // zero exit fees → currentPnl = 0.891 + 0 = 0.891 < 0.904 — not quite
+        // kalshi sell@0.521 → (0.521-0.50)*44.55 = 0.93555
+        // currentPnl = 0.93555 ≥ 0.904 → trigger
+        currentKalshiPrice: new Decimal('0.521'),
+        currentPolymarketPrice: new Decimal('0.50'),
+        kalshiFeeDecimal: new Decimal('0'),
+        polymarketFeeDecimal: new Decimal('0'),
+      });
+      const result = service.evaluate(input);
+      expect(result.triggered).toBe(true);
+      expect(result.type).toBe('take_profit');
+      expect(result.currentPnl.gte(new Decimal('0.904'))).toBe(true);
+    });
   });
 });

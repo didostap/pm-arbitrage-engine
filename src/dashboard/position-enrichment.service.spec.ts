@@ -399,12 +399,12 @@ describe('PositionEnrichmentService', () => {
       expect(tp.toNumber()).toBeCloseTo(1.0, 4);
     });
 
-    it('should activate floor for extreme spread in enrichment (6.5.5j AC5)', async () => {
+    it('should use edge-relative fallback for extreme spread in enrichment (6.5.5j AC5, 9-18)', async () => {
       // entryCostBaseline = -20, scaledInitialEdge = 1.0
-      // Journey TP: max(0, -20 + 0.80*(1.0-(-20))) = max(0, -3.2) = 0 (floor)
+      // Journey TP: -20 + 0.80*(1.0-(-20)) = -20+16.8 = -3.2 ≤ 0 → fallback
+      // Fallback (9-18): max(0, 1.0 * 0.80) = 0.80
       // currentPnl with slightly negative prices: -1.0
-      // TP proximity: (-1.0-(-20)) / (0-(-20)) = 19/20 = 0.95
-      // (position is actually 95% of the way from baseline to threshold=0)
+      // TP proximity: (-1.0-(-20)) / (0.80-(-20)) = 19/20.80 ≈ 0.9135
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
         (platform: string): Promise<Decimal | null> => {
           if (platform === 'kalshi')
@@ -436,15 +436,15 @@ describe('PositionEnrichmentService', () => {
       const result = await service.enrich(position as never);
 
       expect(result.status).toBe('enriched');
-      // TP threshold = 0 (floor active)
+      // TP threshold = 0.80 (fallback: max(0, 1.0 * 0.80))
       // currentPnl = (0.505-0.50)*100 + (0.50-0.495)*100 - fees
       //            = 0.5 + 0.5 - (0.505*100*0.02 + 0.495*100*0.02) = 1.0 - 2.0 = -1.0
-      // TP proximity: (-1.0-(-20)) / (0-(-20)) = 19/20 = 0.95
+      // TP proximity: (-1.0-(-20)) / (0.80-(-20)) = 19/20.80 ≈ 0.9135
       const tp = new Decimal(result.data.exitProximity!.takeProfit);
-      expect(tp.toNumber()).toBeCloseTo(0.95, 3);
+      expect(tp.toNumber()).toBeCloseTo(0.9135, 3);
     });
 
-    it('offsets exit proximity with entry cost baseline (6.5.5i)', async () => {
+    it('offsets exit proximity with entry cost baseline (6.5.5i, 9-18)', async () => {
       // Kalshi buy@0.55, entry close bid=0.53 → spread = 0.55-0.53 = 0.02
       // Poly sell@0.45, entry close ask=0.47 → spread = 0.47-0.45 = 0.02
       // spreadCost = (0.02 * 100) + (0.02 * 100) = 4.0
@@ -452,11 +452,11 @@ describe('PositionEnrichmentService', () => {
       // entryCostBaseline = -(4.0 + 2.0) = -6.0
       // scaledInitialEdge = 0.012 * 100 = 1.2
       // SL threshold = -6.0 + 1.2*-2 = -8.4
-      // TP threshold (6.5.5j journey): max(0, -6.0 + 0.80*(1.2-(-6.0))) = max(0, -6.0+5.76) = max(0, -0.24) = 0.00 (floor)
+      // TP (9-18 fallback): journeyTp = -6.0 + 0.80*(1.2+6.0) = -0.24 ≤ 0 → fallback max(0, 1.2*0.80) = 0.96
       //
       // currentPnl = -5.96 (see computation below)
       // Baseline-relative SL: (-6.0 - (-5.96)) / (-6.0 - (-8.4)) = -0.04/2.4 → clamp → 0
-      // Baseline-relative TP: (-5.96 - (-6.0)) / (0.00 - (-6.0)) = 0.04/6.0 ≈ 0.00667
+      // Baseline-relative TP: (-5.96 - (-6.0)) / (0.96 - (-6.0)) = 0.04/6.96 ≈ 0.00575
       vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
         (platform: string): Promise<Decimal | null> => {
           // kalshi buy@0.55 sell@0.52 → (0.52-0.55)*100 = -3.0
@@ -483,7 +483,7 @@ describe('PositionEnrichmentService', () => {
       const sl = new Decimal(result.data.exitProximity!.stopLoss);
       const tp = new Decimal(result.data.exitProximity!.takeProfit);
       expect(sl.toNumber()).toBeCloseTo(0.0, 2);
-      expect(tp.toNumber()).toBeCloseTo(0.00667, 3);
+      expect(tp.toNumber()).toBeCloseTo(0.00575, 3);
     });
 
     it('uses baseline=0 when entry close prices are null (legacy fallback)', async () => {
@@ -955,6 +955,62 @@ describe('PositionEnrichmentService', () => {
       expect(sl.toNumber()).toBeCloseTo(-4.4, 6);
       // TP = 0.56
       expect(tp.toNumber()).toBeCloseTo(0.56, 6);
+    });
+
+    it('should produce positive TP and valid proximity when baseline dominates edge (9-18)', async () => {
+      // Real bug case: baseline ≈ -8.05, scaledInitialEdge ≈ 1.13
+      // Journey: -8.05 + (1.13+8.05)*0.80 = -0.706 ≤ 0
+      // Fallback: max(0, 1.13*0.80) = 0.904
+      //
+      // Setup: legSize=44.55, initialEdge=0.02536
+      // Spread-only baseline (zero entry fee rates):
+      //   kalshi buy@0.50, close=0.4097 → spread=0.0903*44.55≈4.023
+      //   poly sell@0.50, close=0.5904 → spread=0.0904*44.55≈4.027
+      //   baseline ≈ -8.05
+      vi.mocked(priceFeed.getCurrentClosePrice).mockImplementation(
+        (platform: string): Promise<Decimal | null> => {
+          // Small positive P&L: kalshi 0.505, poly 0.495
+          if (platform === 'kalshi')
+            return Promise.resolve(new Decimal('0.505'));
+          return Promise.resolve(new Decimal('0.495'));
+        },
+      );
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0'));
+
+      const position = createMockPosition({
+        expectedEdge: { toString: () => '0.02536' } as unknown,
+        kalshiOrder: {
+          ...createMockPosition().kalshiOrder,
+          fillPrice: { toString: () => '0.50' },
+          fillSize: { toString: () => '44.55' },
+          side: 'buy',
+        },
+        polymarketOrder: {
+          ...createMockPosition().polymarketOrder,
+          fillPrice: { toString: () => '0.50' },
+          fillSize: { toString: () => '44.55' },
+          side: 'sell',
+        },
+        kalshiSide: 'buy',
+        polymarketSide: 'sell',
+        entryClosePriceKalshi: { toString: () => '0.4097' },
+        entryClosePricePolymarket: { toString: () => '0.5904' },
+        entryKalshiFeeRate: { toString: () => '0' },
+        entryPolymarketFeeRate: { toString: () => '0' },
+      });
+      const result = await service.enrich(position as never);
+
+      expect(result.status).toBe('enriched');
+
+      // projectedTpPnl should be positive (not $0.00)
+      const projectedTp = new Decimal(result.data.projectedTpPnl!);
+      expect(projectedTp.gt(0)).toBe(true);
+
+      // TP proximity must be in [0, 1] with no NaN
+      const tpProximity = parseFloat(result.data.exitProximity!.takeProfit);
+      expect(tpProximity).toBeGreaterThanOrEqual(0);
+      expect(tpProximity).toBeLessThanOrEqual(1);
+      expect(Number.isNaN(tpProximity)).toBe(false);
     });
   });
 });
