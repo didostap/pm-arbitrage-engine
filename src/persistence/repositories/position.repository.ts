@@ -110,6 +110,7 @@ export class PositionRepository {
     limit: number = 50,
     sortBy?: string,
     order?: 'asc' | 'desc',
+    pairId?: string,
   ) {
     const where: Record<string, unknown> = {};
 
@@ -119,6 +120,10 @@ export class PositionRepository {
 
     if (isPaper !== undefined) {
       where['isPaper'] = isPaper;
+    }
+
+    if (pairId) {
+      where['pairId'] = pairId;
     }
 
     const skip = (page - 1) * limit;

@@ -210,6 +210,13 @@ export class MatchSummaryDto {
     description: 'Timestamp of last APR computation (ISO 8601)',
   })
   lastComputedAt!: string | null;
+  @ApiProperty({ description: 'Total positions ever opened for this match' })
+  positionCount!: number;
+  @ApiProperty({
+    description:
+      'Positions currently in OPEN, SINGLE_LEG_EXPOSED, or EXIT_PARTIAL status',
+  })
+  activePositionCount!: number;
   @ApiProperty() createdAt!: string;
   @ApiProperty() updatedAt!: string;
 }

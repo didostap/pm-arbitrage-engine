@@ -53,6 +53,10 @@ describe('MatchApprovalService', () => {
       updateMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
+    openPosition: {
+      count: ReturnType<typeof vi.fn>;
+      groupBy: ReturnType<typeof vi.fn>;
+    };
     correlationCluster: {
       findMany: ReturnType<typeof vi.fn>;
     };
@@ -67,6 +71,10 @@ describe('MatchApprovalService', () => {
         findUnique: vi.fn(),
         updateMany: vi.fn(),
         update: vi.fn(),
+      },
+      openPosition: {
+        count: vi.fn().mockResolvedValue(0),
+        groupBy: vi.fn().mockResolvedValue([]),
       },
       correlationCluster: {
         findMany: vi.fn(),
@@ -454,6 +462,51 @@ describe('MatchApprovalService', () => {
         }),
       );
     });
+
+    it('should return batched position counts for all matches in page', async () => {
+      const matches = [
+        buildMockMatch({ matchId: 'match-1' }),
+        buildMockMatch({ matchId: 'match-2' }),
+      ];
+      prisma.contractMatch.findMany.mockResolvedValue(matches);
+      prisma.contractMatch.count.mockResolvedValue(2);
+      prisma.openPosition.groupBy
+        .mockResolvedValueOnce([
+          { pairId: 'match-1', _count: 5 },
+          { pairId: 'match-2', _count: 3 },
+        ])
+        .mockResolvedValueOnce([{ pairId: 'match-1', _count: 2 }]);
+
+      const result = await service.listMatches('all', 1, 20);
+
+      expect(result.data[0]!.positionCount).toBe(5);
+      expect(result.data[0]!.activePositionCount).toBe(2);
+      expect(result.data[1]!.positionCount).toBe(3);
+      expect(result.data[1]!.activePositionCount).toBe(0);
+    });
+
+    it('should return 0 counts when no matches have positions', async () => {
+      const matches = [buildMockMatch()];
+      prisma.contractMatch.findMany.mockResolvedValue(matches);
+      prisma.contractMatch.count.mockResolvedValue(1);
+      prisma.openPosition.groupBy
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.listMatches('all', 1, 20);
+
+      expect(result.data[0]!.positionCount).toBe(0);
+      expect(result.data[0]!.activePositionCount).toBe(0);
+    });
+
+    it('should skip groupBy queries when no matches on page', async () => {
+      prisma.contractMatch.findMany.mockResolvedValue([]);
+      prisma.contractMatch.count.mockResolvedValue(0);
+
+      await service.listMatches('all', 1, 20);
+
+      expect(prisma.openPosition.groupBy).not.toHaveBeenCalled();
+    });
   });
 
   describe('getMatchById', () => {
@@ -474,6 +527,46 @@ describe('MatchApprovalService', () => {
       );
       await expect(service.getMatchById('nonexistent')).rejects.toMatchObject({
         code: SYSTEM_HEALTH_ERROR_CODES.NOT_FOUND,
+      });
+    });
+
+    it('should return positionCount and activePositionCount', async () => {
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      prisma.openPosition.count
+        .mockResolvedValueOnce(5) // total
+        .mockResolvedValueOnce(2); // active
+
+      const result = await service.getMatchById('match-1');
+
+      expect(result.positionCount).toBe(5);
+      expect(result.activePositionCount).toBe(2);
+    });
+
+    it('should return 0 counts when match has no positions', async () => {
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      prisma.openPosition.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const result = await service.getMatchById('match-1');
+
+      expect(result.positionCount).toBe(0);
+      expect(result.activePositionCount).toBe(0);
+    });
+
+    it('should query active count with correct statuses (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL)', async () => {
+      prisma.contractMatch.findUnique.mockResolvedValue(buildMockMatch());
+      prisma.openPosition.count
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(1);
+
+      await service.getMatchById('match-1');
+
+      expect(prisma.openPosition.count).toHaveBeenCalledWith({
+        where: {
+          pairId: 'match-1',
+          status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
+        },
       });
     });
   });

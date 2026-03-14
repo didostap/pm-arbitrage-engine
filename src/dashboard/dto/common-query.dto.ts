@@ -1,5 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsEnum, IsInt, Min, Max, IsString } from 'class-validator';
+import {
+  IsOptional,
+  IsEnum,
+  IsInt,
+  Min,
+  Max,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum SortOrder {
@@ -66,4 +74,11 @@ export class PositionsQueryDto {
   @IsOptional()
   @IsEnum(SortOrder)
   order?: SortOrder;
+
+  @ApiPropertyOptional({
+    description: 'Filter positions by contract match ID (UUID)',
+  })
+  @IsOptional()
+  @IsUUID()
+  matchId?: string;
 }

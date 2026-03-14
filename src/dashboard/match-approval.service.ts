@@ -14,12 +14,23 @@ import type {
   MatchSortField,
 } from './dto/match-approval.dto';
 import type { SortOrder } from './dto/common-query.dto';
-import type { ContractMatch, CorrelationCluster } from '@prisma/client';
+import type {
+  ContractMatch,
+  CorrelationCluster,
+  PositionStatus,
+} from '@prisma/client';
 import { asMatchId, asContractId } from '../common/types/branded.type';
 
 type ContractMatchWithCluster = ContractMatch & {
   cluster: CorrelationCluster | null;
 };
+
+/** Statuses considered "active" for position count display (excludes CLOSED and RECONCILIATION_REQUIRED). */
+const ACTIVE_POSITION_STATUSES: PositionStatus[] = [
+  'OPEN',
+  'SINGLE_LEG_EXPOSED',
+  'EXIT_PARTIAL',
+];
 
 @Injectable()
 export class MatchApprovalService {
@@ -66,8 +77,41 @@ export class MatchApprovalService {
       this.prisma.contractMatch.count({ where }),
     ]);
 
+    // Batch position count queries to avoid N+1
+    const matchIds = matches.map((m) => m.matchId);
+
+    const [totalCounts, activeCounts] =
+      matchIds.length > 0
+        ? await Promise.all([
+            this.prisma.openPosition.groupBy({
+              by: ['pairId'],
+              where: { pairId: { in: matchIds } },
+              _count: true,
+            }),
+            this.prisma.openPosition.groupBy({
+              by: ['pairId'],
+              where: {
+                pairId: { in: matchIds },
+                status: { in: ACTIVE_POSITION_STATUSES },
+              },
+              _count: true,
+            }),
+          ])
+        : [[], []];
+
+    const totalCountMap = new Map(totalCounts.map((r) => [r.pairId, r._count]));
+    const activeCountMap = new Map(
+      activeCounts.map((r) => [r.pairId, r._count]),
+    );
+
     return {
-      data: matches.map((m) => this.toSummaryDto(m)),
+      data: matches.map((m) =>
+        this.toSummaryDto(
+          m,
+          totalCountMap.get(m.matchId) ?? 0,
+          activeCountMap.get(m.matchId) ?? 0,
+        ),
+      ),
       count,
       page,
       limit,
@@ -89,7 +133,14 @@ export class MatchApprovalService {
       );
     }
 
-    return this.toSummaryDto(match);
+    const [positionCount, activePositionCount] = await Promise.all([
+      this.prisma.openPosition.count({ where: { pairId: matchId } }),
+      this.prisma.openPosition.count({
+        where: { pairId: matchId, status: { in: ACTIVE_POSITION_STATUSES } },
+      }),
+    ]);
+
+    return this.toSummaryDto(match, positionCount, activePositionCount);
   }
 
   async approveMatch(
@@ -156,6 +207,8 @@ export class MatchApprovalService {
       data: { matchId, rationale },
     });
 
+    // Position counts omitted (defaults to 0) — mutation responses are not used
+    // for count display; the UI invalidates and refetches match data after mutations.
     return this.toSummaryDto(updated);
   }
 
@@ -210,6 +263,7 @@ export class MatchApprovalService {
       data: { matchId, rationale },
     });
 
+    // Position counts omitted (defaults to 0) — see approveMatch comment.
     return this.toSummaryDto(updated);
   }
 
@@ -246,7 +300,11 @@ export class MatchApprovalService {
     }
   }
 
-  private toSummaryDto(match: ContractMatchWithCluster): MatchSummaryDto {
+  private toSummaryDto(
+    match: ContractMatchWithCluster,
+    positionCount: number = 0,
+    activePositionCount: number = 0,
+  ): MatchSummaryDto {
     return {
       matchId: match.matchId,
       polymarketContractId: match.polymarketContractId,
@@ -281,6 +339,8 @@ export class MatchApprovalService {
             slug: match.cluster.slug,
           }
         : null,
+      positionCount,
+      activePositionCount,
       createdAt: match.createdAt.toISOString(),
       updatedAt: match.updatedAt.toISOString(),
     };

@@ -198,6 +198,7 @@ export class DashboardService {
     status?: string,
     sortBy?: string,
     order?: 'asc' | 'desc',
+    matchId?: string,
   ): Promise<{ data: PositionSummaryDto[]; count: number }> {
     try {
       const clampedLimit = Math.min(Math.max(1, limit), 200);
@@ -235,6 +236,7 @@ export class DashboardService {
           clampedLimit,
           sortBy,
           order,
+          matchId,
         );
 
       // Identify positions needing exit data (closed for P&L, EXIT_PARTIAL for residual sizes)
@@ -357,6 +359,7 @@ export class DashboardService {
 
             return {
               id: pos.positionId,
+              pairId: pos.pairId,
               pairName:
                 pos.pair.kalshiDescription ??
                 pos.pair.polymarketDescription ??
@@ -425,6 +428,7 @@ export class DashboardService {
 
       return {
         id: pos.positionId,
+        pairId: pos.pairId,
         pairName:
           pos.pair.kalshiDescription ??
           pos.pair.polymarketDescription ??
@@ -609,6 +613,7 @@ export class DashboardService {
 
       return {
         id: pos.positionId,
+        pairId: pos.pairId,
         pairName:
           pos.pair.kalshiDescription ??
           pos.pair.polymarketDescription ??

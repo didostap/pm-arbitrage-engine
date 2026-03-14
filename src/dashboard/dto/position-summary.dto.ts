@@ -64,6 +64,9 @@ export class PositionSummaryDto {
   @ApiProperty({ description: 'Position ID' })
   id!: string;
 
+  @ApiProperty({ description: 'Contract match pair ID' })
+  pairId!: string;
+
   @ApiProperty({ description: 'Contract pair name', example: 'BTC-100K-YES' })
   pairName!: string;
 

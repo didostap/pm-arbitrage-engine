@@ -76,6 +76,7 @@ describe('DashboardController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
       expect(result.data).toEqual([]);
       expect(result.count).toBe(0);
@@ -99,6 +100,7 @@ describe('DashboardController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -115,6 +117,7 @@ describe('DashboardController', () => {
         undefined,
         1,
         50,
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -135,6 +138,7 @@ describe('DashboardController', () => {
         1,
         50,
         'CLOSED',
+        undefined,
         undefined,
         undefined,
       );
@@ -159,6 +163,7 @@ describe('DashboardController', () => {
         undefined,
         'expectedEdge',
         'asc',
+        undefined,
       );
     });
 
@@ -178,6 +183,27 @@ describe('DashboardController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
+      );
+    });
+
+    it('should pass matchId to service when provided', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
+
+      await controller.getPositions({ matchId: 'match-uuid-123' });
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        undefined,
+        undefined,
+        undefined,
+        'match-uuid-123',
       );
     });
   });

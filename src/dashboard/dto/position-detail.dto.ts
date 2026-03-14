@@ -114,6 +114,9 @@ export class PositionFullDetailDto {
   @ApiProperty({ description: 'Position ID' })
   id!: string;
 
+  @ApiProperty({ description: 'Contract match pair ID' })
+  pairId!: string;
+
   @ApiProperty({ description: 'Contract pair name' })
   pairName!: string;
 

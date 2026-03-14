@@ -71,6 +71,7 @@ export class DashboardController {
       query.status,
       query.sortBy,
       query.order,
+      query.matchId,
     );
     return {
       data: result.data,

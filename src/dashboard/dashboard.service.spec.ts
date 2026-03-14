@@ -417,6 +417,7 @@ describe('DashboardService', () => {
         50,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -433,6 +434,7 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
         undefined,
         undefined,
       );
@@ -453,6 +455,7 @@ describe('DashboardService', () => {
         10,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -469,6 +472,7 @@ describe('DashboardService', () => {
         undefined,
         1,
         200,
+        undefined,
         undefined,
         undefined,
       );
@@ -489,6 +493,7 @@ describe('DashboardService', () => {
         50,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -507,6 +512,7 @@ describe('DashboardService', () => {
         50,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -523,6 +529,7 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
         undefined,
         undefined,
       );
@@ -550,6 +557,7 @@ describe('DashboardService', () => {
         50,
         'expectedEdge',
         'asc',
+        undefined,
       );
     });
 
@@ -717,6 +725,119 @@ describe('DashboardService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.data[0]!.currentEdge).toBeNull();
       expect(result.data[0]!.unrealizedPnl).toBeNull();
+    });
+
+    it('should pass matchId through to repository as pairId', async () => {
+      (
+        positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ data: [], count: 0 });
+
+      await service.getPositions(
+        undefined,
+        1,
+        50,
+        undefined,
+        undefined,
+        undefined,
+        'match-uuid-1',
+      );
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(positionRepository.findManyWithFilters).toHaveBeenCalledWith(
+        ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+        undefined,
+        1,
+        50,
+        undefined,
+        undefined,
+        'match-uuid-1',
+      );
+    });
+
+    it('should combine matchId with status and mode filters', async () => {
+      (
+        positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ data: [], count: 0 });
+
+      await service.getPositions(
+        'paper',
+        1,
+        50,
+        'OPEN,EXIT_PARTIAL',
+        undefined,
+        undefined,
+        'match-uuid-1',
+      );
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(positionRepository.findManyWithFilters).toHaveBeenCalledWith(
+        ['OPEN', 'EXIT_PARTIAL'],
+        true,
+        1,
+        50,
+        undefined,
+        undefined,
+        'match-uuid-1',
+      );
+    });
+
+    it('should return empty results when matchId has no matching positions', async () => {
+      (
+        positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ data: [], count: 0 });
+
+      const result = await service.getPositions(
+        undefined,
+        1,
+        50,
+        undefined,
+        undefined,
+        undefined,
+        'no-match-uuid',
+      );
+
+      expect(result.data).toHaveLength(0);
+      expect(result.count).toBe(0);
+    });
+
+    it('should return pairId in position summary DTOs', async () => {
+      const mockPosition = {
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'OPEN',
+        expectedEdge: new Decimal('0.012'),
+        entryPrices: { kalshi: '0.55', polymarket: '0.45' },
+        sizes: { kalshi: '100', polymarket: '100' },
+        isPaper: false,
+        pair: {
+          kalshiContractId: 'k-contract',
+          polymarketContractId: 'p-contract',
+          kalshiDescription: 'Kalshi Yes',
+          polymarketDescription: 'Poly Yes',
+          resolutionDate: new Date('2026-04-01'),
+        },
+        kalshiOrder: {
+          fillPrice: new Decimal('0.55'),
+          fillSize: new Decimal('100'),
+          side: 'buy',
+        },
+        polymarketOrder: {
+          fillPrice: new Decimal('0.45'),
+          fillSize: new Decimal('100'),
+          side: 'sell',
+        },
+      };
+
+      (
+        positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ data: [mockPosition], count: 1 });
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+
+      const result = await service.getPositions();
+
+      expect(result.data[0]!.pairId).toBe('pair-1');
     });
   });
 
