@@ -60,19 +60,21 @@ describe('DashboardController', () => {
   });
 
   describe('GET /dashboard/positions', () => {
-    it('should return positions with default mode=all and pagination', async () => {
+    it('should return positions with defaults when no query params provided', async () => {
       (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
         data: [],
         count: 0,
       });
 
-      const result = await controller.getPositions();
+      const result = await controller.getPositions({});
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.getPositions).toHaveBeenCalledWith(
         undefined,
         1,
         50,
+        undefined,
+        undefined,
         undefined,
       );
       expect(result.data).toEqual([]);
@@ -87,13 +89,15 @@ describe('DashboardController', () => {
         count: 0,
       });
 
-      await controller.getPositions('paper', '2', '25');
+      await controller.getPositions({ mode: 'paper', page: 2, limit: 25 });
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.getPositions).toHaveBeenCalledWith(
         'paper',
         2,
         25,
+        undefined,
+        undefined,
         undefined,
       );
     });
@@ -104,13 +108,15 @@ describe('DashboardController', () => {
         count: 0,
       });
 
-      await controller.getPositions('all');
+      await controller.getPositions({ mode: 'all' });
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.getPositions).toHaveBeenCalledWith(
         undefined,
         1,
         50,
+        undefined,
+        undefined,
         undefined,
       );
     });
@@ -121,7 +127,7 @@ describe('DashboardController', () => {
         count: 0,
       });
 
-      await controller.getPositions(undefined, undefined, undefined, 'CLOSED');
+      await controller.getPositions({ status: 'CLOSED' });
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(service.getPositions).toHaveBeenCalledWith(
@@ -129,6 +135,49 @@ describe('DashboardController', () => {
         1,
         50,
         'CLOSED',
+        undefined,
+        undefined,
+      );
+    });
+
+    it('should pass sortBy and order to service', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
+
+      await controller.getPositions({
+        sortBy: 'expectedEdge' as never,
+        order: 'asc' as never,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        undefined,
+        'expectedEdge',
+        'asc',
+      );
+    });
+
+    it('should not pass sortBy/order when omitted', async () => {
+      (service.getPositions as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [],
+        count: 0,
+      });
+
+      await controller.getPositions({});
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.getPositions).toHaveBeenCalledWith(
+        undefined,
+        1,
+        50,
+        undefined,
+        undefined,
+        undefined,
       );
     });
   });

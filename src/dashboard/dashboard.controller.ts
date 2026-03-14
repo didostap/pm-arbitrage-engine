@@ -1,9 +1,16 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
-  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -20,6 +27,7 @@ import {
   PositionFullDetailResponseDto,
   PositionListResponseDto,
   AlertListResponseDto,
+  PositionsQueryDto,
 } from './dto';
 
 @Controller('dashboard')
@@ -49,48 +57,20 @@ export class DashboardController {
 
   @Get('positions')
   @ApiOperation({ summary: 'Open positions with edge and P&L details' })
-  @ApiQuery({
-    name: 'mode',
-    required: false,
-    enum: ['live', 'paper', 'all'],
-    description: 'Filter by trading mode (default: all)',
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Page number (default: 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Items per page (default: 50, max: 200)',
-  })
-  @ApiQuery({
-    name: 'status',
-    required: false,
-    type: String,
-    description:
-      'Comma-separated status filter (e.g. "OPEN,EXIT_PARTIAL"). Omit for default open statuses. Empty string for all statuses.',
-  })
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async getPositions(
-    @Query('mode') mode?: 'live' | 'paper' | 'all',
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('status') status?: string,
+    @Query() query: PositionsQueryDto,
   ): Promise<PositionListResponseDto> {
-    const filterMode = mode === 'all' ? undefined : mode;
-    const pageNum = Math.max(1, page ? parseInt(page, 10) : 1);
-    const limitNum = Math.min(
-      Math.max(1, limit ? parseInt(limit, 10) : 50),
-      200,
-    );
+    const filterMode = query.mode === 'all' ? undefined : query.mode;
+    const pageNum = query.page ?? 1;
+    const limitNum = query.limit ?? 50;
     const result = await this.dashboardService.getPositions(
       filterMode,
       pageNum,
       limitNum,
-      status,
+      query.status,
+      query.sortBy,
+      query.order,
     );
     return {
       data: result.data,

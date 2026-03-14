@@ -12,8 +12,8 @@ import type {
   ClusterSummaryDto,
   MatchSummaryDto,
   MatchSortField,
-  SortOrder,
 } from './dto/match-approval.dto';
+import type { SortOrder } from './dto/common-query.dto';
 import type { ContractMatch, CorrelationCluster } from '@prisma/client';
 import { asMatchId, asContractId } from '../common/types/branded.type';
 

@@ -108,6 +108,8 @@ export class PositionRepository {
     isPaper?: boolean,
     page: number = 1,
     limit: number = 50,
+    sortBy?: string,
+    order?: 'asc' | 'desc',
   ) {
     const where: Record<string, unknown> = {};
 
@@ -121,11 +123,15 @@ export class PositionRepository {
 
     const skip = (page - 1) * limit;
 
+    const orderBy = sortBy
+      ? { [sortBy]: order ?? 'desc' }
+      : { updatedAt: 'desc' as const };
+
     const [data, count] = await Promise.all([
       this.prisma.openPosition.findMany({
         where,
         include: { pair: true, kalshiOrder: true, polymarketOrder: true },
-        orderBy: { updatedAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

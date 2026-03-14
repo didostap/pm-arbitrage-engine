@@ -196,6 +196,8 @@ export class DashboardService {
     page: number = 1,
     limit: number = 50,
     status?: string,
+    sortBy?: string,
+    order?: 'asc' | 'desc',
   ): Promise<{ data: PositionSummaryDto[]; count: number }> {
     try {
       const clampedLimit = Math.min(Math.max(1, limit), 200);
@@ -231,6 +233,8 @@ export class DashboardService {
           isPaper,
           clampedPage,
           clampedLimit,
+          sortBy,
+          order,
         );
 
       // Identify positions needing exit data (closed for P&L, EXIT_PARTIAL for residual sizes)

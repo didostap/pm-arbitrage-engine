@@ -4,6 +4,7 @@ export * from './position-summary.dto';
 export * from './alert-summary.dto';
 export * from './response-wrappers.dto';
 export * from './ws-events.dto';
+export * from './common-query.dto';
 export * from './match-approval.dto';
 export * from './performance.dto';
 export * from './position-detail.dto';

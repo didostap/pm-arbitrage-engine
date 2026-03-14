@@ -11,6 +11,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { SortOrder } from './common-query.dto';
 
 // ─── Request DTOs ────────────────────────────────────────────────────────────
 
@@ -60,11 +61,6 @@ export enum MatchSortField {
   LAST_ANNUALIZED_RETURN = 'lastAnnualizedReturn',
   LAST_NET_EDGE = 'lastNetEdge',
   LAST_COMPUTED_AT = 'lastComputedAt',
-}
-
-export enum SortOrder {
-  ASC = 'asc',
-  DESC = 'desc',
 }
 
 export class MatchListQueryDto {

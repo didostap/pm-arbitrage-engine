@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../common/prisma.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
@@ -55,6 +56,13 @@ function createMockEnrichmentService() {
   } as unknown as PositionEnrichmentService;
 }
 
+function createMockEventEmitter() {
+  return {
+    emit: vi.fn(),
+    emitAsync: vi.fn(),
+  } as unknown as EventEmitter2;
+}
+
 const mockEnrichedResult: EnrichmentResult = {
   status: 'enriched',
   data: {
@@ -73,17 +81,20 @@ describe('DashboardService', () => {
   let configService: ReturnType<typeof createMockConfigService>;
   let enrichmentService: ReturnType<typeof createMockEnrichmentService>;
   let positionRepository: ReturnType<typeof createMockPositionRepository>;
+  let eventEmitter: ReturnType<typeof createMockEventEmitter>;
 
   beforeEach(() => {
     prisma = createMockPrisma();
     configService = createMockConfigService();
     enrichmentService = createMockEnrichmentService();
     positionRepository = createMockPositionRepository();
+    eventEmitter = createMockEventEmitter();
     service = new DashboardService(
       prisma,
       configService,
       enrichmentService,
       positionRepository,
+      eventEmitter,
     );
 
     // Default mock for riskState (overview balance computation)
@@ -404,6 +415,8 @@ describe('DashboardService', () => {
         true,
         1,
         50,
+        undefined,
+        undefined,
       );
     });
 
@@ -420,6 +433,8 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
+        undefined,
       );
     });
 
@@ -436,6 +451,8 @@ describe('DashboardService', () => {
         undefined,
         3,
         10,
+        undefined,
+        undefined,
       );
     });
 
@@ -452,6 +469,8 @@ describe('DashboardService', () => {
         undefined,
         1,
         200,
+        undefined,
+        undefined,
       );
     });
 
@@ -468,6 +487,8 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
+        undefined,
       );
     });
 
@@ -484,6 +505,8 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
+        undefined,
       );
     });
 
@@ -500,6 +523,33 @@ describe('DashboardService', () => {
         undefined,
         1,
         50,
+        undefined,
+        undefined,
+      );
+    });
+
+    it('should pass sortBy and order through to repository', async () => {
+      (
+        positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ data: [], count: 0 });
+
+      await service.getPositions(
+        undefined,
+        1,
+        50,
+        undefined,
+        'expectedEdge',
+        'asc',
+      );
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(positionRepository.findManyWithFilters).toHaveBeenCalledWith(
+        ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+        undefined,
+        1,
+        50,
+        'expectedEdge',
+        'asc',
       );
     });
 

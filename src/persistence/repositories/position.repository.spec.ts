@@ -298,5 +298,91 @@ describe('PositionRepository', () => {
         }),
       );
     });
+
+    it('should sort by specified field ascending', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(
+        undefined,
+        undefined,
+        1,
+        50,
+        'expectedEdge',
+        'asc',
+      );
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { expectedEdge: 'asc' },
+        }),
+      );
+    });
+
+    it('should sort by specified field descending', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(
+        undefined,
+        undefined,
+        1,
+        50,
+        'status',
+        'desc',
+      );
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { status: 'desc' },
+        }),
+      );
+    });
+
+    it('should default to desc when sortBy provided without order', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(undefined, undefined, 1, 50, 'createdAt');
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
+    });
+
+    it('should default to updatedAt desc when no sort params provided', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(undefined, undefined, 1, 50);
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { updatedAt: 'desc' },
+        }),
+      );
+    });
+
+    it('should sort by isPaper field', async () => {
+      mockPrisma.openPosition.findMany.mockResolvedValue([]);
+      mockPrisma.openPosition.count.mockResolvedValue(0);
+
+      await repo.findManyWithFilters(
+        undefined,
+        undefined,
+        1,
+        50,
+        'isPaper',
+        'asc',
+      );
+
+      expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { isPaper: 'asc' },
+        }),
+      );
+    });
   });
 });

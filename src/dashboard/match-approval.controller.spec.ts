@@ -9,9 +9,9 @@ import {
 import {
   MatchStatusFilter,
   MatchSortField,
-  SortOrder,
   type MatchSummaryDto,
 } from './dto/match-approval.dto';
+import { SortOrder } from './dto/common-query.dto';
 
 function buildMatchDto(
   overrides: Partial<MatchSummaryDto> = {},
