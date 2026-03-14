@@ -7,7 +7,7 @@ export enum PlatformId {
 
 export interface PlatformHealth {
   platformId: PlatformId;
-  status: 'healthy' | 'degraded' | 'disconnected';
+  status: 'healthy' | 'degraded' | 'disconnected' | 'initializing';
   lastHeartbeat: Date | null;
   latencyMs: number | null;
   metadata?: Record<string, unknown>;

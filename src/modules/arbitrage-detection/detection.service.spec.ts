@@ -44,6 +44,7 @@ describe('DetectionService', () => {
   let degradationService: { isDegraded: ReturnType<typeof vi.fn> };
   let healthService: {
     getOrderbookStaleness: ReturnType<typeof vi.fn>;
+    getContractStaleness: ReturnType<typeof vi.fn>;
   };
   let kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
   let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
@@ -53,6 +54,7 @@ describe('DetectionService', () => {
     degradationService = { isDegraded: vi.fn().mockReturnValue(false) };
     healthService = {
       getOrderbookStaleness: vi.fn().mockReturnValue({ stale: false }),
+      getContractStaleness: vi.fn().mockReturnValue({ stale: false }),
     };
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
     polymarketConnector = createMockPlatformConnector(PlatformId.POLYMARKET);
@@ -587,13 +589,14 @@ describe('DetectionService', () => {
     expect(result.pairsEvaluated).toBe(0);
   });
 
-  // Story 9.1b: Orderbook staleness suppression
-  it('should skip pairs when Kalshi orderbook is stale', async () => {
+  // Story 9.15: Per-contract orderbook staleness suppression
+  it('should skip pairs when Kalshi contract is stale (per-contract)', async () => {
     contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
-    healthService.getOrderbookStaleness.mockImplementation((id: PlatformId) =>
-      id === PlatformId.KALSHI
-        ? { stale: true, stalenessMs: 95000 }
-        : { stale: false },
+    healthService.getContractStaleness.mockImplementation(
+      (id: PlatformId, _contractId: string) =>
+        id === PlatformId.KALSHI
+          ? { stale: true, stalenessMs: 95000 }
+          : { stale: false },
     );
 
     const result = await service.detectDislocations();
@@ -603,12 +606,13 @@ describe('DetectionService', () => {
     expect(kalshiConnector.getOrderBook).not.toHaveBeenCalled();
   });
 
-  it('should skip pairs when Polymarket orderbook is stale', async () => {
+  it('should skip pairs when Polymarket contract is stale (per-contract)', async () => {
     contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
-    healthService.getOrderbookStaleness.mockImplementation((id: PlatformId) =>
-      id === PlatformId.POLYMARKET
-        ? { stale: true, stalenessMs: 120000 }
-        : { stale: false },
+    healthService.getContractStaleness.mockImplementation(
+      (id: PlatformId, _contractId: string) =>
+        id === PlatformId.POLYMARKET
+          ? { stale: true, stalenessMs: 120000 }
+          : { stale: false },
     );
 
     const result = await service.detectDislocations();
@@ -618,9 +622,59 @@ describe('DetectionService', () => {
     expect(polymarketConnector.getOrderBook).not.toHaveBeenCalled();
   });
 
+  it('stale contract A does not block fresh contract B on same platform', async () => {
+    const pairA = makePair({
+      kalshiContractId: 'STALE-K',
+      polymarketClobTokenId: 'STALE-P',
+    });
+    const pairB = makePair({
+      kalshiContractId: 'FRESH-K',
+      polymarketClobTokenId: 'FRESH-P',
+    });
+    contractPairLoader.getActivePairs.mockResolvedValue([pairA, pairB]);
+
+    healthService.getContractStaleness.mockImplementation(
+      (_id: PlatformId, contractId: string) =>
+        contractId === 'STALE-K'
+          ? { stale: true, stalenessMs: 95000 }
+          : { stale: false },
+    );
+
+    kalshiConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.KALSHI, 'FRESH-K', 0.5, 0.55),
+    );
+    polymarketConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.POLYMARKET, 'FRESH-P', 0.5, 0.55),
+    );
+
+    const result = await service.detectDislocations();
+
+    // pairA skipped (Kalshi stale), pairB evaluated (fresh)
+    expect(result.pairsSkipped).toBe(1);
+    expect(result.pairsEvaluated).toBe(1);
+  });
+
+  it('unknown contract returns not stale (startup grace)', async () => {
+    contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
+    // getContractStaleness returns { stale: false } for unknown contracts (default mock)
+    healthService.getContractStaleness.mockReturnValue({ stale: false });
+
+    kalshiConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),
+    );
+    polymarketConnector.getOrderBook.mockResolvedValue(
+      makeOrderBook(PlatformId.POLYMARKET, 'p', 0.5, 0.55),
+    );
+
+    const result = await service.detectDislocations();
+
+    expect(result.pairsSkipped).toBe(0);
+    expect(result.pairsEvaluated).toBe(1);
+  });
+
   it('should not skip pairs when orderbook is fresh', async () => {
     contractPairLoader.getActivePairs.mockResolvedValue([makePair()]);
-    healthService.getOrderbookStaleness.mockReturnValue({ stale: false });
+    healthService.getContractStaleness.mockReturnValue({ stale: false });
 
     kalshiConnector.getOrderBook.mockResolvedValue(
       makeOrderBook(PlatformId.KALSHI, 'k', 0.5, 0.55),

@@ -565,6 +565,15 @@ export class KalshiConnector
     return PlatformId.KALSHI;
   }
 
+  /**
+   * Returns the effective read rate from the rate limiter.
+   * Used by DataIngestionService for polling cycle duration estimation.
+   * Note: may reflect initial fromTier() value if called before connect().
+   */
+  getEffectiveReadRate(): number {
+    return this.rateLimiter.getReadRate();
+  }
+
   getFeeSchedule(): FeeSchedule {
     return {
       platformId: PlatformId.KALSHI,

@@ -95,15 +95,19 @@ describe('Structured Logging (e2e)', () => {
       if (event.correlationId !== undefined) {
         expect(typeof event.correlationId).toBe('string');
       }
-      expect(event.timestamp).toBeDefined();
-      // BaseEvent constructor sets timestamp as new Date(), verify it's a Date instance or valid date value
-      if (event.timestamp instanceof Date) {
-        expect(event.timestamp.getTime()).not.toBeNaN();
-      } else {
-        // If serialized/deserialized, timestamp may be a string — verify it parses to a valid date
-        expect(
-          new Date(event.timestamp as unknown as string).getTime(),
-        ).not.toBeNaN();
+      // platform.health.updated emits raw PlatformHealth (no timestamp/correlationId),
+      // while platform.health.degraded emits BaseEvent subclass (with timestamp).
+      // Only validate timestamp if it exists on the event payload.
+      if ('timestamp' in event && event.timestamp !== undefined) {
+        // BaseEvent constructor sets timestamp as new Date(), verify it's a Date instance or valid date value
+        if (event.timestamp instanceof Date) {
+          expect(event.timestamp.getTime()).not.toBeNaN();
+        } else {
+          // If serialized/deserialized, timestamp may be a string — verify it parses to a valid date
+          expect(
+            new Date(event.timestamp as unknown as string).getTime(),
+          ).not.toBeNaN();
+        }
       }
     }
   });

@@ -6,9 +6,9 @@ export class PlatformHealthDto {
 
   @ApiProperty({
     description: 'Health status',
-    enum: ['healthy', 'degraded', 'disconnected'],
+    enum: ['healthy', 'degraded', 'disconnected', 'initializing'],
   })
-  status!: 'healthy' | 'degraded' | 'disconnected';
+  status!: 'healthy' | 'degraded' | 'disconnected' | 'initializing';
 
   @ApiProperty({ description: 'Whether API connection is active' })
   apiConnected!: boolean;

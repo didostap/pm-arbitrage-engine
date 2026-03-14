@@ -102,7 +102,15 @@ describe('PlatformHealthService', () => {
       service.recordUpdate(PlatformId.KALSHI, 100);
       service.recordUpdate(PlatformId.POLYMARKET, 100);
 
-      // First tick: both default to 'healthy', calculated as 'healthy' → no transition
+      // First tick: previousStatus defaults to 'initializing', calculated as 'healthy' → transition → DB write
+      await service.publishHealth();
+      vi.clearAllMocks();
+
+      // Keep fresh
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // Second tick: both 'healthy' → 'healthy' → no transition → no DB write
       await service.publishHealth();
 
       expect(mockPrismaService.platformHealthLog.create).not.toHaveBeenCalled();
@@ -111,11 +119,17 @@ describe('PlatformHealthService', () => {
     it('should persist health log when status transitions (healthy → degraded)', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Kalshi stale → degraded (transitions from default 'healthy')
+      // First, establish healthy baseline for both platforms
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      vi.clearAllMocks();
+
+      // Now make Kalshi stale → degraded (transitions from 'healthy')
       const sixtyOneSecondsAgo = Date.now() - 61_000;
       service['lastUpdateTime'].set(PlatformId.KALSHI, sixtyOneSecondsAgo);
 
-      // Polymarket fresh → healthy (no transition from default 'healthy')
+      // Polymarket stays fresh → healthy (no transition)
       service.recordUpdate(PlatformId.POLYMARKET, 100);
 
       await service.publishHealth();
@@ -132,14 +146,25 @@ describe('PlatformHealthService', () => {
       });
     });
 
-    it('should persist on first-tick-degraded (differs from default healthy)', async () => {
+    it('should NOT persist on first tick when initializing (initializing → initializing)', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Don't record any updates — both platforms will calculate as degraded
-      // previousStatus defaults to 'healthy', so degraded != 'healthy' → DB write
+      // Don't record any updates — both platforms calculate as 'initializing'
+      // previousStatus defaults to 'initializing', so no transition → no DB write
       await service.publishHealth();
 
-      // Both platforms should get a DB write
+      expect(mockPrismaService.platformHealthLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should persist on first-tick transition (initializing → healthy)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Record updates → both healthy. previousStatus='initializing' → transition → DB write
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // Both platforms should get a DB write (initializing → healthy)
       expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledTimes(
         2,
       );
@@ -185,14 +210,21 @@ describe('PlatformHealthService', () => {
     it('should emit recovered event on degraded → healthy transition', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Start degraded (no updates)
-      await service.publishHealth();
+      // First establish healthy, then degrade, then recover
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth(); // both healthy
 
-      // Clear previous calls
+      // Now make Kalshi stale → degraded
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 61_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth(); // Kalshi degraded
+
       vi.clearAllMocks();
 
-      // Now record fresh update (make healthy)
+      // Now record fresh update (make healthy again)
       service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
       await service.publishHealth();
 
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
@@ -221,10 +253,15 @@ describe('PlatformHealthService', () => {
     it('should emit health events for both platforms even without DB write', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Record updates for both platforms (both healthy, no transition from default)
+      // Establish healthy baseline
       service.recordUpdate(PlatformId.KALSHI, 100);
       service.recordUpdate(PlatformId.POLYMARKET, 120);
+      await service.publishHealth();
+      vi.clearAllMocks();
 
+      // Keep fresh — second tick: healthy → healthy → no transition → no DB write
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 120);
       await service.publishHealth();
 
       // No DB writes (no status transitions)
@@ -240,7 +277,13 @@ describe('PlatformHealthService', () => {
     it('should emit degraded event for Polymarket when stale', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Kalshi healthy, Polymarket stale
+      // Establish healthy baseline for both platforms first
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      vi.clearAllMocks();
+
+      // Now make Polymarket stale (transitions from 'healthy' → 'degraded')
       service.recordUpdate(PlatformId.KALSHI, 100);
       const sixtyOneSecondsAgo = Date.now() - 61_000;
       service['lastUpdateTime'].set(PlatformId.POLYMARKET, sixtyOneSecondsAgo);
@@ -259,13 +302,20 @@ describe('PlatformHealthService', () => {
     it('should emit recovered event for Polymarket when recovered', async () => {
       mockPrismaService.platformHealthLog.create.mockResolvedValue({});
 
-      // Start Polymarket degraded (no updates)
+      // Establish healthy baseline
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
       await service.publishHealth();
 
-      // Clear previous calls
+      // Make Polymarket degraded (stale)
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service['lastUpdateTime'].set(PlatformId.POLYMARKET, Date.now() - 61_000);
+      await service.publishHealth();
+
       vi.clearAllMocks();
 
       // Now record fresh update for Polymarket (make healthy)
+      service.recordUpdate(PlatformId.KALSHI, 100);
       service.recordUpdate(PlatformId.POLYMARKET, 100);
       await service.publishHealth();
 
@@ -356,13 +406,15 @@ describe('PlatformHealthService', () => {
       expect(health.latencyMs).toBeLessThan(2000);
     });
 
-    it('should return degraded status when no updates recorded', () => {
+    it('should return initializing status when no updates recorded', () => {
       const platform = PlatformId.KALSHI;
 
       const health = service['calculateHealth'](platform);
 
-      // No updates = age > threshold = degraded
-      expect(health.status).toBe('degraded');
+      // No updates = lastUpdate === 0 → initializing (not degraded — epoch zero fix)
+      expect(health.status).toBe('initializing');
+      expect(health.lastHeartbeat).toBeNull();
+      expect(health.metadata).toEqual({ reason: 'no_data_received' });
     });
 
     it('should include p95 latency in health response', () => {
@@ -864,6 +916,171 @@ describe('PlatformHealthService', () => {
     it('should return stale=false when no data about platform (startup)', () => {
       const result = service.getOrderbookStaleness(PlatformId.KALSHI);
       expect(result.stale).toBe(false);
+    });
+  });
+
+  describe('initializing status (Story 9.15)', () => {
+    it('calculateHealth returns initializing when lastUpdateTime is 0', () => {
+      const health = service['calculateHealth'](PlatformId.KALSHI);
+
+      expect(health.status).toBe('initializing');
+      expect(health.lastHeartbeat).toBeNull();
+      expect(health.latencyMs).toBeNull();
+      expect(health.metadata).toEqual({ reason: 'no_data_received' });
+    });
+
+    it('publishHealth does NOT emit PLATFORM_HEALTH_DEGRADED when previousStatus is initializing', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Make Kalshi stale (non-zero lastUpdate, but old enough to be degraded)
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 61_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      // previousStatus defaults to 'initializing' — guard should suppress degraded event
+      await service.publishHealth();
+
+      const degradedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
+      );
+      expect(degradedCalls).toHaveLength(0);
+    });
+
+    it('publishHealth emits PLATFORM_HEALTH_DEGRADED when previousStatus is healthy (normal degradation)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Establish healthy baseline
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      vi.clearAllMocks();
+
+      // Now make Kalshi stale
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 61_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      const degradedCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
+      );
+      expect(degradedCalls).toHaveLength(1);
+    });
+
+    it('publishHealth treats initializing as healthy for consecutive tick counters', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // No data → 'initializing' → should NOT increment unhealthy ticks
+      await service.publishHealth();
+
+      expect(service['consecutiveUnhealthyTicks'].get(PlatformId.KALSHI)).toBe(
+        0,
+      );
+      expect(service['consecutiveHealthyTicks'].get(PlatformId.KALSHI)).toBe(1);
+    });
+
+    it('previousStatus defaults to initializing on first tick', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Verify the internal state before any publishHealth call
+      expect(service['previousStatus'].get(PlatformId.KALSHI)).toBeUndefined();
+
+      // First tick — should use 'initializing' as default
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // After first tick, previousStatus should be set to the calculated status
+      expect(service['previousStatus'].get(PlatformId.KALSHI)).toBe('healthy');
+    });
+
+    it('transition from initializing → healthy persists to DB but does NOT emit recovered', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+
+      // Record fresh data → healthy. previousStatus='initializing' → transition → DB write
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      // DB write should occur (initializing → healthy transition)
+      expect(mockPrismaService.platformHealthLog.create).toHaveBeenCalledTimes(
+        2,
+      );
+
+      // But NO recovered event (was initializing, not degraded)
+      const recoveredCalls = mockEventEmitter.emit.mock.calls.filter(
+        (call) => call[0] === EVENT_NAMES.PLATFORM_HEALTH_RECOVERED,
+      );
+      expect(recoveredCalls).toHaveLength(0);
+    });
+  });
+
+  describe('recordContractUpdate() (Story 9.15)', () => {
+    it('should set per-contract timestamp and delegate to recordUpdate', () => {
+      service.recordContractUpdate(PlatformId.KALSHI, 'TICKER-A', 150);
+
+      // Per-contract tracking
+      const key = `${PlatformId.KALSHI}:TICKER-A`;
+      const timestamp = service['lastContractUpdateTime'].get(key);
+      expect(timestamp).toBeGreaterThan(0);
+
+      // Platform-level delegation
+      const platformTimestamp = service['lastUpdateTime'].get(
+        PlatformId.KALSHI,
+      );
+      expect(platformTimestamp).toBeGreaterThan(0);
+
+      const samples = service['latencySamples'].get(PlatformId.KALSHI);
+      expect(samples).toContain(150);
+    });
+  });
+
+  describe('getContractStaleness() (Story 9.15)', () => {
+    it('should return stale=false for unknown contractId (startup grace)', () => {
+      const result = service.getContractStaleness(PlatformId.KALSHI, 'UNKNOWN');
+      expect(result.stale).toBe(false);
+      expect(result.stalenessMs).toBeUndefined();
+    });
+
+    it('should return stale=false for fresh contract', () => {
+      service.recordContractUpdate(PlatformId.KALSHI, 'TICKER-A', 100);
+
+      const result = service.getContractStaleness(
+        PlatformId.KALSHI,
+        'TICKER-A',
+      );
+      expect(result.stale).toBe(false);
+    });
+
+    it('should return stale=true with duration for stale contract', () => {
+      // Manually set an old timestamp
+      const key = `${PlatformId.KALSHI}:TICKER-A`;
+      service['lastContractUpdateTime'].set(key, Date.now() - 91_000);
+
+      const result = service.getContractStaleness(
+        PlatformId.KALSHI,
+        'TICKER-A',
+      );
+      expect(result.stale).toBe(true);
+      expect(result.stalenessMs).toBeGreaterThanOrEqual(91_000);
+    });
+
+    it('should isolate platforms via composite key', () => {
+      // Same contractId on different platforms tracked independently
+      service.recordContractUpdate(PlatformId.KALSHI, 'SHARED-ID', 100);
+
+      // Kalshi has data → not stale
+      const kalshi = service.getContractStaleness(
+        PlatformId.KALSHI,
+        'SHARED-ID',
+      );
+      expect(kalshi.stale).toBe(false);
+
+      // Polymarket has NO data for this ID → startup grace → not stale
+      const poly = service.getContractStaleness(
+        PlatformId.POLYMARKET,
+        'SHARED-ID',
+      );
+      expect(poly.stale).toBe(false);
+      expect(poly.stalenessMs).toBeUndefined();
     });
   });
 });

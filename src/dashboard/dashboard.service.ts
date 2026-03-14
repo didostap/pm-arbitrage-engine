@@ -200,7 +200,11 @@ export class DashboardService {
         );
         return {
           platformId: log.platform.toLowerCase(),
-          status: log.status as 'healthy' | 'degraded' | 'disconnected',
+          status: log.status as
+            | 'healthy'
+            | 'degraded'
+            | 'disconnected'
+            | 'initializing',
           apiConnected: log.status !== 'disconnected',
           dataFresh: log.status === 'healthy',
           lastUpdate: log.created_at.toISOString(),

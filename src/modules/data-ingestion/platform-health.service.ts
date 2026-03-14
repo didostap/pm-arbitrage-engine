@@ -31,7 +31,7 @@ export class PlatformHealthService {
   private latencySamples: Map<PlatformId, number[]> = new Map();
   private previousStatus: Map<
     PlatformId,
-    'healthy' | 'degraded' | 'disconnected'
+    'healthy' | 'degraded' | 'disconnected' | 'initializing'
   > = new Map();
 
   private consecutiveUnhealthyTicks: Map<PlatformId, number> = new Map();
@@ -40,6 +40,11 @@ export class PlatformHealthService {
   private orderbookStale = new Map<PlatformId, boolean>();
   private orderbookStaleStartTime = new Map<PlatformId, number>();
   private readonly orderbookStalenessThreshold: number;
+
+  // Per-contract staleness tracking (Story 9.15)
+  // Key format: `${platformId}:${contractId}` — composite key for cross-platform uniqueness
+  // Memory: ~40 bytes per entry. 100K entries = ~4MB — acceptable, no cleanup needed.
+  private readonly lastContractUpdateTime = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -72,10 +77,13 @@ export class PlatformHealthService {
       const platforms = [PlatformId.KALSHI, PlatformId.POLYMARKET];
 
       for (const platform of platforms) {
-        const previousStatus = this.previousStatus.get(platform) || 'healthy';
+        const previousStatus =
+          this.previousStatus.get(platform) ?? 'initializing';
         const health = this.calculateHealth(platform);
 
         // Update consecutive tick counters
+        // 'initializing' is treated as healthy for counter purposes — do NOT
+        // increment unhealthy ticks during boot window (prevents false degradation protocol)
         if (health.status === 'degraded' || health.status === 'disconnected') {
           this.consecutiveUnhealthyTicks.set(
             platform,
@@ -83,6 +91,7 @@ export class PlatformHealthService {
           );
           this.consecutiveHealthyTicks.set(platform, 0);
         } else {
+          // 'healthy' OR 'initializing'
           this.consecutiveHealthyTicks.set(
             platform,
             (this.consecutiveHealthyTicks.get(platform) ?? 0) + 1,
@@ -120,7 +129,13 @@ export class PlatformHealthService {
         this.eventEmitter.emit(EVENT_NAMES.PLATFORM_HEALTH_UPDATED, health);
 
         // Emit transition events (degradation AND recovery)
-        if (health.status === 'degraded' && previousStatus !== 'degraded') {
+        // Guard: do NOT emit degradation event when previousStatus is 'initializing' —
+        // platform hasn't been healthy yet, this is still booting, not degradation
+        if (
+          health.status === 'degraded' &&
+          previousStatus !== 'degraded' &&
+          previousStatus !== 'initializing'
+        ) {
           this.eventEmitter.emit(
             EVENT_NAMES.PLATFORM_HEALTH_DEGRADED,
             new PlatformDegradedEvent(platform, health, previousStatus),
@@ -145,6 +160,8 @@ export class PlatformHealthService {
         }
 
         // Orderbook staleness detection (Story 9.1b)
+        // Note: `lastUpdate > 0` guard below intentionally prevents staleness detection
+        // during initialization — isNowStale is always false when no data has been received yet
         try {
           const lastUpdate = this.lastUpdateTime.get(platform) || 0;
           const dataAge = Date.now() - lastUpdate;
@@ -295,6 +312,24 @@ export class PlatformHealthService {
    */
   private calculateHealth(platform: PlatformId): PlatformHealth {
     const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+
+    // Epoch zero guard: no data received yet (system just booted)
+    // Return 'initializing' instead of 'degraded' to prevent false alerts
+    if (lastUpdate === 0) {
+      this.logger.debug({
+        message: 'Platform initializing — no data received yet',
+        module: 'data-ingestion',
+        platform,
+      });
+      return {
+        platformId: platform,
+        status: 'initializing',
+        lastHeartbeat: null,
+        latencyMs: null,
+        metadata: { reason: 'no_data_received' },
+      };
+    }
+
     const age = Date.now() - lastUpdate;
 
     // For MVP, we don't have connector health check yet
@@ -361,6 +396,40 @@ export class PlatformHealthService {
     samples.push(latencyMs);
     if (samples.length > 100) samples.shift(); // Rolling window
     this.latencySamples.set(platform, samples);
+  }
+
+  /**
+   * Records a successful per-contract orderbook fetch.
+   * Updates per-contract staleness tracking and delegates to platform-level recordUpdate().
+   */
+  recordContractUpdate(
+    platform: PlatformId,
+    contractId: string,
+    latencyMs: number,
+  ): void {
+    const key = `${platform}:${contractId}`;
+    this.lastContractUpdateTime.set(key, Date.now());
+    // Also update platform-level tracking for backward compatibility (health calculation)
+    this.recordUpdate(platform, latencyMs);
+  }
+
+  /**
+   * Returns per-contract staleness status.
+   * Used by detection to evaluate staleness per pair instead of per platform.
+   */
+  getContractStaleness(
+    platform: PlatformId,
+    contractId: string,
+  ): { stale: boolean; stalenessMs?: number } {
+    const key = `${platform}:${contractId}`;
+    const lastUpdate = this.lastContractUpdateTime.get(key);
+    // Startup grace: contract not yet polled — not stale, just not seen yet
+    if (lastUpdate === undefined) return { stale: false };
+    const stalenessMs = Date.now() - lastUpdate;
+    if (stalenessMs > this.orderbookStalenessThreshold) {
+      return { stale: true, stalenessMs };
+    }
+    return { stale: false };
   }
 
   /**

@@ -193,6 +193,10 @@ export const envSchema = z.object({
     .positive()
     .default(90_000),
 
+  // Polling Concurrency (Story 9.15) — max concurrent getOrderBook() calls per platform
+  KALSHI_POLLING_CONCURRENCY: z.coerce.number().int().positive().default(10),
+  POLYMARKET_POLLING_CONCURRENCY: z.coerce.number().int().positive().default(5),
+
   // Cluster Classification
   CLUSTER_LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 

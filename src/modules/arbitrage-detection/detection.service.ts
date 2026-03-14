@@ -33,9 +33,10 @@ export class DetectionService {
     const activePairs = await this.contractPairLoader.getActivePairs();
 
     for (const pair of activePairs) {
-      // Story 9.1b: Skip if either platform's orderbook is stale
-      const kalshiStaleness = this.healthService.getOrderbookStaleness(
+      // Story 9.15: Skip if either contract's orderbook is stale (per-pair granularity)
+      const kalshiStaleness = this.healthService.getContractStaleness(
         PlatformId.KALSHI,
+        pair.kalshiContractId,
       );
       if (kalshiStaleness.stale) {
         this.logger.debug({
@@ -45,6 +46,7 @@ export class DetectionService {
           data: {
             eventDescription: pair.eventDescription,
             platformId: PlatformId.KALSHI,
+            contractId: pair.kalshiContractId,
             skipReason: 'orderbook_stale',
             stalenessMs: kalshiStaleness.stalenessMs,
           },
@@ -53,8 +55,9 @@ export class DetectionService {
         continue;
       }
 
-      const polymarketStaleness = this.healthService.getOrderbookStaleness(
+      const polymarketStaleness = this.healthService.getContractStaleness(
         PlatformId.POLYMARKET,
+        pair.polymarketClobTokenId,
       );
       if (polymarketStaleness.stale) {
         this.logger.debug({
@@ -64,6 +67,7 @@ export class DetectionService {
           data: {
             eventDescription: pair.eventDescription,
             platformId: PlatformId.POLYMARKET,
+            contractId: pair.polymarketClobTokenId,
             skipReason: 'orderbook_stale',
             stalenessMs: polymarketStaleness.stalenessMs,
           },

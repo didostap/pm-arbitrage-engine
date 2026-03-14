@@ -6,7 +6,7 @@
 
 export interface WsHealthChangePayload {
   platformId: string;
-  status: 'healthy' | 'degraded' | 'disconnected';
+  status: 'healthy' | 'degraded' | 'disconnected' | 'initializing';
   apiConnected: boolean;
   dataFresh: boolean;
   lastUpdate: string;

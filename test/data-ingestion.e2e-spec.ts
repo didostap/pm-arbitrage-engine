@@ -233,10 +233,10 @@ describe('Data Ingestion (e2e)', () => {
       expect(kalshiHealth.platformId).toBe(PlatformId.KALSHI);
       expect(polymarketHealth.platformId).toBe(PlatformId.POLYMARKET);
 
-      expect(['healthy', 'degraded', 'disconnected']).toContain(
+      expect(['healthy', 'degraded', 'disconnected', 'initializing']).toContain(
         kalshiHealth.status,
       );
-      expect(['healthy', 'degraded', 'disconnected']).toContain(
+      expect(['healthy', 'degraded', 'disconnected', 'initializing']).toContain(
         polymarketHealth.status,
       );
     });

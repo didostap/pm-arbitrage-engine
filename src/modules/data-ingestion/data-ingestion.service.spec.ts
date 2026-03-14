@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataIngestionService } from './data-ingestion.service';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
@@ -39,7 +40,10 @@ const TEST_PAIRS: ContractPairConfig[] = [
 describe('DataIngestionService', () => {
   let service: DataIngestionService;
 
-  const mockKalshiConnector = createMockPlatformConnector(PlatformId.KALSHI);
+  const mockKalshiConnector = {
+    ...createMockPlatformConnector(PlatformId.KALSHI),
+    getEffectiveReadRate: vi.fn().mockReturnValue(16),
+  };
 
   const mockPolymarketConnector = {
     ...createMockPlatformConnector(PlatformId.POLYMARKET),
@@ -52,6 +56,7 @@ describe('DataIngestionService', () => {
 
   const mockHealthService = {
     recordUpdate: vi.fn(),
+    recordContractUpdate: vi.fn(),
   };
 
   const mockPrismaService = {
@@ -75,6 +80,14 @@ describe('DataIngestionService', () => {
     getActivePairs: vi.fn().mockResolvedValue(TEST_PAIRS),
   };
 
+  const mockConfigService = {
+    get: vi.fn().mockImplementation((key: string, defaultValue?: unknown) => {
+      if (key === 'KALSHI_POLLING_CONCURRENCY') return 10;
+      if (key === 'POLYMARKET_POLLING_CONCURRENCY') return 5;
+      return defaultValue;
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +109,7 @@ describe('DataIngestionService', () => {
           provide: ContractPairLoaderService,
           useValue: mockContractPairLoader,
         },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -140,6 +154,57 @@ describe('DataIngestionService', () => {
 
       expect(mockKalshiConnector.onOrderBookUpdate).toHaveBeenCalled();
       expect(mockPolymarketConnector.onOrderBookUpdate).toHaveBeenCalled();
+    });
+
+    it('should emit startup warning when estimated polling cycle exceeds 60s (AC #11)', async () => {
+      // 700 pairs / min(10 concurrency, 16 read rate) = 70s > 60s threshold
+      const largePairs: ContractPairConfig[] = Array.from(
+        { length: 700 },
+        (_, i) => ({
+          kalshiContractId: `KALSHI-${i}`,
+          polymarketContractId: `pm-${i}`,
+          polymarketClobTokenId: `pm-${i}`,
+          eventDescription: `Event ${i}`,
+          operatorVerificationTimestamp: new Date('2026-02-27T00:00:00Z'),
+          primaryLeg: 'kalshi' as const,
+        }),
+      );
+      mockContractPairLoader.getActivePairs.mockResolvedValue(largePairs);
+      mockKalshiConnector.getEffectiveReadRate.mockReturnValue(16);
+
+      const warnSpy = vi
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => {});
+
+      await service.onModuleInit();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'Polling cycle may exceed staleness threshold',
+          ),
+          data: expect.objectContaining({
+            kalshiPairCount: 700,
+            concurrency: 10,
+          }),
+        }),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('should NOT emit startup warning when estimated cycle is within threshold', async () => {
+      // 2 pairs / min(10, 16) = 0.2s < 60s threshold
+      mockContractPairLoader.getActivePairs.mockResolvedValue(TEST_PAIRS);
+      mockKalshiConnector.getEffectiveReadRate.mockReturnValue(16);
+
+      const warnSpy = vi
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => {});
+
+      await service.onModuleInit();
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 
@@ -226,9 +291,10 @@ describe('DataIngestionService', () => {
         expect.any(OrderBookUpdatedEvent),
       );
 
-      // Verify health tracking
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      // Verify per-contract health tracking
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.KALSHI,
+        expect.any(String),
         expect.any(Number),
       );
     });
@@ -286,13 +352,15 @@ describe('DataIngestionService', () => {
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
       expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
 
-      // Health tracking for both platforms
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      // Per-contract health tracking for both platforms
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.KALSHI,
+        expect.any(String),
         expect.any(Number),
       );
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.POLYMARKET,
+        expect.any(String),
         expect.any(Number),
       );
     });
@@ -385,8 +453,9 @@ describe('DataIngestionService', () => {
 
       // Polymarket should still be ingested via batch
       expect(mockPolymarketConnector.getOrderBooks).toHaveBeenCalled();
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.POLYMARKET,
+        expect.any(String),
         expect.any(Number),
       );
     });
@@ -410,10 +479,87 @@ describe('DataIngestionService', () => {
 
       // Kalshi should still be ingested
       expect(mockKalshiConnector.getOrderBook).toHaveBeenCalled();
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.KALSHI,
+        expect.any(String),
         expect.any(Number),
       );
+    });
+
+    it('should log rejected promises with contractId when individual Kalshi fetches fail (AC #10)', async () => {
+      // First ticker succeeds, second rejects — mixed scenario within Promise.allSettled
+      mockKalshiConnector.getOrderBook.mockImplementation((ticker: string) => {
+        if (ticker === 'KALSHI-TICKER-2') {
+          return Promise.reject(new Error('Rate limited'));
+        }
+        return Promise.resolve({
+          platformId: PlatformId.KALSHI,
+          contractId: ticker,
+          bids: [{ price: 0.6, quantity: 1000 }],
+          asks: [{ price: 0.65, quantity: 800 }],
+          timestamp: new Date(),
+        });
+      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      const errorSpy = vi
+        .spyOn(service['logger'], 'error')
+        .mockImplementation(() => {});
+
+      await service.ingestCurrentOrderBooks();
+
+      // Successful ticker should still be processed
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        'KALSHI-TICKER-1',
+        expect.any(Number),
+      );
+
+      // Rejected ticker should be logged with contractId
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Kalshi orderbook fetch rejected',
+          contractId: 'KALSHI-TICKER-2',
+          error: 'Rate limited',
+        }),
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('should log pollingCycleDurationMs in cycle completion entry (AC #12)', async () => {
+      mockKalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-TICKER-1',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      const logSpy = vi
+        .spyOn(service['logger'], 'log')
+        .mockImplementation(() => {});
+
+      await service.ingestCurrentOrderBooks();
+
+      // Find the 'Polling cycle complete' log entry
+      const cycleCompleteCall = logSpy.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'object' &&
+          call[0] !== null &&
+          'message' in call[0] &&
+          (call[0] as Record<string, unknown>).message ===
+            'Polling cycle complete',
+      );
+
+      expect(cycleCompleteCall).toBeDefined();
+      const logEntry = cycleCompleteCall![0] as Record<string, unknown>;
+      const data = logEntry.data as Record<string, unknown>;
+      expect(data.pollingCycleDurationMs).toEqual(expect.any(Number));
+      expect(data.kalshiConcurrency).toBe(10);
+      logSpy.mockRestore();
     });
   });
 
@@ -438,8 +584,9 @@ describe('DataIngestionService', () => {
         'orderbook.updated',
         expect.any(OrderBookUpdatedEvent),
       );
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.KALSHI,
+        'TEST-MARKET',
         expect.any(Number),
       );
     });
@@ -481,8 +628,9 @@ describe('DataIngestionService', () => {
         'orderbook.updated',
         expect.any(OrderBookUpdatedEvent),
       );
-      expect(mockHealthService.recordUpdate).toHaveBeenCalledWith(
+      expect(mockHealthService.recordContractUpdate).toHaveBeenCalledWith(
         PlatformId.POLYMARKET,
+        'POLYMARKET-TOKEN',
         expect.any(Number),
       );
     });

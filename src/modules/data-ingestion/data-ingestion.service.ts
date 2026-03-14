@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import pLimit from 'p-limit';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { KalshiConnector } from '../../connectors/kalshi/kalshi.connector';
@@ -34,6 +36,8 @@ export class DataIngestionService implements OnModuleInit {
   private readonly logger = new Logger(DataIngestionService.name);
   private consecutiveFailures = 0;
 
+  private readonly kalshiConcurrency: number;
+
   constructor(
     private readonly kalshiConnector: KalshiConnector,
     private readonly polymarketConnector: PolymarketConnector,
@@ -42,13 +46,19 @@ export class DataIngestionService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly contractPairLoader: ContractPairLoaderService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.kalshiConcurrency = this.configService.get<number>(
+      'KALSHI_POLLING_CONCURRENCY',
+      10,
+    );
+  }
 
   /**
    * Module initialization lifecycle hook.
    * Registers WebSocket callbacks for real-time order book updates from both platforms.
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
+
   async onModuleInit() {
     const correlationId = randomUUID();
 
@@ -91,6 +101,32 @@ export class DataIngestionService implements OnModuleInit {
       correlationId,
       timestamp: new Date().toISOString(),
     });
+
+    // Startup warning: estimate polling cycle time (AC #11)
+    const { kalshiTickers } = await this.getConfiguredTickers(correlationId);
+    const kalshiPairs = kalshiTickers.length;
+    const connectorReadRate = this.kalshiConnector.getEffectiveReadRate();
+    const effectiveReadRate = Math.min(
+      this.kalshiConcurrency,
+      connectorReadRate,
+    );
+    const estimatedCycleSeconds =
+      effectiveReadRate > 0 ? Math.ceil(kalshiPairs / effectiveReadRate) : 0;
+    if (estimatedCycleSeconds > 60) {
+      this.logger.warn({
+        message:
+          'Polling cycle may exceed staleness threshold (conservative estimate)',
+        module: 'data-ingestion',
+        data: {
+          kalshiPairCount: kalshiPairs,
+          concurrency: this.kalshiConcurrency,
+          connectorReadRate,
+          effectiveReadRate,
+          estimatedCycleSeconds,
+          stalenessThresholdSeconds: 90,
+        },
+      });
+    }
   }
 
   /**
@@ -125,6 +161,7 @@ export class DataIngestionService implements OnModuleInit {
   }
 
   async ingestCurrentOrderBooks(): Promise<void> {
+    const methodStartTime = Date.now();
     const correlationId = randomUUID();
 
     this.logger.log({
@@ -141,51 +178,65 @@ export class DataIngestionService implements OnModuleInit {
       return;
     }
 
-    // Ingest Kalshi (isolated try/catch) — skip if degraded
+    // Ingest Kalshi concurrently with p-limit (isolated try/catch) — skip if degraded
     if (!this.degradationService.isDegraded(PlatformId.KALSHI)) {
       try {
-        for (const ticker of kalshiTickers) {
-          const startTime = Date.now();
+        const kalshiLimit = pLimit(this.kalshiConcurrency);
+        const kalshiResults = await Promise.allSettled(
+          kalshiTickers.map((ticker) =>
+            kalshiLimit(async () => {
+              const startTime = Date.now();
 
-          try {
-            // Connector returns already normalized data
-            const normalized = await this.kalshiConnector.getOrderBook(
-              asContractId(ticker),
-            );
+              // Connector returns already normalized data
+              const normalized = await this.kalshiConnector.getOrderBook(
+                asContractId(ticker),
+              );
 
-            await this.persistSnapshot(normalized, correlationId);
+              await this.persistSnapshot(normalized, correlationId);
 
-            this.eventEmitter.emit(
-              EVENT_NAMES.ORDERBOOK_UPDATED,
-              new OrderBookUpdatedEvent(normalized),
-            );
+              this.eventEmitter.emit(
+                EVENT_NAMES.ORDERBOOK_UPDATED,
+                new OrderBookUpdatedEvent(normalized),
+              );
 
-            const latency = Date.now() - startTime;
-            this.healthService.recordUpdate(PlatformId.KALSHI, latency);
+              const latency = Date.now() - startTime;
+              this.healthService.recordContractUpdate(
+                PlatformId.KALSHI,
+                ticker,
+                latency,
+              );
 
-            this.logger.log({
-              message: 'Order book ingested (polling)',
-              module: 'data-ingestion',
-              correlationId,
-              timestamp: new Date().toISOString(),
-              contractId: normalized.contractId,
-              latencyMs: latency,
-              metadata: {
-                platformId: normalized.platformId,
-                bidLevels: normalized.bids.length,
-                askLevels: normalized.asks.length,
-                bestBid: normalized.bids[0]?.price,
-                bestAsk: normalized.asks[0]?.price,
-              },
-            });
-          } catch (error) {
+              this.logger.log({
+                message: 'Order book ingested (polling)',
+                module: 'data-ingestion',
+                correlationId,
+                timestamp: new Date().toISOString(),
+                contractId: normalized.contractId,
+                latencyMs: latency,
+                metadata: {
+                  platformId: normalized.platformId,
+                  bidLevels: normalized.bids.length,
+                  askLevels: normalized.asks.length,
+                  bestBid: normalized.bids[0]?.price,
+                  bestAsk: normalized.asks[0]?.price,
+                },
+              });
+            }),
+          ),
+        );
+
+        // Log rejected promises (AC #10)
+        for (const [i, result] of kalshiResults.entries()) {
+          if (result.status === 'rejected') {
             this.logger.error({
-              message: 'Failed to ingest order book',
+              message: 'Kalshi orderbook fetch rejected',
               module: 'data-ingestion',
               correlationId,
-              ticker,
-              error: error instanceof Error ? error.message : 'Unknown error',
-              timestamp: new Date().toISOString(),
+              contractId: kalshiTickers[i],
+              error:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : 'Unknown error',
             });
           }
         }
@@ -209,7 +260,6 @@ export class DataIngestionService implements OnModuleInit {
           await this.polymarketConnector.getOrderBooks(polymarketTokens);
 
         const batchLatency = Date.now() - startTime;
-        this.healthService.recordUpdate(PlatformId.POLYMARKET, batchLatency);
 
         for (const normalized of normalizedBooks) {
           await this.persistSnapshot(normalized, correlationId);
@@ -217,6 +267,12 @@ export class DataIngestionService implements OnModuleInit {
           this.eventEmitter.emit(
             EVENT_NAMES.ORDERBOOK_UPDATED,
             new OrderBookUpdatedEvent(normalized),
+          );
+
+          this.healthService.recordContractUpdate(
+            PlatformId.POLYMARKET,
+            normalized.contractId,
+            batchLatency,
           );
 
           this.logger.log({
@@ -248,6 +304,20 @@ export class DataIngestionService implements OnModuleInit {
 
     // Poll degraded platforms via REST fallback
     await this.pollDegradedPlatforms(correlationId);
+
+    // Polling cycle duration metric (AC #12)
+    const pollingDuration = Date.now() - methodStartTime;
+    this.logger.log({
+      message: 'Polling cycle complete',
+      module: 'data-ingestion',
+      correlationId,
+      data: {
+        kalshiContracts: kalshiTickers.length,
+        polymarketContracts: polymarketTokens.length,
+        pollingCycleDurationMs: pollingDuration,
+        kalshiConcurrency: this.kalshiConcurrency,
+      },
+    });
   }
 
   /**
@@ -270,9 +340,13 @@ export class DataIngestionService implements OnModuleInit {
         new OrderBookUpdatedEvent(normalized),
       );
 
-      // Track latency for health monitoring (use platformId from normalized data)
+      // Track latency for health monitoring — per-contract for staleness consistency with polling path
       const latency = Date.now() - startTime;
-      this.healthService.recordUpdate(normalized.platformId, latency);
+      this.healthService.recordContractUpdate(
+        normalized.platformId,
+        normalized.contractId,
+        latency,
+      );
 
       this.logger.log({
         message: 'Order book normalized (WebSocket)',
@@ -324,10 +398,8 @@ export class DataIngestionService implements OnModuleInit {
       },
     ];
 
-    // Degraded polling uses sequential per-contract getOrderBook() intentionally:
-    // - Isolates failures to individual contracts (one failure doesn't lose the whole batch)
-    // - Tracks per-contract latency for granular health recovery signals
-    // - Matches Kalshi's sequential pattern (no batch API available)
+    // Degraded fallback intentionally uses per-contract sequential polling for fault isolation —
+    // batch is in the main polling path. One contract failure doesn't lose the whole batch.
     for (const { connector, contracts, platformId } of connectors) {
       if (!this.degradationService.isDegraded(platformId)) continue;
 
@@ -342,7 +414,11 @@ export class DataIngestionService implements OnModuleInit {
             new OrderBookUpdatedEvent(book),
           );
           const latency = Date.now() - startTime;
-          this.healthService.recordUpdate(platformId, latency);
+          this.healthService.recordContractUpdate(
+            platformId,
+            contractId,
+            latency,
+          );
           this.degradationService.incrementPollingCycle(platformId);
 
           this.logger.log({

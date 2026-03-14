@@ -108,6 +108,14 @@ export class RateLimiter {
     };
   }
 
+  /**
+   * Returns the read refill rate per second.
+   * Used by DataIngestionService to estimate polling cycle duration.
+   */
+  getReadRate(): number {
+    return this.readRefillRatePerSec;
+  }
+
   private checkUtilization(
     type: 'read' | 'write',
     tokens: number,
