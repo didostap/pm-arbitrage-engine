@@ -25,7 +25,7 @@ import { parseJsonField } from '../../common/schemas/parse-json-field.js';
 export class CorrelationTrackerService {
   private readonly logger = new Logger(CorrelationTrackerService.name);
   private clusterExposures: ClusterExposure[] = [];
-  private readonly bankrollUsd: Decimal;
+  private bankrollUsd: Decimal;
   private readonly softLimitPct: Decimal;
 
   constructor(
@@ -39,6 +39,14 @@ export class CorrelationTrackerService {
     this.softLimitPct = new Decimal(
       this.configService.get<string>('RISK_CLUSTER_SOFT_LIMIT_PCT', '0.12'),
     );
+  }
+
+  /**
+   * Update the bankroll value used for cluster exposure calculations.
+   * Called by RiskManagerService after loading/reloading bankroll from DB.
+   */
+  updateBankroll(bankrollUsd: Decimal): void {
+    this.bankrollUsd = bankrollUsd;
   }
 
   /**

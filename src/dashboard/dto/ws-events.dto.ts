@@ -72,4 +72,5 @@ export const WS_EVENTS = {
   POSITION_UPDATE: 'position.update',
   MATCH_PENDING: 'match.pending',
   BATCH_COMPLETE: 'batch.complete',
+  CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
 } as const;

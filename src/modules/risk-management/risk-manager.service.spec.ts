@@ -14,6 +14,7 @@ import {
 } from './risk-manager.service';
 import { PrismaService } from '../../common/prisma.service';
 import { CorrelationTrackerService } from './correlation-tracker.service';
+import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
 import { EVENT_NAMES } from '../../common/events';
 import { RiskLimitError, RISK_ERROR_CODES } from '../../common/errors';
 import { FinancialDecimal } from '../../common/utils/financial-math';
@@ -142,9 +143,25 @@ describe('RiskManagerService', () => {
     };
   }
 
+  function createMockEngineConfigRepository(bankroll = '10000') {
+    return {
+      get: vi.fn().mockResolvedValue(null),
+      upsertBankroll: vi.fn().mockResolvedValue({
+        id: 'cfg-1',
+        singletonKey: 'default',
+        bankrollUsd: { toString: () => bankroll },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    };
+  }
+
+  let mockEngineConfigRepo: ReturnType<typeof createMockEngineConfigRepository>;
+
   beforeEach(async () => {
     mockConfigService = createMockConfigService();
     mockEventEmitter = { emit: vi.fn() };
+    mockEngineConfigRepo = createMockEngineConfigRepository();
     mockPrisma = {
       riskState: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -172,7 +189,12 @@ describe('RiskManagerService', () => {
             getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
             recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
             getTriageRecommendations: vi.fn().mockResolvedValue([]),
+            updateBankroll: vi.fn(),
           },
+        },
+        {
+          provide: EngineConfigRepository,
+          useValue: mockEngineConfigRepo,
         },
       ],
     }).compile();
@@ -198,7 +220,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository('-100'),
           },
         ],
       }).compile();
@@ -224,7 +251,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -250,7 +282,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -276,7 +313,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -302,7 +344,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -328,7 +375,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -354,7 +406,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -425,7 +482,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository('0'),
           },
         ],
       }).compile();
@@ -986,7 +1048,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -1179,7 +1246,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -1219,7 +1291,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -1256,7 +1333,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -2062,7 +2144,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();
@@ -2103,7 +2190,12 @@ describe('RiskManagerService', () => {
               getClusterExposures: vi.fn().mockReturnValue([]),
               getAggregateExposurePct: vi.fn().mockReturnValue(new Decimal(0)),
               recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+              updateBankroll: vi.fn(),
             },
+          },
+          {
+            provide: EngineConfigRepository,
+            useValue: createMockEngineConfigRepository(),
           },
         ],
       }).compile();

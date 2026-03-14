@@ -200,6 +200,10 @@ export const EVENT_NAMES = {
   STRESS_TEST_COMPLETED: 'risk.stress_test.completed',
   /** Emitted when stress test indicates risk parameters are too loose */
   STRESS_TEST_ALERT: 'risk.stress_test.alert',
+
+  // [Story 9.14] Config Events
+  /** Emitted when bankroll value is updated via dashboard */
+  CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
 } as const;
 
 /**

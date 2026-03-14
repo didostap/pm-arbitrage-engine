@@ -51,6 +51,16 @@ describe('Core Lifecycle (e2e)', () => {
         findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
       },
+      engineConfig: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({
+          id: 'cfg-1',
+          singletonKey: 'default',
+          bankrollUsd: { toString: () => '10000' },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      },
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({

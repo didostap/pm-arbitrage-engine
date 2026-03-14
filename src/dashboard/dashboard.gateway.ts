@@ -25,6 +25,8 @@ import type {
 import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { EVENT_NAMES } from '../common/events/event-catalog';
+import type { BankrollUpdatedEvent } from '../common/events/config.events';
+import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
 @WebSocketGateway({ path: '/ws' })
@@ -145,6 +147,19 @@ export class DashboardGateway
   ): void {
     const envelope = this.mapper.mapAggregateClusterLimitBreachedAlert(event);
     this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.CONFIG_BANKROLL_UPDATED)
+  handleBankrollUpdated(event: BankrollUpdatedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.CONFIG_BANKROLL_UPDATED,
+      data: {
+        previousValue: event.previousValue,
+        newValue: event.newValue,
+        updatedBy: event.updatedBy,
+      },
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // --- Private helpers ---

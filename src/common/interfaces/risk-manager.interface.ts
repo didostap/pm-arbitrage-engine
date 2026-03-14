@@ -102,4 +102,16 @@ export interface IRiskManager {
     realizedPnl: unknown,
     pairId?: PairId,
   ): Promise<void>;
+  /**
+   * Get bankroll configuration from DB (bankroll value + last update timestamp).
+   */
+  getBankrollConfig(): Promise<{ bankrollUsd: string; updatedAt: string }>;
+  /**
+   * Get current bankroll as Decimal (for other services to read single source of truth).
+   */
+  getBankrollUsd(): Decimal;
+  /**
+   * Re-read bankroll from DB and recalculate all derived limits.
+   */
+  reloadBankroll(): Promise<void>;
 }

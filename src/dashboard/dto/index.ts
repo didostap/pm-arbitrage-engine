@@ -8,3 +8,4 @@ export * from './common-query.dto';
 export * from './match-approval.dto';
 export * from './performance.dto';
 export * from './position-detail.dto';
+export * from './bankroll-config.dto';

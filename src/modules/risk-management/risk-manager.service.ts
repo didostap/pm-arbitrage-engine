@@ -39,6 +39,7 @@ import {
 } from '../../common/errors/risk-limit-error';
 import { randomUUID } from 'crypto';
 import { CorrelationTrackerService } from './correlation-tracker.service';
+import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
 import {
   asClusterId,
   asReservationId,
@@ -66,15 +67,18 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   private lastResetTimestamp: Date | null = null;
   private reservations = new Map<string, BudgetReservation>();
   private paperActivePairIds = new Set<string>();
+  private bankrollUpdatedAt: Date = new Date();
 
   constructor(
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
     private readonly prisma: PrismaService,
     private readonly correlationTracker: CorrelationTrackerService,
+    private readonly engineConfigRepository: EngineConfigRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.loadBankrollFromDb();
     this.validateConfig();
     await this.initializeStateFromDb();
     await this.clearStaleReservations();
@@ -103,12 +107,79 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
   }
 
+  private async loadBankrollFromDb(): Promise<void> {
+    const engineConfig = await this.engineConfigRepository.get();
+    if (engineConfig) {
+      const bankroll = Number(engineConfig.bankrollUsd.toString());
+      // Set partial config — validateConfig() will fill the rest
+      this.config = { bankrollUsd: bankroll } as RiskConfig;
+      this.bankrollUpdatedAt = engineConfig.updatedAt;
+      this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
+      this.logger.log({
+        message: 'Bankroll loaded from database',
+        data: { bankrollUsd: bankroll },
+      });
+    } else {
+      const seedValue =
+        this.configService.get<string>('RISK_BANKROLL_USD') ?? '10000';
+      const row = await this.engineConfigRepository.upsertBankroll(seedValue);
+      const bankroll = Number(row.bankrollUsd.toString());
+      this.config = { bankrollUsd: bankroll } as RiskConfig;
+      this.bankrollUpdatedAt = row.updatedAt;
+      this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
+      this.logger.log({
+        message: 'Bankroll seeded to database from env var',
+        data: { bankrollUsd: bankroll, source: 'RISK_BANKROLL_USD' },
+      });
+    }
+  }
+
+  async reloadBankroll(): Promise<void> {
+    const engineConfig = await this.engineConfigRepository.get();
+    if (!engineConfig) {
+      this.logger.warn({
+        message: 'reloadBankroll called but no EngineConfig row exists',
+      });
+      return;
+    }
+    const bankroll = Number(engineConfig.bankrollUsd.toString());
+    this.config = {
+      ...this.config,
+      bankrollUsd: bankroll,
+    };
+    this.bankrollUpdatedAt = engineConfig.updatedAt;
+    this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
+    this.logger.log({
+      message: 'Bankroll reloaded from database',
+      data: {
+        bankrollUsd: bankroll,
+        maxPositionSizeUsd: new FinancialDecimal(bankroll)
+          .mul(new FinancialDecimal(this.config.maxPositionPct))
+          .toString(),
+        dailyLossLimitUsd: new FinancialDecimal(bankroll)
+          .mul(new FinancialDecimal(this.config.dailyLossPct))
+          .toString(),
+      },
+    });
+  }
+
+  getBankrollConfig(): Promise<{
+    bankrollUsd: string;
+    updatedAt: string;
+  }> {
+    return Promise.resolve({
+      bankrollUsd: String(this.config.bankrollUsd),
+      updatedAt: this.bankrollUpdatedAt.toISOString(),
+    });
+  }
+
+  getBankrollUsd(): Decimal {
+    return new FinancialDecimal(this.config.bankrollUsd);
+  }
+
   private validateConfig(): void {
-    const bankrollRaw = this.configService.get<string | number>(
-      'RISK_BANKROLL_USD',
-    );
-    const bankroll =
-      bankrollRaw !== undefined ? Number(bankrollRaw) : undefined;
+    // bankrollUsd is already set by loadBankrollFromDb() — validate it
+    const bankroll = this.config?.bankrollUsd;
     const maxPctRaw = this.configService.get<string | number>(
       'RISK_MAX_POSITION_PCT',
       0.03,

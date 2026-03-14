@@ -38,6 +38,7 @@ import {
   formatOrderbookRecovered,
   formatClusterLimitBreached,
   formatAggregateClusterLimitBreached,
+  formatBankrollUpdated,
 } from './formatters/telegram-message.formatter.js';
 import { type AlertSeverity, classifyEventSeverity } from './event-severity.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -70,6 +71,7 @@ import type {
 import type { ResolutionDivergedEvent } from '../../common/events/resolution-diverged.event.js';
 import type { ResolutionPollCompletedEvent } from '../../common/events/resolution-poll-completed.event.js';
 import type { CalibrationCompletedEvent } from '../../common/events/calibration-completed.event.js';
+import type { BankrollUpdatedEvent } from '../../common/events/config.events.js';
 
 interface BufferedMessage {
   text: string;
@@ -114,6 +116,7 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.ORDERBOOK_RECOVERED,
   EVENT_NAMES.CLUSTER_LIMIT_BREACHED,
   EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
+  EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
 ]);
 
 /**
@@ -204,6 +207,10 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
       formatAggregateClusterLimitBreached(
         e as AggregateClusterLimitBreachedEvent,
       ),
+  ],
+  [
+    EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
+    (e) => formatBankrollUpdated(e as BankrollUpdatedEvent),
   ],
 ]);
 

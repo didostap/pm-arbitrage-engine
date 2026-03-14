@@ -679,3 +679,22 @@ export function formatAggregateClusterLimitBreached(event: {
   const footer = formatCorrelationFooter(event as BaseEvent);
   return smartTruncate(`${header}\n\n${body}${footer}`);
 }
+
+export function formatBankrollUpdated(event: {
+  previousValue: string;
+  newValue: string;
+  updatedBy: string;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.warning} <b>⚠️ Bankroll Updated</b>`;
+  const prev = escapeHtml(event.previousValue);
+  const next = escapeHtml(event.newValue);
+  const body = [
+    `Previous: <code>$${prev}</code>`,
+    `New: <code>$${next}</code>`,
+    `Updated by: <code>${escapeHtml(event.updatedBy)}</code>`,
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}

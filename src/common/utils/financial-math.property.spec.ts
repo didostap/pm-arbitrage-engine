@@ -9,6 +9,7 @@ import { FinancialMath, FinancialDecimal } from './financial-math';
 import { FeeSchedule, PlatformId } from '../types/platform.type';
 import { RiskManagerService } from '../../modules/risk-management/risk-manager.service';
 import { CorrelationTrackerService } from '../../modules/risk-management/correlation-tracker.service';
+import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
 import { PrismaService } from '../prisma.service';
 
 // ── Arbitraries ──
@@ -407,6 +408,7 @@ describe('Composition chain end-to-end property tests', () => {
             .fn()
             .mockReturnValue(new FinancialDecimal(0)),
           recalculateClusterExposure: vi.fn().mockResolvedValue(undefined),
+          updateBankroll: vi.fn(),
         };
 
         const module = await Test.createTestingModule({
@@ -418,6 +420,19 @@ describe('Composition chain end-to-end property tests', () => {
             {
               provide: CorrelationTrackerService,
               useValue: mockCorrelationTracker,
+            },
+            {
+              provide: EngineConfigRepository,
+              useValue: {
+                get: vi.fn().mockResolvedValue(null),
+                upsertBankroll: vi.fn().mockResolvedValue({
+                  id: 'cfg-1',
+                  singletonKey: 'default',
+                  bankrollUsd: { toString: () => String(bankrollNum) },
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                }),
+              },
             },
           ],
         }).compile();

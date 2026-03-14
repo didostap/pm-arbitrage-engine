@@ -7,6 +7,7 @@ import { AuthTokenGuard } from '../../common/guards/auth-token.guard';
 import { RISK_MANAGER_TOKEN } from './risk-management.constants';
 import { CorrelationTrackerService } from './correlation-tracker.service';
 import { ContractMatchingModule } from '../contract-matching/contract-matching.module';
+import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
 
 export { RISK_MANAGER_TOKEN };
 
@@ -21,7 +22,12 @@ export { RISK_MANAGER_TOKEN };
     CorrelationTrackerService,
     StressTestService,
     AuthTokenGuard,
+    EngineConfigRepository,
   ],
-  exports: [RISK_MANAGER_TOKEN, CorrelationTrackerService],
+  exports: [
+    RISK_MANAGER_TOKEN,
+    CorrelationTrackerService,
+    EngineConfigRepository,
+  ],
 })
 export class RiskManagementModule {}

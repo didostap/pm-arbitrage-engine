@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Put,
   Query,
   UseGuards,
   UsePipes,
@@ -28,6 +30,8 @@ import {
   PositionListResponseDto,
   AlertListResponseDto,
   PositionsQueryDto,
+  BankrollConfigResponseDto,
+  UpdateBankrollDto,
 } from './dto';
 
 @Controller('dashboard')
@@ -140,5 +144,23 @@ export class DashboardController {
   async getAlerts(): Promise<AlertListResponseDto> {
     const data = await this.dashboardService.getAlerts();
     return { data, count: data.length, timestamp: new Date().toISOString() };
+  }
+
+  @Get('config/bankroll')
+  @ApiOperation({ summary: 'Get current bankroll configuration' })
+  @ApiResponse({ status: 200, type: BankrollConfigResponseDto })
+  async getBankrollConfig(): Promise<BankrollConfigResponseDto> {
+    const data = await this.dashboardService.getBankrollConfig();
+    return { data, timestamp: new Date().toISOString() };
+  }
+
+  @Put('config/bankroll')
+  @ApiOperation({ summary: 'Update bankroll value (hot-reload, no restart)' })
+  @ApiResponse({ status: 200, type: BankrollConfigResponseDto })
+  async updateBankroll(
+    @Body(new ValidationPipe({ whitelist: true })) dto: UpdateBankrollDto,
+  ): Promise<BankrollConfigResponseDto> {
+    const data = await this.dashboardService.updateBankroll(dto.bankrollUsd);
+    return { data, timestamp: new Date().toISOString() };
   }
 }

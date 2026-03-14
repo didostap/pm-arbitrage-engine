@@ -15,6 +15,8 @@ describe('DashboardController', () => {
       getPositionById: vi.fn(),
       getPositionDetails: vi.fn(),
       getAlerts: vi.fn(),
+      getBankrollConfig: vi.fn(),
+      updateBankroll: vi.fn(),
     } as unknown as DashboardService;
     controller = new DashboardController(service);
   });
@@ -261,6 +263,42 @@ describe('DashboardController', () => {
       await expect(
         controller.getPositionDetails('nonexistent'),
       ).rejects.toThrow(SystemHealthError);
+    });
+  });
+
+  describe('GET /dashboard/config/bankroll', () => {
+    it('should return bankroll config wrapped in standard response', async () => {
+      const config = {
+        bankrollUsd: '10000',
+        updatedAt: '2026-03-14T10:00:00.000Z',
+      };
+      (service.getBankrollConfig as ReturnType<typeof vi.fn>).mockResolvedValue(
+        config,
+      );
+
+      const result = await controller.getBankrollConfig();
+      expect(result.data).toEqual(config);
+      expect(result.timestamp).toBeDefined();
+    });
+  });
+
+  describe('PUT /dashboard/config/bankroll', () => {
+    it('should update bankroll and return updated config', async () => {
+      const updatedConfig = {
+        bankrollUsd: '15000',
+        updatedAt: '2026-03-14T11:00:00.000Z',
+      };
+      (service.updateBankroll as ReturnType<typeof vi.fn>).mockResolvedValue(
+        updatedConfig,
+      );
+
+      const result = await controller.updateBankroll({
+        bankrollUsd: '15000',
+      });
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(service.updateBankroll).toHaveBeenCalledWith('15000');
+      expect(result.data).toEqual(updatedConfig);
+      expect(result.timestamp).toBeDefined();
     });
   });
 

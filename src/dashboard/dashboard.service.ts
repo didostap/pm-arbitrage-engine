@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
@@ -9,6 +9,7 @@ import {
 } from '../common/schemas/prisma-json.schema';
 import { EVENT_NAMES } from '../common/events/event-catalog';
 import { DataCorruptionDetectedEvent } from '../common/events/system.events';
+import { BankrollUpdatedEvent } from '../common/events/config.events';
 import {
   SystemHealthError,
   SYSTEM_HEALTH_ERROR_CODES,
@@ -30,6 +31,10 @@ import type {
 } from './dto/position-detail.dto';
 import { PositionEnrichmentService } from './position-enrichment.service';
 import type { PositionId } from '../common/types/branded.type';
+import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
+import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.module';
+import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
+import type { BankrollConfigDto } from './dto/bankroll-config.dto';
 
 @Injectable()
 export class DashboardService {
@@ -41,6 +46,9 @@ export class DashboardService {
     private readonly enrichmentService: PositionEnrichmentService,
     private readonly positionRepository: PositionRepository,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(RISK_MANAGER_TOKEN)
+    private readonly riskManager: IRiskManager,
+    private readonly engineConfigRepository: EngineConfigRepository,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -91,14 +99,15 @@ export class DashboardService {
               .toNumber()
           : 0;
 
-      // Balance computation
-      const bankrollStr = this.configService.get<string>('RISK_BANKROLL_USD');
+      // Balance computation — single source of truth via IRiskManager
+      const bankrollConfig = await this.riskManager.getBankrollConfig();
+      const bankrollStr = bankrollConfig.bankrollUsd;
       let totalBankroll: string | null = null;
       let deployedCapital: string | null = null;
       let availableCapital: string | null = null;
       let reservedCapital: string | null = null;
 
-      if (bankrollStr) {
+      if (bankrollStr && Number(bankrollStr) > 0) {
         totalBankroll = bankrollStr;
         const bankroll = new Decimal(bankrollStr);
         const deployed = riskState?.totalCapitalDeployed
@@ -126,7 +135,8 @@ export class DashboardService {
         }
       } else {
         this.logger.warn({
-          message: 'BANKROLL_USD not configured — balance fields will be null',
+          message:
+            'Bankroll is zero or not configured — balance fields will be null',
         });
       }
 
@@ -155,6 +165,28 @@ export class DashboardService {
         'DashboardService',
       );
     }
+  }
+
+  getBankrollConfig(): Promise<BankrollConfigDto> {
+    return this.riskManager.getBankrollConfig();
+  }
+
+  async updateBankroll(bankrollUsd: string): Promise<BankrollConfigDto> {
+    const previousConfig = await this.riskManager.getBankrollConfig();
+    await this.engineConfigRepository.upsertBankroll(bankrollUsd);
+    await this.riskManager.reloadBankroll();
+    const newConfig = await this.riskManager.getBankrollConfig();
+
+    this.eventEmitter.emit(
+      EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
+      new BankrollUpdatedEvent(
+        previousConfig.bankrollUsd,
+        newConfig.bankrollUsd,
+        'dashboard',
+      ),
+    );
+
+    return newConfig;
   }
 
   async getHealth(): Promise<PlatformHealthDto[]> {

@@ -16,16 +16,15 @@ enum Platform {
   POLYMARKET
 }
 
-// Placeholder model for initial migration (required for Prisma to generate migration)
-// This will be removed in Story 1.4 when real tables are added
-model SystemMetadata {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  value     String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+// Engine configuration singleton — typed config persisted in DB (replaces SystemMetadata placeholder)
+model EngineConfig {
+  id           String   @id @default(uuid()) @map("id")
+  singletonKey String   @unique @default("default") @map("singleton_key")
+  bankrollUsd  Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  @@map("system_metadata")
+  @@map("engine_config")
 }
 
 // Order book snapshots for audit trail and compliance (7-year retention)

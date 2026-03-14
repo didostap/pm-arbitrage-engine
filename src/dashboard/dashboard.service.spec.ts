@@ -6,6 +6,8 @@ import { PrismaService } from '../common/prisma.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
 import { PositionEnrichmentService } from './position-enrichment.service';
 import type { EnrichmentResult } from './position-enrichment.service';
+import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
+import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
 import Decimal from 'decimal.js';
 
 function createMockPrisma() {
@@ -63,6 +65,30 @@ function createMockEventEmitter() {
   } as unknown as EventEmitter2;
 }
 
+function createMockRiskManager() {
+  return {
+    getBankrollConfig: vi.fn().mockResolvedValue({
+      bankrollUsd: '10000',
+      updatedAt: new Date().toISOString(),
+    }),
+    getBankrollUsd: vi.fn().mockReturnValue(new Decimal('10000')),
+    reloadBankroll: vi.fn().mockResolvedValue(undefined),
+  } as unknown as IRiskManager;
+}
+
+function createMockEngineConfigRepository() {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    upsertBankroll: vi.fn().mockResolvedValue({
+      id: 'cfg-1',
+      singletonKey: 'default',
+      bankrollUsd: { toString: () => '10000' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  };
+}
+
 const mockEnrichedResult: EnrichmentResult = {
   status: 'enriched',
   data: {
@@ -82,6 +108,8 @@ describe('DashboardService', () => {
   let enrichmentService: ReturnType<typeof createMockEnrichmentService>;
   let positionRepository: ReturnType<typeof createMockPositionRepository>;
   let eventEmitter: ReturnType<typeof createMockEventEmitter>;
+  let riskManager: ReturnType<typeof createMockRiskManager>;
+  let engineConfigRepo: ReturnType<typeof createMockEngineConfigRepository>;
 
   beforeEach(() => {
     prisma = createMockPrisma();
@@ -89,12 +117,16 @@ describe('DashboardService', () => {
     enrichmentService = createMockEnrichmentService();
     positionRepository = createMockPositionRepository();
     eventEmitter = createMockEventEmitter();
+    riskManager = createMockRiskManager();
+    engineConfigRepo = createMockEngineConfigRepository();
     service = new DashboardService(
       prisma,
       configService,
       enrichmentService,
       positionRepository,
       eventEmitter,
+      riskManager,
+      engineConfigRepo as unknown as EngineConfigRepository,
     );
 
     // Default mock for riskState (overview balance computation)
@@ -220,17 +252,6 @@ describe('DashboardService', () => {
         reservedCapital: new Decimal('100'),
       });
 
-      (configService.get as ReturnType<typeof vi.fn>).mockImplementation(
-        (key: string, defaultValue?: string) => {
-          if (key === 'RISK_BANKROLL_USD') return '10000';
-          const config: Record<string, string> = {
-            PLATFORM_MODE_KALSHI: 'paper',
-            PLATFORM_MODE_POLYMARKET: 'paper',
-          };
-          return config[key] ?? defaultValue;
-        },
-      );
-
       const result = await service.getOverview();
 
       expect(result.totalBankroll).toBe('10000');
@@ -239,7 +260,7 @@ describe('DashboardService', () => {
       expect(result.availableCapital).toBe('9400');
     });
 
-    it('should return null balance fields when RISK_BANKROLL_USD not configured', async () => {
+    it('should return null balance fields when bankroll is zero', async () => {
       (
         prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
       ).mockResolvedValue([]);
@@ -255,6 +276,13 @@ describe('DashboardService', () => {
       (
         prisma.riskState.findUnique as ReturnType<typeof vi.fn>
       ).mockResolvedValue(null);
+
+      (
+        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
+        bankrollUsd: '0',
+        updatedAt: new Date().toISOString(),
+      });
 
       const result = await service.getOverview();
 
@@ -285,17 +313,6 @@ describe('DashboardService', () => {
         totalCapitalDeployed: new Decimal('9000'),
         reservedCapital: new Decimal('2000'),
       });
-
-      (configService.get as ReturnType<typeof vi.fn>).mockImplementation(
-        (key: string, defaultValue?: string) => {
-          if (key === 'RISK_BANKROLL_USD') return '10000';
-          const config: Record<string, string> = {
-            PLATFORM_MODE_KALSHI: 'paper',
-            PLATFORM_MODE_POLYMARKET: 'paper',
-          };
-          return config[key] ?? defaultValue;
-        },
-      );
 
       const result = await service.getOverview();
 
@@ -1042,6 +1059,77 @@ describe('DashboardService', () => {
       const result = await service.getPositionDetails('pos-1');
 
       expect(result!.entryReasoning).toContain('Edge 2.5%');
+    });
+  });
+
+  describe('getBankrollConfig', () => {
+    it('should delegate to riskManager.getBankrollConfig()', async () => {
+      const expected = {
+        bankrollUsd: '10000',
+        updatedAt: '2026-03-14T10:00:00.000Z',
+      };
+      (
+        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(expected);
+
+      const result = await service.getBankrollConfig();
+
+      expect(result).toEqual(expected);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(riskManager.getBankrollConfig).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateBankroll', () => {
+    it('should upsert to DB, reload risk manager, and emit event', async () => {
+      (riskManager.getBankrollConfig as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({
+          bankrollUsd: '10000',
+          updatedAt: '2026-03-14T10:00:00.000Z',
+        })
+        .mockResolvedValueOnce({
+          bankrollUsd: '15000',
+          updatedAt: '2026-03-14T11:00:00.000Z',
+        });
+
+      const result = await service.updateBankroll('15000');
+
+      expect(engineConfigRepo.upsertBankroll).toHaveBeenCalledWith('15000');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(riskManager.reloadBankroll).toHaveBeenCalled();
+      expect(result.bankrollUsd).toBe('15000');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'config.bankroll.updated',
+        expect.objectContaining({
+          previousValue: '10000',
+          newValue: '15000',
+          updatedBy: 'dashboard',
+        }),
+      );
+    });
+
+    it('should emit event with correct previous and new values', async () => {
+      (riskManager.getBankrollConfig as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({
+          bankrollUsd: '5000',
+          updatedAt: '2026-03-14T10:00:00.000Z',
+        })
+        .mockResolvedValueOnce({
+          bankrollUsd: '7500',
+          updatedAt: '2026-03-14T11:00:00.000Z',
+        });
+
+      await service.updateBankroll('7500');
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'config.bankroll.updated',
+        expect.objectContaining({
+          previousValue: '5000',
+          newValue: '7500',
+        }),
+      );
     });
   });
 
