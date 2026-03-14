@@ -70,3 +70,5 @@ data/
 
 # Generated OpenAPI spec (served live at /api/docs-json)
 api-spec.json
+
+/backups/
