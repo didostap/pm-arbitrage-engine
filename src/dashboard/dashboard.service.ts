@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
+import { calculateLegCapital } from '../common/utils/capital';
 import { parseJsonField } from '../common/schemas/parse-json-field';
 import {
   entryPricesSchema,
@@ -60,7 +61,7 @@ export class DashboardService {
         totalOrders,
         filledOrders,
         activeAlertCount,
-        riskState,
+        riskStates,
       ] = await Promise.all([
         this.getLatestHealthLogs(),
         this.prisma.openPosition.count({
@@ -82,7 +83,7 @@ export class DashboardService {
         this.prisma.openPosition.count({
           where: { status: 'SINGLE_LEG_EXPOSED' },
         }),
-        this.prisma.riskState.findUnique({
+        this.prisma.riskState.findMany({
           where: { singletonKey: 'default' },
         }),
       ]);
@@ -99,40 +100,21 @@ export class DashboardService {
               .toNumber()
           : 0;
 
-      // Balance computation — single source of truth via IRiskManager
+      // Per-mode capital computation
       const bankrollConfig = await this.riskManager.getBankrollConfig();
-      const bankrollStr = bankrollConfig.bankrollUsd;
-      let totalBankroll: string | null = null;
-      let deployedCapital: string | null = null;
-      let availableCapital: string | null = null;
-      let reservedCapital: string | null = null;
+      const liveBankrollStr = bankrollConfig.bankrollUsd;
+      const paperBankrollStr =
+        bankrollConfig.paperBankrollUsd ?? bankrollConfig.bankrollUsd;
+      let capitalOverview: DashboardOverviewDto['capitalOverview'] = null;
 
-      if (bankrollStr && Number(bankrollStr) > 0) {
-        totalBankroll = bankrollStr;
-        const bankroll = new Decimal(bankrollStr);
-        const deployed = riskState?.totalCapitalDeployed
-          ? new Decimal(riskState.totalCapitalDeployed.toString())
-          : new Decimal(0);
-        const reserved = riskState?.reservedCapital
-          ? new Decimal(riskState.reservedCapital.toString())
-          : new Decimal(0);
+      if (liveBankrollStr && Number(liveBankrollStr) > 0) {
+        const liveState = riskStates.find((r) => r.mode === 'live');
+        const paperState = riskStates.find((r) => r.mode === 'paper');
 
-        deployedCapital = deployed.toString();
-        reservedCapital = reserved.toString();
-
-        const available = bankroll.minus(deployed).minus(reserved);
-        availableCapital = Decimal.max(available, new Decimal(0)).toString();
-
-        if (available.isNeg()) {
-          this.logger.warn({
-            message: 'Available capital is negative — configuration drift',
-            data: {
-              bankroll: bankrollStr,
-              deployed: deployedCapital,
-              reserved: reservedCapital,
-            },
-          });
-        }
+        capitalOverview = {
+          live: this.computeModeCapital(liveBankrollStr, liveState),
+          paper: this.computeModeCapital(paperBankrollStr, paperState),
+        };
       } else {
         this.logger.warn({
           message:
@@ -146,10 +128,7 @@ export class DashboardService {
         executionQualityRatio,
         openPositionCount,
         activeAlertCount,
-        totalBankroll,
-        deployedCapital,
-        availableCapital,
-        reservedCapital,
+        capitalOverview,
       };
     } catch (error) {
       this.logger.error({
@@ -766,6 +745,37 @@ export class DashboardService {
     }
   }
 
+  private computeModeCapital(
+    bankrollStr: string,
+    riskState?: {
+      totalCapitalDeployed: { toString(): string };
+      reservedCapital: { toString(): string };
+    } | null,
+  ): {
+    bankroll: string | null;
+    deployed: string | null;
+    available: string | null;
+    reserved: string | null;
+  } {
+    const bankroll = new Decimal(bankrollStr);
+    const deployed = riskState?.totalCapitalDeployed
+      ? new Decimal(riskState.totalCapitalDeployed.toString())
+      : new Decimal(0);
+    const reserved = riskState?.reservedCapital
+      ? new Decimal(riskState.reservedCapital.toString())
+      : new Decimal(0);
+    const available = Decimal.max(
+      bankroll.minus(deployed).minus(reserved),
+      new Decimal(0),
+    );
+    return {
+      bankroll: bankroll.toString(),
+      deployed: deployed.toString(),
+      available: available.toString(),
+      reserved: reserved.toString(),
+    };
+  }
+
   private computeCapitalBreakdown(
     position: {
       kalshiOrder: {
@@ -819,8 +829,16 @@ export class DashboardService {
       position.polymarketOrder.fillSize.toString(),
     );
 
-    const entryCapitalKalshi = kalshiFillPrice.mul(kalshiFillSize);
-    const entryCapitalPolymarket = polyFillPrice.mul(polyFillSize);
+    const entryCapitalKalshi = calculateLegCapital(
+      position.kalshiSide ?? 'buy',
+      kalshiFillPrice,
+      kalshiFillSize,
+    );
+    const entryCapitalPolymarket = calculateLegCapital(
+      position.polymarketSide ?? 'buy',
+      polyFillPrice,
+      polyFillSize,
+    );
 
     const kalshiFeeRate = position.entryKalshiFeeRate
       ? new Decimal(position.entryKalshiFeeRate.toString())

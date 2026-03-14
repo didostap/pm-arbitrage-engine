@@ -55,16 +55,32 @@ export const HALT_REASONS = {
 } as const;
 export type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS];
 
+interface ModeRiskState {
+  openPositionCount: number;
+  totalCapitalDeployed: Decimal;
+  dailyPnl: Decimal;
+  activeHaltReasons: Set<HaltReason>;
+  dailyLossApproachEmitted: boolean;
+  lastResetTimestamp: Date | null;
+}
+
+function createDefaultModeRiskState(): ModeRiskState {
+  return {
+    openPositionCount: 0,
+    totalCapitalDeployed: new FinancialDecimal(0),
+    dailyPnl: new FinancialDecimal(0),
+    activeHaltReasons: new Set<HaltReason>(),
+    dailyLossApproachEmitted: false,
+    lastResetTimestamp: null,
+  };
+}
+
 @Injectable()
 export class RiskManagerService implements IRiskManager, OnModuleInit {
   private readonly logger = new Logger(RiskManagerService.name);
   private config!: RiskConfig;
-  private openPositionCount = 0;
-  private totalCapitalDeployed = new FinancialDecimal(0);
-  private dailyPnl = new FinancialDecimal(0);
-  private activeHaltReasons = new Set<HaltReason>();
-  private dailyLossApproachEmitted = false;
-  private lastResetTimestamp: Date | null = null;
+  private liveState: ModeRiskState = createDefaultModeRiskState();
+  private paperState: ModeRiskState = createDefaultModeRiskState();
   private reservations = new Map<string, BudgetReservation>();
   private paperActivePairIds = new Set<string>();
   private bankrollUpdatedAt: Date = new Date();
@@ -76,6 +92,19 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     private readonly correlationTracker: CorrelationTrackerService,
     private readonly engineConfigRepository: EngineConfigRepository,
   ) {}
+
+  private getState(isPaper: boolean): ModeRiskState {
+    return isPaper ? this.paperState : this.liveState;
+  }
+
+  private getBankrollForMode(isPaper: boolean): Decimal {
+    if (isPaper) {
+      return new FinancialDecimal(
+        this.config.paperBankrollUsd ?? this.config.bankrollUsd,
+      );
+    }
+    return new FinancialDecimal(this.config.bankrollUsd);
+  }
 
   async onModuleInit(): Promise<void> {
     await this.loadBankrollFromDb();
@@ -111,20 +140,35 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     const engineConfig = await this.engineConfigRepository.get();
     if (engineConfig) {
       const bankroll = Number(engineConfig.bankrollUsd.toString());
+      const paperBankroll = engineConfig.paperBankrollUsd
+        ? Number(engineConfig.paperBankrollUsd.toString())
+        : undefined;
       // Set partial config — validateConfig() will fill the rest
-      this.config = { bankrollUsd: bankroll } as RiskConfig;
+      this.config = {
+        bankrollUsd: bankroll,
+        paperBankrollUsd: paperBankroll,
+      } as RiskConfig;
       this.bankrollUpdatedAt = engineConfig.updatedAt;
       this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
       this.logger.log({
         message: 'Bankroll loaded from database',
-        data: { bankrollUsd: bankroll },
+        data: {
+          bankrollUsd: bankroll,
+          paperBankrollUsd: paperBankroll ?? null,
+        },
       });
     } else {
       const seedValue =
         this.configService.get<string>('RISK_BANKROLL_USD') ?? '10000';
       const row = await this.engineConfigRepository.upsertBankroll(seedValue);
       const bankroll = Number(row.bankrollUsd.toString());
-      this.config = { bankrollUsd: bankroll } as RiskConfig;
+      const paperBankroll = row.paperBankrollUsd
+        ? Number(row.paperBankrollUsd.toString())
+        : undefined;
+      this.config = {
+        bankrollUsd: bankroll,
+        paperBankrollUsd: paperBankroll,
+      } as RiskConfig;
       this.bankrollUpdatedAt = row.updatedAt;
       this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
       this.logger.log({
@@ -143,9 +187,13 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       return;
     }
     const bankroll = Number(engineConfig.bankrollUsd.toString());
+    const paperBankroll = engineConfig.paperBankrollUsd
+      ? Number(engineConfig.paperBankrollUsd.toString())
+      : undefined;
     this.config = {
       ...this.config,
       bankrollUsd: bankroll,
+      paperBankrollUsd: paperBankroll,
     };
     this.bankrollUpdatedAt = engineConfig.updatedAt;
     this.correlationTracker.updateBankroll(new FinancialDecimal(bankroll));
@@ -165,10 +213,15 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
   getBankrollConfig(): Promise<{
     bankrollUsd: string;
+    paperBankrollUsd: string | null;
     updatedAt: string;
   }> {
     return Promise.resolve({
       bankrollUsd: String(this.config.bankrollUsd),
+      paperBankrollUsd:
+        this.config.paperBankrollUsd != null
+          ? String(this.config.paperBankrollUsd)
+          : null,
       updatedAt: this.bankrollUpdatedAt.toISOString(),
     });
   }
@@ -223,6 +276,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
     this.config = {
       bankrollUsd: bankroll,
+      paperBankrollUsd: this.config?.paperBankrollUsd,
       maxPositionPct: maxPct,
       maxOpenPairs: maxPairs,
       dailyLossPct,
@@ -239,116 +293,130 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   private async initializeStateFromDb(): Promise<void> {
-    const state = await this.prisma.riskState.findFirst({
-      where: { singletonKey: 'default' },
+    const liveRow = await this.prisma.riskState.findFirst({
+      where: { singletonKey: 'default', mode: 'live' },
+    });
+    const paperRow = await this.prisma.riskState.findFirst({
+      where: { singletonKey: 'default', mode: 'paper' },
     });
 
-    if (state) {
-      this.openPositionCount = state.openPositionCount;
-      this.totalCapitalDeployed = new FinancialDecimal(
-        state.totalCapitalDeployed.toString(),
-      );
-      this.dailyPnl = new FinancialDecimal(state.dailyPnl.toString());
+    // Initialize each mode independently
+    for (const { row, mode } of [
+      { row: liveRow, mode: 'live' as const },
+      { row: paperRow, mode: 'paper' as const },
+    ]) {
+      const isPaper = mode === 'paper';
+      const state = this.getState(isPaper);
 
-      // Restore halt reasons from DB
-      this.activeHaltReasons = new Set<HaltReason>();
-      if (state.haltReason) {
-        try {
-          const parsed: unknown = JSON.parse(state.haltReason);
-          const validated = haltReasonSchema.safeParse(parsed);
-          if (validated.success) {
-            for (const r of validated.data) {
-              this.activeHaltReasons.add(r as HaltReason);
+      if (row) {
+        state.openPositionCount = row.openPositionCount;
+        state.totalCapitalDeployed = new FinancialDecimal(
+          row.totalCapitalDeployed.toString(),
+        );
+        state.dailyPnl = new FinancialDecimal(row.dailyPnl.toString());
+
+        // Restore halt reasons from DB
+        state.activeHaltReasons = new Set<HaltReason>();
+        if (row.haltReason) {
+          try {
+            const parsed: unknown = JSON.parse(row.haltReason);
+            const validated = haltReasonSchema.safeParse(parsed);
+            if (validated.success) {
+              for (const r of validated.data) {
+                state.activeHaltReasons.add(r as HaltReason);
+              }
+            } else if (typeof parsed === 'string' && parsed.length > 0) {
+              // Legacy single-string JSON format
+              state.activeHaltReasons.add(parsed as HaltReason);
+            } else {
+              this.eventEmitter.emit(
+                EVENT_NAMES.DATA_CORRUPTION_DETECTED,
+                new DataCorruptionDetectedEvent(
+                  'RiskState',
+                  'haltReason',
+                  `default:${mode}`,
+                  parsed,
+                  validated.error?.issues ?? [],
+                ),
+              );
             }
-          } else if (typeof parsed === 'string' && parsed.length > 0) {
-            // Legacy single-string JSON format
-            this.activeHaltReasons.add(parsed as HaltReason);
+          } catch {
+            // Legacy single-string format (not JSON)
+            if (
+              typeof row.haltReason === 'string' &&
+              row.haltReason.length > 0
+            ) {
+              state.activeHaltReasons.add(row.haltReason as HaltReason);
+            }
+          }
+        }
+
+        // Stale-day detection (per-mode)
+        const bankroll = this.getBankrollForMode(isPaper);
+        if (row.lastResetTimestamp) {
+          const todayMidnight = new Date();
+          todayMidnight.setUTCHours(0, 0, 0, 0);
+
+          if (row.lastResetTimestamp < todayMidnight) {
+            this.logger.log({
+              message: `Stale-day detected on startup for ${mode} mode, daily P&L reset`,
+              data: { previousDailyPnl: state.dailyPnl.toString(), mode },
+            });
+            state.dailyPnl = new FinancialDecimal(0);
+            state.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
+            state.lastResetTimestamp = todayMidnight;
+            state.dailyLossApproachEmitted = false;
+            await this.persistState(mode);
           } else {
-            this.eventEmitter.emit(
-              EVENT_NAMES.DATA_CORRUPTION_DETECTED,
-              new DataCorruptionDetectedEvent(
-                'RiskState',
-                'haltReason',
-                'default',
-                parsed,
-                validated.error?.issues ?? [],
-              ),
+            state.lastResetTimestamp = row.lastResetTimestamp;
+            // Re-evaluate halt if same day and loss exceeds limit
+            const dailyLossLimitUsd = bankroll.mul(
+              new FinancialDecimal(this.config.dailyLossPct),
             );
+            const absLoss = state.dailyPnl.isNegative()
+              ? state.dailyPnl.abs()
+              : new FinancialDecimal(0);
+            if (absLoss.gte(dailyLossLimitUsd)) {
+              state.activeHaltReasons.add(HALT_REASONS.DAILY_LOSS_LIMIT);
+            }
           }
-        } catch {
-          // Legacy single-string format (not JSON)
-          if (
-            typeof state.haltReason === 'string' &&
-            state.haltReason.length > 0
-          ) {
-            this.activeHaltReasons.add(state.haltReason as HaltReason);
-          }
-        }
-      }
-
-      // Stale-day detection
-      if (state.lastResetTimestamp) {
-        const todayMidnight = new Date();
-        todayMidnight.setUTCHours(0, 0, 0, 0);
-
-        if (state.lastResetTimestamp < todayMidnight) {
-          this.logger.log({
-            message: 'Stale-day detected on startup, daily P&L reset',
-            data: { previousDailyPnl: this.dailyPnl.toString() },
-          });
-          this.dailyPnl = new FinancialDecimal(0);
-          this.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
-          this.lastResetTimestamp = todayMidnight;
-          this.dailyLossApproachEmitted = false;
-          await this.persistState();
         } else {
-          this.lastResetTimestamp = state.lastResetTimestamp;
-          // Re-evaluate halt if same day and loss exceeds limit
-          const dailyLossLimitUsd = new FinancialDecimal(
-            this.config.bankrollUsd,
-          ).mul(new FinancialDecimal(this.config.dailyLossPct));
-          const absLoss = this.dailyPnl.isNegative()
-            ? this.dailyPnl.abs()
-            : new FinancialDecimal(0);
-          if (absLoss.gte(dailyLossLimitUsd)) {
-            this.activeHaltReasons.add(HALT_REASONS.DAILY_LOSS_LIMIT);
+          // No lastResetTimestamp — first run or corrupted state
+          const todayMidnight = new Date();
+          todayMidnight.setUTCHours(0, 0, 0, 0);
+          state.lastResetTimestamp = todayMidnight;
+
+          if (!state.dailyPnl.isZero()) {
+            this.logger.warn({
+              message:
+                'Corrupted state: non-zero dailyPnl with null lastResetTimestamp, resetting',
+              data: { dailyPnl: state.dailyPnl.toString(), mode },
+            });
+            state.dailyPnl = new FinancialDecimal(0);
+            state.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
+            await this.persistState(mode);
           }
         }
+
+        this.logger.log({
+          message: `Risk state restored from database (${mode})`,
+          data: {
+            mode,
+            openPositionCount: state.openPositionCount,
+            totalCapitalDeployed: state.totalCapitalDeployed.toString(),
+            dailyPnl: state.dailyPnl.toString(),
+            tradingHalted: state.activeHaltReasons.size > 0,
+          },
+        });
       } else {
-        // No lastResetTimestamp — first run or corrupted state
         const todayMidnight = new Date();
         todayMidnight.setUTCHours(0, 0, 0, 0);
-        this.lastResetTimestamp = todayMidnight;
-
-        if (!this.dailyPnl.isZero()) {
-          this.logger.warn({
-            message:
-              'Corrupted state: non-zero dailyPnl with null lastResetTimestamp, resetting',
-            data: { dailyPnl: this.dailyPnl.toString() },
-          });
-          this.dailyPnl = new FinancialDecimal(0);
-          this.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
-          await this.persistState();
-        }
+        state.lastResetTimestamp = todayMidnight;
+        await this.persistState(mode);
+        this.logger.log({
+          message: `Risk state initialized for ${mode} mode (new row created)`,
+        });
       }
-
-      this.logger.log({
-        message: 'Risk state restored from database',
-        data: {
-          openPositionCount: this.openPositionCount,
-          totalCapitalDeployed: this.totalCapitalDeployed.toString(),
-          dailyPnl: this.dailyPnl.toString(),
-          tradingHalted: this.isTradingHalted(),
-        },
-      });
-    } else {
-      const todayMidnight = new Date();
-      todayMidnight.setUTCHours(0, 0, 0, 0);
-      this.lastResetTimestamp = todayMidnight;
-      await this.persistState();
-      this.logger.log({
-        message: 'Risk state initialized (new singleton row created)',
-      });
     }
 
     // Restore paper active pair IDs from open positions
@@ -371,19 +439,23 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
   }
 
-  private async persistState(): Promise<void> {
+  private async persistState(mode: 'live' | 'paper' = 'live'): Promise<void> {
     try {
-      const reservedPositionSlots = this.getReservedPositionSlots();
-      const reservedCapital = this.getReservedCapital().toFixed();
-      const tradingHalted = this.isTradingHalted();
-      const haltReason = JSON.stringify([...this.activeHaltReasons]);
+      const isPaper = mode === 'paper';
+      const state = this.getState(isPaper);
+      const reservedPositionSlots = this.getReservedPositionSlots(isPaper);
+      const reservedCapital = this.getReservedCapital(isPaper).toFixed();
+      const tradingHalted = state.activeHaltReasons.size > 0;
+      const haltReason = JSON.stringify([...state.activeHaltReasons]);
       await this.prisma.riskState.upsert({
-        where: { singletonKey: 'default' },
+        where: {
+          singletonKey_mode: { singletonKey: 'default', mode },
+        },
         update: {
-          openPositionCount: this.openPositionCount,
-          totalCapitalDeployed: this.totalCapitalDeployed.toFixed(),
-          dailyPnl: this.dailyPnl.toFixed(),
-          lastResetTimestamp: this.lastResetTimestamp,
+          openPositionCount: state.openPositionCount,
+          totalCapitalDeployed: state.totalCapitalDeployed.toFixed(),
+          dailyPnl: state.dailyPnl.toFixed(),
+          lastResetTimestamp: state.lastResetTimestamp,
           tradingHalted,
           haltReason,
           reservedCapital,
@@ -391,10 +463,11 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         },
         create: {
           singletonKey: 'default',
-          openPositionCount: this.openPositionCount,
-          totalCapitalDeployed: this.totalCapitalDeployed.toFixed(),
-          dailyPnl: this.dailyPnl.toFixed(),
-          lastResetTimestamp: this.lastResetTimestamp,
+          mode,
+          openPositionCount: state.openPositionCount,
+          totalCapitalDeployed: state.totalCapitalDeployed.toFixed(),
+          dailyPnl: state.dailyPnl.toFixed(),
+          lastResetTimestamp: state.lastResetTimestamp,
           tradingHalted,
           haltReason,
           reservedCapital,
@@ -402,12 +475,14 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         },
       });
     } catch (error) {
+      const state = this.getState(mode === 'paper');
       this.logger.error({
         message: 'Failed to persist risk state to database',
         data: {
           operation: 'persistState',
-          dailyPnl: this.dailyPnl.toString(),
-          tradingHalted: this.isTradingHalted(),
+          mode,
+          dailyPnl: state.dailyPnl.toString(),
+          tradingHalted: state.activeHaltReasons.size > 0,
           error: error instanceof Error ? error.message : String(error),
         },
       });
@@ -421,8 +496,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: 'Trading halted: daily loss limit breached',
         maxPositionSizeUsd: new FinancialDecimal(0),
-        currentOpenPairs: this.openPositionCount,
-        dailyPnl: this.dailyPnl,
+        currentOpenPairs: this.liveState.openPositionCount,
+        dailyPnl: this.liveState.dailyPnl,
       };
     }
 
@@ -467,12 +542,12 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
     // Check max open pairs limit (including reserved slots)
     const effectiveOpenPairs =
-      this.openPositionCount + this.getReservedPositionSlots();
+      this.liveState.openPositionCount + this.getReservedPositionSlots();
     if (effectiveOpenPairs >= this.config.maxOpenPairs) {
       this.logger.warn({
         message: 'Opportunity rejected: max open pairs exceeded',
         data: {
-          currentOpenPairs: this.openPositionCount,
+          currentOpenPairs: this.liveState.openPositionCount,
           reservedSlots: this.getReservedPositionSlots(),
           maxOpenPairs: this.config.maxOpenPairs,
         },
@@ -481,7 +556,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
         maxPositionSizeUsd,
-        currentOpenPairs: this.openPositionCount,
+        currentOpenPairs: this.liveState.openPositionCount,
         ...(rawConfidence != null && { confidenceScore: rawConfidence }),
         ...(confidenceAdjustedSizeUsd !== undefined && {
           confidenceAdjustedSizeUsd,
@@ -493,7 +568,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
     const reservedCapital = this.getReservedCapital();
     const availableCapital = new FinancialDecimal(
-      bankrollUsd.minus(this.totalCapitalDeployed).minus(reservedCapital),
+      bankrollUsd
+        .minus(this.liveState.totalCapitalDeployed)
+        .minus(reservedCapital),
     );
     if (availableCapital.lt(maxPositionSizeUsd)) {
       this.logger.warn({
@@ -508,7 +585,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: `Insufficient available capital (${availableCapital.toFixed(2)} < ${maxPositionSizeUsd.toFixed(2)})`,
         maxPositionSizeUsd,
-        currentOpenPairs: this.openPositionCount,
+        currentOpenPairs: this.liveState.openPositionCount,
         ...(rawConfidence != null && { confidenceScore: rawConfidence }),
         ...(confidenceAdjustedSizeUsd !== undefined && {
           confidenceAdjustedSizeUsd,
@@ -556,7 +633,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: aggregate cluster exposure ${aggregateExposurePct.mul(100).toFixed(1)}% >= ${aggregateLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.openPositionCount,
+          currentOpenPairs: this.liveState.openPositionCount,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
           ...(confidenceAdjustedSizeUsd !== undefined && {
             confidenceAdjustedSizeUsd,
@@ -636,7 +713,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: cluster hard limit — exposure ${clusterExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.openPositionCount,
+          currentOpenPairs: this.liveState.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
@@ -707,7 +784,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: cluster hard limit — projected ${projectedExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.openPositionCount,
+          currentOpenPairs: this.liveState.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
@@ -726,7 +803,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         EVENT_NAMES.LIMIT_APPROACHED,
         new LimitApproachedEvent(
           'max_open_pairs',
-          this.openPositionCount,
+          this.liveState.openPositionCount,
           this.config.maxOpenPairs,
           percentUsed,
         ),
@@ -737,7 +814,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       approved: true,
       reason: 'Position within risk limits',
       maxPositionSizeUsd,
-      currentOpenPairs: this.openPositionCount,
+      currentOpenPairs: this.liveState.openPositionCount,
       ...(adjustedMaxPositionSizeUsd !== undefined && {
         adjustedMaxPositionSizeUsd,
       }),
@@ -753,7 +830,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
   private determineRejectionReason(): string | null {
     const effectiveOpenPairs =
-      this.openPositionCount + this.getReservedPositionSlots();
+      this.liveState.openPositionCount + this.getReservedPositionSlots();
     if (effectiveOpenPairs >= this.config.maxOpenPairs) {
       return `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`;
     }
@@ -827,7 +904,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     // FIRST: Check if daily loss halt is active — cannot be overridden
     if (
       this.isTradingHalted() &&
-      this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
+      this.liveState.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
     ) {
       const denialReason = 'Override denied: daily loss halt active';
 
@@ -866,8 +943,8 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: denialReason,
         maxPositionSizeUsd: new FinancialDecimal(0),
-        currentOpenPairs: this.openPositionCount,
-        dailyPnl: this.dailyPnl,
+        currentOpenPairs: this.liveState.openPositionCount,
+        dailyPnl: this.liveState.dailyPnl,
       };
     }
 
@@ -924,31 +1001,37 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       approved: true,
       reason: 'Override approved by operator',
       maxPositionSizeUsd,
-      currentOpenPairs: this.openPositionCount,
-      dailyPnl: this.dailyPnl,
+      currentOpenPairs: this.liveState.openPositionCount,
+      dailyPnl: this.liveState.dailyPnl,
       overrideApplied: true,
       overrideRationale: rationale,
     };
   }
 
-  async updateDailyPnl(pnlDelta: unknown): Promise<void> {
+  async updateDailyPnl(pnlDelta: unknown, isPaper = false): Promise<void> {
     const delta = new FinancialDecimal(pnlDelta as Decimal);
-    this.dailyPnl = this.dailyPnl.add(delta);
+    const state = this.getState(isPaper);
+    state.dailyPnl = state.dailyPnl.add(delta);
 
-    const dailyLossLimitUsd = new FinancialDecimal(this.config.bankrollUsd).mul(
+    const bankroll = this.getBankrollForMode(isPaper);
+    const dailyLossLimitUsd = bankroll.mul(
       new FinancialDecimal(this.config.dailyLossPct),
     );
 
-    const absLoss = this.dailyPnl.isNegative()
-      ? this.dailyPnl.abs()
+    const absLoss = state.dailyPnl.isNegative()
+      ? state.dailyPnl.abs()
       : new FinancialDecimal(0);
     const percentUsed = absLoss.div(dailyLossLimitUsd).toNumber();
 
     if (
       percentUsed >= 1.0 &&
-      !this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
+      !state.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)
     ) {
-      this.haltTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
+      if (!isPaper) {
+        this.haltTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
+      } else {
+        state.activeHaltReasons.add(HALT_REASONS.DAILY_LOSS_LIMIT);
+      }
       this.eventEmitter.emit(
         EVENT_NAMES.LIMIT_BREACHED,
         new LimitBreachedEvent(
@@ -958,19 +1041,20 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         ),
       );
       this.logger.log({
-        message: 'TRADING HALTED: Daily loss limit breached',
+        message: `TRADING HALTED: Daily loss limit breached (${isPaper ? 'paper' : 'live'})`,
         data: {
-          dailyPnl: this.dailyPnl.toString(),
+          dailyPnl: state.dailyPnl.toString(),
           limit: dailyLossLimitUsd.toString(),
           percentUsed,
+          mode: isPaper ? 'paper' : 'live',
         },
       });
     } else if (
       percentUsed >= 0.8 &&
       percentUsed < 1.0 &&
-      !this.dailyLossApproachEmitted
+      !state.dailyLossApproachEmitted
     ) {
-      this.dailyLossApproachEmitted = true;
+      state.dailyLossApproachEmitted = true;
       this.eventEmitter.emit(
         EVENT_NAMES.LIMIT_APPROACHED,
         new LimitApproachedEvent(
@@ -982,42 +1066,42 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
-    await this.persistState();
+    await this.persistState(isPaper ? 'paper' : 'live');
   }
 
   isTradingHalted(): boolean {
-    return this.activeHaltReasons.size > 0;
+    return this.liveState.activeHaltReasons.size > 0;
   }
 
   haltTrading(reason: string): void {
     const haltReason = reason as HaltReason;
-    if (this.activeHaltReasons.has(haltReason)) {
+    if (this.liveState.activeHaltReasons.has(haltReason)) {
       return; // Already halted for this reason
     }
-    this.activeHaltReasons.add(haltReason);
+    this.liveState.activeHaltReasons.add(haltReason);
     this.eventEmitter.emit(
       EVENT_NAMES.SYSTEM_TRADING_HALTED,
       new TradingHaltedEvent(
         reason,
-        { activeReasons: [...this.activeHaltReasons] },
+        { activeReasons: [...this.liveState.activeHaltReasons] },
         new Date(),
         'critical',
       ),
     );
     this.logger.log({
       message: `Trading halted: ${reason}`,
-      data: { reason, activeReasons: [...this.activeHaltReasons] },
+      data: { reason, activeReasons: [...this.liveState.activeHaltReasons] },
     });
-    void this.persistState();
+    void this.persistState('live');
   }
 
   resumeTrading(reason: string): void {
     const haltReason = reason as HaltReason;
-    if (!this.activeHaltReasons.has(haltReason)) {
+    if (!this.liveState.activeHaltReasons.has(haltReason)) {
       return; // Not halted for this reason
     }
-    this.activeHaltReasons.delete(haltReason);
-    const remaining = [...this.activeHaltReasons];
+    this.liveState.activeHaltReasons.delete(haltReason);
+    const remaining = [...this.liveState.activeHaltReasons];
     this.eventEmitter.emit(
       EVENT_NAMES.SYSTEM_TRADING_RESUMED,
       new TradingResumedEvent(reason, remaining, new Date()),
@@ -1027,55 +1111,73 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       data: {
         removedReason: reason,
         remainingReasons: remaining,
-        tradingResumed: this.activeHaltReasons.size === 0,
+        tradingResumed: this.liveState.activeHaltReasons.size === 0,
       },
     });
-    void this.persistState();
+    void this.persistState('live');
   }
 
   async recalculateFromPositions(
     openCount: number,
     capitalDeployed: Decimal,
+    mode: 'live' | 'paper' = 'live',
   ): Promise<void> {
-    const previousCount = this.openPositionCount;
-    const previousCapital = this.totalCapitalDeployed.toString();
+    const isPaper = mode === 'paper';
+    const state = this.getState(isPaper);
+    const previousCount = state.openPositionCount;
+    const previousCapital = state.totalCapitalDeployed.toString();
 
-    this.openPositionCount = openCount;
-    this.totalCapitalDeployed = new FinancialDecimal(capitalDeployed);
+    state.openPositionCount = openCount;
+    state.totalCapitalDeployed = new FinancialDecimal(capitalDeployed);
 
     this.logger.log({
       message: 'Risk state recalculated from reconciliation',
       data: {
+        mode,
         previousOpenCount: previousCount,
         newOpenCount: openCount,
         previousCapitalDeployed: previousCapital,
-        newCapitalDeployed: this.totalCapitalDeployed.toString(),
+        newCapitalDeployed: state.totalCapitalDeployed.toString(),
       },
     });
 
-    await this.persistState();
+    await this.persistState(mode);
   }
 
   @Cron('0 0 0 * * *', { timeZone: 'UTC' })
   async handleMidnightReset(): Promise<void> {
-    const previousPnl = this.dailyPnl.toString();
-    this.dailyPnl = new FinancialDecimal(0);
     const todayMidnight = new Date();
     todayMidnight.setUTCHours(0, 0, 0, 0);
-    this.lastResetTimestamp = todayMidnight;
-    this.dailyLossApproachEmitted = false;
 
-    if (this.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)) {
-      this.resumeTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
-      this.logger.log({ message: 'Trading halt cleared by midnight reset' });
+    // Reset both modes independently
+    for (const { state, mode } of [
+      { state: this.liveState, mode: 'live' as const },
+      { state: this.paperState, mode: 'paper' as const },
+    ]) {
+      const previousPnl = state.dailyPnl.toString();
+      state.dailyPnl = new FinancialDecimal(0);
+      state.lastResetTimestamp = todayMidnight;
+      state.dailyLossApproachEmitted = false;
+
+      if (state.activeHaltReasons.has(HALT_REASONS.DAILY_LOSS_LIMIT)) {
+        if (mode === 'live') {
+          this.resumeTrading(HALT_REASONS.DAILY_LOSS_LIMIT);
+        } else {
+          state.activeHaltReasons.delete(HALT_REASONS.DAILY_LOSS_LIMIT);
+        }
+        this.logger.log({
+          message: `Trading halt cleared by midnight reset (${mode})`,
+        });
+      }
+
+      this.logger.log({
+        message: `Daily P&L reset at UTC midnight (${mode})`,
+        data: { previousDayPnl: previousPnl, newDailyPnl: '0', mode },
+      });
     }
 
-    this.logger.log({
-      message: 'Daily P&L reset at UTC midnight',
-      data: { previousDayPnl: previousPnl, newDailyPnl: '0' },
-    });
-
-    await this.persistState();
+    await this.persistState('live');
+    await this.persistState('paper');
   }
 
   getCurrentExposure(): RiskExposure {
@@ -1085,15 +1187,16 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     );
     const reserved: Decimal = this.getReservedCapital();
     return {
-      openPairCount: this.openPositionCount + this.getReservedPositionSlots(),
+      openPairCount:
+        this.liveState.openPositionCount + this.getReservedPositionSlots(),
       totalCapitalDeployed: new FinancialDecimal(
-        this.totalCapitalDeployed.add(reserved),
+        this.liveState.totalCapitalDeployed.add(reserved),
       ),
       bankrollUsd,
       availableCapital: new FinancialDecimal(
-        bankrollUsd.minus(this.totalCapitalDeployed).minus(reserved),
+        bankrollUsd.minus(this.liveState.totalCapitalDeployed).minus(reserved),
       ),
-      dailyPnl: this.dailyPnl,
+      dailyPnl: this.liveState.dailyPnl,
       dailyLossLimitUsd,
       clusterExposures: this.correlationTracker.getClusterExposures(),
       aggregateClusterExposurePct:
@@ -1102,12 +1205,15 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   }
 
   getOpenPositionCount(): number {
-    return this.openPositionCount;
+    return this.liveState.openPositionCount;
   }
 
   async reserveBudget(request: ReservationRequest): Promise<BudgetReservation> {
-    // Check halt
-    if (this.isTradingHalted()) {
+    const state = this.getState(request.isPaper);
+    const bankroll = this.getBankrollForMode(request.isPaper);
+
+    // Check halt (live only — paper mode doesn't halt live trading)
+    if (!request.isPaper && this.isTradingHalted()) {
       throw new RiskLimitError(
         RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
         'Budget reservation failed: trading halted',
@@ -1139,9 +1245,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
-    const maxPositionSizeUsd = new FinancialDecimal(
-      this.config.bankrollUsd,
-    ).mul(new FinancialDecimal(this.config.maxPositionPct));
+    const maxPositionSizeUsd = bankroll.mul(
+      new FinancialDecimal(this.config.maxPositionPct),
+    );
 
     // Use the lesser of recommended size and config max — avoid over-reserving
     const reserveAmount = request.recommendedPositionSizeUsd.lte(
@@ -1150,9 +1256,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       ? new FinancialDecimal(request.recommendedPositionSizeUsd)
       : maxPositionSizeUsd;
 
-    // Check max open pairs (including reserved slots)
+    // Check max open pairs (including mode-filtered reserved slots)
     const effectiveOpenPairs =
-      this.openPositionCount + this.getReservedPositionSlots();
+      state.openPositionCount + this.getReservedPositionSlots(request.isPaper);
     if (effectiveOpenPairs >= this.config.maxOpenPairs) {
       throw new RiskLimitError(
         RISK_ERROR_CODES.BUDGET_RESERVATION_FAILED,
@@ -1164,12 +1270,10 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
-    // Check available capital (including reserved capital)
-    const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
+    // Check available capital (including mode-filtered reserved capital)
+    const modeReservedCapital = this.getReservedCapital(request.isPaper);
     const availableCapital = new FinancialDecimal(
-      bankrollUsd
-        .minus(this.totalCapitalDeployed)
-        .minus(this.getReservedCapital()),
+      bankroll.minus(state.totalCapitalDeployed).minus(modeReservedCapital),
     );
     if (availableCapital.lt(reserveAmount)) {
       throw new RiskLimitError(
@@ -1217,7 +1321,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       },
     });
 
-    await this.persistState();
+    await this.persistState(request.isPaper ? 'paper' : 'live');
     return reservation;
   }
 
@@ -1234,10 +1338,11 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       );
     }
 
-    // Move reservation to permanent state
-    this.openPositionCount += reservation.reservedPositionSlots;
-    this.totalCapitalDeployed = new FinancialDecimal(
-      this.totalCapitalDeployed.add(
+    // Move reservation to permanent state (mode-aware)
+    const state = this.getState(reservation.isPaper);
+    state.openPositionCount += reservation.reservedPositionSlots;
+    state.totalCapitalDeployed = new FinancialDecimal(
+      state.totalCapitalDeployed.add(
         new FinancialDecimal(reservation.reservedCapitalUsd),
       ),
     );
@@ -1257,12 +1362,12 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       data: {
         reservationId,
         opportunityId: reservation.opportunityId,
-        newOpenPositionCount: this.openPositionCount,
-        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+        newOpenPositionCount: state.openPositionCount,
+        newTotalCapitalDeployed: state.totalCapitalDeployed.toString(),
       },
     });
 
-    await this.persistState();
+    await this.persistState(reservation.isPaper ? 'paper' : 'live');
   }
 
   async releaseReservation(reservationId: ReservationId): Promise<void> {
@@ -1302,7 +1407,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       },
     });
 
-    await this.persistState();
+    await this.persistState(reservation.isPaper ? 'paper' : 'live');
   }
 
   async adjustReservation(
@@ -1336,17 +1441,18 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       },
     });
 
-    await this.persistState();
+    await this.persistState(reservation.isPaper ? 'paper' : 'live');
   }
 
   async closePosition(
     capitalReturned: unknown,
     pnlDelta: unknown,
     pairId?: PairId,
+    isPaper = false,
   ): Promise<void> {
     if (pairId) {
       this.paperActivePairIds.delete(pairId);
-    } else if (this.paperActivePairIds.size > 0) {
+    } else if (isPaper && this.paperActivePairIds.size > 0) {
       this.logger.warn({
         message:
           'closePosition called without pairId while paper pairs are tracked — potential Set leak if closing a paper position',
@@ -1355,15 +1461,16 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       });
     }
 
+    const state = this.getState(isPaper);
     const capital = new FinancialDecimal(capitalReturned as Decimal);
     const pnl = new FinancialDecimal(pnlDelta as Decimal);
 
-    this.openPositionCount = Math.max(0, this.openPositionCount - 1);
-    this.totalCapitalDeployed = new FinancialDecimal(
-      this.totalCapitalDeployed.minus(capital),
+    state.openPositionCount = Math.max(0, state.openPositionCount - 1);
+    state.totalCapitalDeployed = new FinancialDecimal(
+      state.totalCapitalDeployed.minus(capital),
     );
-    if (this.totalCapitalDeployed.isNegative()) {
-      this.totalCapitalDeployed = new FinancialDecimal(0);
+    if (state.totalCapitalDeployed.isNegative()) {
+      state.totalCapitalDeployed = new FinancialDecimal(0);
     }
 
     this.eventEmitter.emit(
@@ -1380,31 +1487,33 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       data: {
         capitalReturned: capital.toString(),
         pnlDelta: pnl.toString(),
-        newOpenPositionCount: this.openPositionCount,
-        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+        newOpenPositionCount: state.openPositionCount,
+        newTotalCapitalDeployed: state.totalCapitalDeployed.toString(),
       },
     });
 
-    await this.updateDailyPnl(pnl);
-    await this.persistState();
+    await this.updateDailyPnl(pnl, isPaper);
+    await this.persistState(isPaper ? 'paper' : 'live');
   }
 
   async releasePartialCapital(
     capitalReleased: unknown,
     realizedPnl: unknown,
     _pairId?: string,
+    isPaper = false,
   ): Promise<void> {
     // NOTE: pairId is intentionally ignored — position is still EXIT_PARTIAL,
     // so it must NOT be removed from paperActivePairIds and openPositionCount
     // must NOT be decremented.
+    const state = this.getState(isPaper);
     const capital = new FinancialDecimal(capitalReleased as Decimal);
     const pnl = new FinancialDecimal(realizedPnl as Decimal);
 
-    this.totalCapitalDeployed = new FinancialDecimal(
-      this.totalCapitalDeployed.minus(capital),
+    state.totalCapitalDeployed = new FinancialDecimal(
+      state.totalCapitalDeployed.minus(capital),
     );
-    if (this.totalCapitalDeployed.isNegative()) {
-      this.totalCapitalDeployed = new FinancialDecimal(0);
+    if (state.totalCapitalDeployed.isNegative()) {
+      state.totalCapitalDeployed = new FinancialDecimal(0);
     }
 
     this.eventEmitter.emit(
@@ -1421,27 +1530,31 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       data: {
         capitalReleased: capital.toString(),
         realizedPnl: pnl.toString(),
-        openPositionCount: this.openPositionCount,
-        newTotalCapitalDeployed: this.totalCapitalDeployed.toString(),
+        openPositionCount: state.openPositionCount,
+        newTotalCapitalDeployed: state.totalCapitalDeployed.toString(),
       },
     });
 
-    await this.updateDailyPnl(pnl);
-    await this.persistState();
+    await this.updateDailyPnl(pnl, isPaper);
+    await this.persistState(isPaper ? 'paper' : 'live');
   }
 
-  private getReservedPositionSlots(): number {
+  private getReservedPositionSlots(isPaper?: boolean): number {
     let total = 0;
     for (const reservation of this.reservations.values()) {
-      total += reservation.reservedPositionSlots;
+      if (isPaper === undefined || reservation.isPaper === isPaper) {
+        total += reservation.reservedPositionSlots;
+      }
     }
     return total;
   }
 
-  private getReservedCapital(): Decimal {
+  private getReservedCapital(isPaper?: boolean): Decimal {
     let total: Decimal = new FinancialDecimal(0);
     for (const reservation of this.reservations.values()) {
-      total = total.add(new FinancialDecimal(reservation.reservedCapitalUsd));
+      if (isPaper === undefined || reservation.isPaper === isPaper) {
+        total = total.add(new FinancialDecimal(reservation.reservedCapitalUsd));
+      }
     }
     return total;
   }

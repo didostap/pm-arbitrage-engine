@@ -6,3 +6,4 @@ export { toPlatformEnum } from './platform.js';
 export { FinancialMath, FinancialDecimal } from './financial-math.js';
 export { normalizeKalshiLevels } from './kalshi-price.util.js';
 export { getResidualSize } from './residual-size.js';
+export { calculateLegCapital } from './capital.js';

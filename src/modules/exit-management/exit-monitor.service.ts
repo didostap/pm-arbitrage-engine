@@ -3,7 +3,11 @@ import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 
-import { FinancialMath, getResidualSize } from '../../common/utils';
+import {
+  FinancialMath,
+  getResidualSize,
+  calculateLegCapital,
+} from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -228,6 +232,7 @@ export class ExitMonitorService {
           new Decimal(0),
           new Decimal(0),
           asPairId(position.pairId),
+          isPaper,
         );
         return;
       }
@@ -656,10 +661,18 @@ export class ExitMonitorService {
       .minus(kalshiExitFee)
       .minus(polymarketExitFee);
 
-    // Capital calculation on exited portion only
-    const exitedEntryCapital = kalshiEntryPrice
-      .mul(kalshiExitFillSize)
-      .plus(polymarketEntryPrice.mul(polymarketExitFillSize));
+    // Capital calculation on exited portion only — sell-side aware
+    const exitedEntryCapital = calculateLegCapital(
+      position.kalshiSide ?? 'buy',
+      kalshiEntryPrice,
+      kalshiExitFillSize,
+    ).plus(
+      calculateLegCapital(
+        position.polymarketSide ?? 'buy',
+        polymarketEntryPrice,
+        polymarketExitFillSize,
+      ),
+    );
 
     // Determine full vs partial exit (compare exit fills to effective sizes — residual for EXIT_PARTIAL, entry for OPEN)
     const isFullExit =
@@ -682,6 +695,7 @@ export class ExitMonitorService {
         capitalReturned,
         realizedPnl,
         asPairId(position.pairId),
+        isPaper,
       );
 
       this.eventEmitter.emit(
@@ -723,6 +737,7 @@ export class ExitMonitorService {
         exitedEntryCapital.plus(realizedPnl),
         realizedPnl,
         asPairId(position.pairId),
+        isPaper,
       );
 
       // Overloaded: partial exit remainder, not single-leg failure

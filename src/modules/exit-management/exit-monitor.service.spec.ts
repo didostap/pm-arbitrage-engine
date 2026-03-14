@@ -849,11 +849,12 @@ describe('ExitMonitorService', () => {
 
         await service.evaluatePositions();
 
-        // closePosition called with 3 args including pairId
+        // closePosition called with pairId and isPaper
         expect(riskManager.closePosition).toHaveBeenCalledWith(
           expect.any(Decimal),
           expect.any(Decimal),
           asPairId('pair-1'),
+          true,
         );
       });
     });
@@ -1960,6 +1961,7 @@ describe('ExitMonitorService', () => {
         new Decimal(0),
         new Decimal(0),
         asPairId('pair-1'),
+        false,
       );
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });

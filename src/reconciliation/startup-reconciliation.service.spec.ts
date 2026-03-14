@@ -54,6 +54,7 @@ const createMockPosition = (overrides: Record<string, unknown> = {}) => ({
   sizes: { polymarket: '100', kalshi: '100' },
   expectedEdge: new Decimal('0.08'),
   status: 'OPEN' as const,
+  isPaper: false,
   reconciliationContext: null,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -184,9 +185,12 @@ describe('StartupReconciliationService', () => {
     });
 
     it('should recalculate risk budget on clean path', async () => {
-      positionRepository.findActivePositions.mockResolvedValue([
-        createMockPosition(),
-      ]);
+      const position = createMockPosition();
+      // reconcileActivePositions: live only; recalculateRiskBudget: live, paper
+      positionRepository.findActivePositions
+        .mockResolvedValueOnce([position]) // reconcile live
+        .mockResolvedValueOnce([position]) // recalculate live
+        .mockResolvedValueOnce([]); // recalculate paper
 
       // Make getOrder return filled for both
       kalshiConnector.getOrder.mockResolvedValue({
@@ -204,9 +208,16 @@ describe('StartupReconciliationService', () => {
 
       await service.reconcile();
 
+      // recalculateFromPositions called twice: once for live, once for paper
       expect(riskManager.recalculateFromPositions).toHaveBeenCalledWith(
         1,
         expect.any(Decimal),
+        'live',
+      );
+      expect(riskManager.recalculateFromPositions).toHaveBeenCalledWith(
+        0,
+        new Decimal(0),
+        'paper',
       );
     });
 
@@ -553,10 +564,11 @@ describe('StartupReconciliationService', () => {
 
       await service.reconcile();
 
-      // Expected: 100 * 0.45 + 100 * 0.55 = 45 + 55 = 100
+      // Kalshi side=sell: 100*(1-0.45)=55, Poly side=buy: 100*0.55=55, total=110
       expect(riskManager.recalculateFromPositions).toHaveBeenCalledWith(
         1,
-        new Decimal('100'),
+        new Decimal('110'),
+        'live',
       );
     });
 
@@ -569,10 +581,10 @@ describe('StartupReconciliationService', () => {
         positionId: asPositionId('pos-recon'),
         status: 'RECONCILIATION_REQUIRED',
       });
-      // For the recalculation call, findActivePositions is called separately
-      positionRepository.findActivePositions
-        .mockResolvedValueOnce([openPosition, reconPosition]) // phase 3
-        .mockResolvedValueOnce([openPosition, reconPosition]); // recalculation
+      positionRepository.findActivePositions.mockResolvedValue([
+        openPosition,
+        reconPosition,
+      ]);
 
       kalshiConnector.getOrder.mockResolvedValue({
         orderId: asOrderId('order-k-1'),
@@ -590,10 +602,12 @@ describe('StartupReconciliationService', () => {
       await service.reconcile();
 
       // openCount should be 1 (only OPEN, not RECONCILIATION_REQUIRED)
-      // capitalDeployed should include both positions = 200
+      // capitalDeployed per position: sell@0.45: 100*(1-0.45)=55 + buy@0.55: 100*0.55=55 = 110
+      // Two positions = 220
       expect(riskManager.recalculateFromPositions).toHaveBeenCalledWith(
         1,
-        new Decimal('200'),
+        new Decimal('220'),
+        'live',
       );
     });
   });
@@ -660,6 +674,7 @@ describe('StartupReconciliationService', () => {
         new Decimal(0),
         new Decimal(0),
         asPairId('pair-1'),
+        false,
       );
     });
 
@@ -775,7 +790,11 @@ describe('StartupReconciliationService', () => {
         polymarketOrderId: null,
         polymarketOrder: null,
       });
-      positionRepository.findActivePositions.mockResolvedValue([position]);
+      // reconcileActivePositions: live only; recalculateRiskBudget: live, paper
+      positionRepository.findActivePositions
+        .mockResolvedValueOnce([position]) // reconcile live
+        .mockResolvedValueOnce([position]) // recalculate live
+        .mockResolvedValueOnce([]); // recalculate paper
 
       kalshiConnector.getOrder.mockResolvedValue({
         orderId: asOrderId('order-k-1'),

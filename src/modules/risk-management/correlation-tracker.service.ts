@@ -20,6 +20,7 @@ import {
   entryPricesSchema,
 } from '../../common/schemas/prisma-json.schema.js';
 import { parseJsonField } from '../../common/schemas/parse-json-field.js';
+import { calculateLegCapital } from '../../common/utils/capital.js';
 
 @Injectable()
 export class CorrelationTrackerService {
@@ -53,16 +54,22 @@ export class CorrelationTrackerService {
    * Recalculate cluster exposure for all clusters (or a specific one).
    * Queries all open positions joined to their ContractMatch → CorrelationCluster.
    */
-  async recalculateClusterExposure(clusterId?: ClusterId): Promise<void> {
+  async recalculateClusterExposure(
+    clusterId?: ClusterId,
+    isPaper: boolean = false,
+  ): Promise<void> {
     const positions = await this.prisma.openPosition.findMany({
       where: {
         status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
+        isPaper,
         ...(clusterId ? { pair: { clusterId: clusterId as string } } : {}),
       },
       select: {
         positionId: true,
         sizes: true,
         entryPrices: true,
+        polymarketSide: true,
+        kalshiSide: true,
         pair: {
           select: {
             clusterId: true,
@@ -94,13 +101,32 @@ export class CorrelationTrackerService {
           recordId: pos.positionId,
         });
 
-        // Capital deployed = sum of both legs: size * entryPrice per leg
-        const polyCapital = new Decimal(sizes.polymarket).mul(
-          new Decimal(entryPrices.polymarket),
-        );
-        const kalshiCapital = new Decimal(sizes.kalshi).mul(
-          new Decimal(entryPrices.kalshi),
-        );
+        // Capital deployed = sum of both legs with sell-side correction
+        const polyCapital = pos.polymarketSide
+          ? calculateLegCapital(
+              pos.polymarketSide,
+              new Decimal(entryPrices.polymarket),
+              new Decimal(sizes.polymarket),
+            )
+          : new Decimal(sizes.polymarket).mul(
+              new Decimal(entryPrices.polymarket),
+            );
+        const kalshiCapital = pos.kalshiSide
+          ? calculateLegCapital(
+              pos.kalshiSide,
+              new Decimal(entryPrices.kalshi),
+              new Decimal(sizes.kalshi),
+            )
+          : new Decimal(sizes.kalshi).mul(new Decimal(entryPrices.kalshi));
+
+        if (!pos.polymarketSide || !pos.kalshiSide) {
+          this.logger.warn({
+            message:
+              'Null side in cluster exposure calc — falling back to buy formula',
+            data: { positionId: pos.positionId },
+          });
+        }
+
         const positionCapital = polyCapital.plus(kalshiCapital);
 
         const existing = clusterMap.get(cId);
@@ -189,10 +215,12 @@ export class CorrelationTrackerService {
    */
   async getTriageRecommendations(
     clusterId: string,
+    isPaper: boolean = false,
   ): Promise<TriageRecommendation[]> {
     const positions = await this.prisma.openPosition.findMany({
       where: {
         status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
+        isPaper,
         pair: { clusterId },
       },
       select: {
@@ -201,6 +229,8 @@ export class CorrelationTrackerService {
         sizes: true,
         entryPrices: true,
         pairId: true,
+        polymarketSide: true,
+        kalshiSide: true,
       },
     });
 
@@ -219,12 +249,22 @@ export class CorrelationTrackerService {
           recordId: pos.positionId,
         });
 
-        const polyCapital = new Decimal(sizes.polymarket).mul(
-          new Decimal(entryPrices.polymarket),
-        );
-        const kalshiCapital = new Decimal(sizes.kalshi).mul(
-          new Decimal(entryPrices.kalshi),
-        );
+        const polyCapital = pos.polymarketSide
+          ? calculateLegCapital(
+              pos.polymarketSide,
+              new Decimal(entryPrices.polymarket),
+              new Decimal(sizes.polymarket),
+            )
+          : new Decimal(sizes.polymarket).mul(
+              new Decimal(entryPrices.polymarket),
+            );
+        const kalshiCapital = pos.kalshiSide
+          ? calculateLegCapital(
+              pos.kalshiSide,
+              new Decimal(entryPrices.kalshi),
+              new Decimal(sizes.kalshi),
+            )
+          : new Decimal(sizes.kalshi).mul(new Decimal(entryPrices.kalshi));
         const capitalDeployed = polyCapital.plus(kalshiCapital);
 
         recommendations.push({

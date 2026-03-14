@@ -18,11 +18,12 @@ enum Platform {
 
 // Engine configuration singleton — typed config persisted in DB (replaces SystemMetadata placeholder)
 model EngineConfig {
-  id           String   @id @default(uuid()) @map("id")
-  singletonKey String   @unique @default("default") @map("singleton_key")
-  bankrollUsd  Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id              String   @id @default(uuid()) @map("id")
+  singletonKey    String   @unique @default("default") @map("singleton_key")
+  bankrollUsd     Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
+  paperBankrollUsd Decimal? @map("paper_bankroll_usd") @db.Decimal(20, 8)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("engine_config")
 }
@@ -141,7 +142,8 @@ model ContractMatch {
 // Risk state singleton for tracking position counts and capital deployment
 model RiskState {
   id                    String    @id @default(uuid()) @map("id")
-  singletonKey          String    @unique @default("default") @map("singleton_key")
+  singletonKey          String    @default("default") @map("singleton_key")
+  mode                  String    @default("live") @map("mode")
   dailyPnl              Decimal   @default(0) @map("daily_pnl") @db.Decimal(20, 8)
   openPositionCount     Int       @default(0) @map("open_position_count")
   lastResetTimestamp    DateTime? @map("last_reset_timestamp") @db.Timestamptz
@@ -153,6 +155,7 @@ model RiskState {
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
+  @@unique([singletonKey, mode])
   @@map("risk_states")
 }
 

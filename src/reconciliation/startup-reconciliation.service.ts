@@ -37,6 +37,7 @@ import {
   asPositionId,
   asPairId,
 } from '../common/types/branded.type';
+import { calculateLegCapital } from '../common/utils/capital';
 
 const API_CALL_TIMEOUT_MS = 10_000;
 const OVERALL_TIMEOUT_MS = 60_000;
@@ -336,7 +337,10 @@ export class StartupReconciliationService {
     ordersVerified: number;
     discrepancies: ReconciliationDiscrepancy[];
   }> {
-    const activePositions = await this.positionRepository.findActivePositions();
+    // Only reconcile LIVE positions against platform APIs.
+    // Paper positions use simulated fills that don't exist on real platforms.
+    const activePositions =
+      await this.positionRepository.findActivePositions(false);
     let checked = 0;
     let ordersVerified = 0;
     const discrepancies: ReconciliationDiscrepancy[] = [];
@@ -515,6 +519,7 @@ export class StartupReconciliationService {
         new Decimal(0),
         new Decimal(0),
         asPairId(position.pairId),
+        position.isPaper,
       );
     }
 
@@ -758,34 +763,68 @@ export class StartupReconciliationService {
   }
 
   private async recalculateRiskBudget(): Promise<void> {
-    const activePositions = await this.positionRepository.findActivePositions();
+    for (const isPaper of [false, true]) {
+      const mode = isPaper ? 'paper' : 'live';
+      const activePositions =
+        await this.positionRepository.findActivePositions(isPaper);
 
-    // Position count: EXCLUDE RECONCILIATION_REQUIRED
-    const openCount = activePositions.filter(
-      (p) =>
-        p.status === 'OPEN' ||
-        p.status === 'SINGLE_LEG_EXPOSED' ||
-        p.status === 'EXIT_PARTIAL',
-    ).length;
+      // Position count: EXCLUDE RECONCILIATION_REQUIRED
+      const openCount = activePositions.filter(
+        (p) =>
+          p.status === 'OPEN' ||
+          p.status === 'SINGLE_LEG_EXPOSED' ||
+          p.status === 'EXIT_PARTIAL',
+      ).length;
 
-    // Capital deployed: INCLUDE ALL active positions including RECONCILIATION_REQUIRED
-    const capitalDeployed = activePositions.reduce((sum, pos) => {
-      const kalshiCapital =
-        pos.kalshiOrder?.fillPrice && pos.kalshiOrder?.fillSize
-          ? new Decimal(pos.kalshiOrder.fillSize.toString()).mul(
-              new Decimal(pos.kalshiOrder.fillPrice.toString()),
-            )
-          : new Decimal(0);
-      const polyCapital =
-        pos.polymarketOrder?.fillPrice && pos.polymarketOrder?.fillSize
-          ? new Decimal(pos.polymarketOrder.fillSize.toString()).mul(
-              new Decimal(pos.polymarketOrder.fillPrice.toString()),
-            )
-          : new Decimal(0);
-      return sum.plus(kalshiCapital).plus(polyCapital);
-    }, new Decimal(0));
+      // Capital deployed: INCLUDE ALL active positions including RECONCILIATION_REQUIRED
+      const capitalDeployed = activePositions.reduce((sum, pos) => {
+        const kalshiSide = pos.kalshiSide ?? pos.kalshiOrder?.side ?? null;
+        const polymarketSide =
+          pos.polymarketSide ?? pos.polymarketOrder?.side ?? null;
 
-    await this.riskManager.recalculateFromPositions(openCount, capitalDeployed);
+        const kalshiCapital =
+          pos.kalshiOrder?.fillPrice && pos.kalshiOrder?.fillSize
+            ? calculateLegCapital(
+                kalshiSide ?? 'buy',
+                new Decimal(pos.kalshiOrder.fillPrice.toString()),
+                new Decimal(pos.kalshiOrder.fillSize.toString()),
+              )
+            : new Decimal(0);
+
+        if (!kalshiSide && pos.kalshiOrder?.fillPrice) {
+          this.logger.warn({
+            message:
+              'Null kalshi side in reconciliation — falling back to buy (conservative)',
+            data: { positionId: pos.positionId },
+          });
+        }
+
+        const polyCapital =
+          pos.polymarketOrder?.fillPrice && pos.polymarketOrder?.fillSize
+            ? calculateLegCapital(
+                polymarketSide ?? 'buy',
+                new Decimal(pos.polymarketOrder.fillPrice.toString()),
+                new Decimal(pos.polymarketOrder.fillSize.toString()),
+              )
+            : new Decimal(0);
+
+        if (!polymarketSide && pos.polymarketOrder?.fillPrice) {
+          this.logger.warn({
+            message:
+              'Null polymarket side in reconciliation — falling back to buy (conservative)',
+            data: { positionId: pos.positionId },
+          });
+        }
+
+        return sum.plus(kalshiCapital).plus(polyCapital);
+      }, new Decimal(0));
+
+      await this.riskManager.recalculateFromPositions(
+        openCount,
+        capitalDeployed,
+        mode,
+      );
+    }
   }
 
   private callWithTimeout<T>(

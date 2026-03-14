@@ -1,5 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export class ModeCapitalDto {
+  @ApiPropertyOptional({ type: String, nullable: true })
+  bankroll!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  deployed!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  available!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  reserved!: string | null;
+}
+
+export class CapitalOverviewDto {
+  @ApiProperty({ type: ModeCapitalDto })
+  live!: ModeCapitalDto;
+
+  @ApiProperty({ type: ModeCapitalDto })
+  paper!: ModeCapitalDto;
+}
+
 export class DashboardOverviewDto {
   @ApiProperty({
     description: 'Composite system health status',
@@ -26,32 +48,9 @@ export class DashboardOverviewDto {
   activeAlertCount!: number;
 
   @ApiPropertyOptional({
-    description: 'Total bankroll from engine config (decimal string)',
-    type: String,
+    description: 'Per-mode capital breakdown (live and paper)',
+    type: CapitalOverviewDto,
     nullable: true,
   })
-  totalBankroll!: string | null;
-
-  @ApiPropertyOptional({
-    description:
-      'Capital currently deployed in open positions (decimal string)',
-    type: String,
-    nullable: true,
-  })
-  deployedCapital!: string | null;
-
-  @ApiPropertyOptional({
-    description:
-      'Available capital: bankroll - deployed - reserved (decimal string)',
-    type: String,
-    nullable: true,
-  })
-  availableCapital!: string | null;
-
-  @ApiPropertyOptional({
-    description: 'Capital reserved for pending executions (decimal string)',
-    type: String,
-    nullable: true,
-  })
-  reservedCapital!: string | null;
+  capitalOverview!: CapitalOverviewDto | null;
 }

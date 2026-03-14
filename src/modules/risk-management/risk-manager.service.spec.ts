@@ -430,7 +430,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject opportunity when max open pairs reached', async () => {
-      (service as any).openPositionCount = 10;
+      (service as any).liveState.openPositionCount = 10;
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
       );
@@ -447,7 +447,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit LimitApproachedEvent when open pairs at 80% of max', async () => {
-      (service as any).openPositionCount = 8; // 80% of 10
+      (service as any).liveState.openPositionCount = 8; // 80% of 10
       await service.validatePosition(makeEnrichedOpportunity());
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.LIMIT_APPROACHED,
@@ -461,7 +461,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT emit LimitApproachedEvent when below 80%', async () => {
-      (service as any).openPositionCount = 7; // 70% of 10
+      (service as any).liveState.openPositionCount = 7; // 70% of 10
       await service.validatePosition(makeEnrichedOpportunity());
       expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     });
@@ -505,7 +505,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should log rejection with current count and limit', async () => {
-      (service as any).openPositionCount = 10;
+      (service as any).liveState.openPositionCount = 10;
       const logSpy = vi.spyOn(service['logger'], 'warn');
       await service.validatePosition(makeEnrichedOpportunity());
       expect(logSpy).toHaveBeenCalledWith(
@@ -520,7 +520,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject all opportunities when trading halted', async () => {
-      (service as any).activeHaltReasons.add('daily_loss_limit');
+      (service as any).liveState.activeHaltReasons.add('daily_loss_limit');
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
       );
@@ -531,8 +531,8 @@ describe('RiskManagerService', () => {
     });
 
     it('should short-circuit when halted (no open-pairs check)', async () => {
-      (service as any).activeHaltReasons.add('daily_loss_limit');
-      (service as any).openPositionCount = 10;
+      (service as any).liveState.activeHaltReasons.add('daily_loss_limit');
+      (service as any).liveState.openPositionCount = 10;
       const logSpy = vi.spyOn(service['logger'], 'warn');
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
@@ -992,7 +992,7 @@ describe('RiskManagerService', () => {
       });
 
       it('should populate confidence fields on rejection paths (max open pairs)', async () => {
-        (service as any).openPositionCount = 10;
+        (service as any).liveState.openPositionCount = 10;
         const decision = await service.validatePosition(
           makeConfidenceOpportunity(90),
         );
@@ -1010,9 +1010,12 @@ describe('RiskManagerService', () => {
       // findFirst returned null in beforeEach, so persistState was called
       expect(mockPrisma.riskState.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { singletonKey: 'default' },
+          where: {
+            singletonKey_mode: { singletonKey: 'default', mode: 'live' },
+          },
           create: expect.objectContaining({
             singletonKey: 'default',
+            mode: 'live',
             openPositionCount: 0,
           }),
         }),
@@ -1089,7 +1092,7 @@ describe('RiskManagerService', () => {
       await service.updateDailyPnl(new Decimal('-200'));
 
       // In-memory state should still reflect the update
-      expect((service as any).dailyPnl.toNumber()).toBe(-200);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-200);
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           message: 'Failed to persist risk state to database',
@@ -1101,27 +1104,27 @@ describe('RiskManagerService', () => {
   describe('updateDailyPnl', () => {
     it('should accumulate negative delta correctly', async () => {
       await service.updateDailyPnl(new Decimal('-100'));
-      expect((service as any).dailyPnl.toNumber()).toBe(-100);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-100);
 
       await service.updateDailyPnl(new Decimal('-50'));
-      expect((service as any).dailyPnl.toNumber()).toBe(-150);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-150);
     });
 
     it('should accumulate positive delta correctly', async () => {
       await service.updateDailyPnl(new Decimal('200'));
-      expect((service as any).dailyPnl.toNumber()).toBe(200);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(200);
 
       await service.updateDailyPnl(new Decimal('100'));
-      expect((service as any).dailyPnl.toNumber()).toBe(300);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(300);
     });
 
     it('should halt trading when daily loss reaches 5% of bankroll', async () => {
       // 5% of 10000 = 500
       await service.updateDailyPnl(new Decimal('-500'));
       expect(service.isTradingHalted()).toBe(true);
-      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
-        true,
-      );
+      expect(
+        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+      ).toBe(true);
     });
 
     it('should emit LimitBreachedEvent with limitType dailyLoss on breach', async () => {
@@ -1187,7 +1190,7 @@ describe('RiskManagerService', () => {
 
       await service.handleMidnightReset();
       expect(service.isTradingHalted()).toBe(false);
-      expect((service as any).dailyPnl.toNumber()).toBe(0);
+      expect((service as any).liveState.dailyPnl.toNumber()).toBe(0);
     });
 
     it('should log previous day P&L', async () => {
@@ -1198,7 +1201,7 @@ describe('RiskManagerService', () => {
 
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: 'Daily P&L reset at UTC midnight',
+          message: 'Daily P&L reset at UTC midnight (live)',
           data: expect.objectContaining({
             previousDayPnl: '-300',
           }),
@@ -1208,10 +1211,10 @@ describe('RiskManagerService', () => {
 
     it('should reset dailyLossApproachEmitted flag', async () => {
       await service.updateDailyPnl(new Decimal('-400'));
-      expect((service as any).dailyLossApproachEmitted).toBe(true);
+      expect((service as any).liveState.dailyLossApproachEmitted).toBe(true);
 
       await service.handleMidnightReset();
-      expect((service as any).dailyLossApproachEmitted).toBe(false);
+      expect((service as any).liveState.dailyLossApproachEmitted).toBe(false);
     });
   });
 
@@ -1259,7 +1262,7 @@ describe('RiskManagerService', () => {
       await svc.onModuleInit();
 
       expect(svc.isTradingHalted()).toBe(false);
-      expect((svc as any).dailyPnl.toNumber()).toBe(0);
+      expect((svc as any).liveState.dailyPnl.toNumber()).toBe(0);
     });
 
     it('should restore halt state if dailyPnl exceeds limit and same day', async () => {
@@ -1347,7 +1350,7 @@ describe('RiskManagerService', () => {
 
       await svc.onModuleInit();
 
-      expect((svc as any).dailyPnl.toNumber()).toBe(0);
+      expect((svc as any).liveState.dailyPnl.toNumber()).toBe(0);
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
@@ -1500,7 +1503,7 @@ describe('RiskManagerService', () => {
 
     it('should correctly derive originalRejectionReason when open pairs at limit', async () => {
       // Set open position count to max
-      (service as any).openPositionCount = 10;
+      (service as any).liveState.openPositionCount = 10;
 
       await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1515,8 +1518,10 @@ describe('RiskManagerService', () => {
 
     it('should return full position cap regardless of current capital deployed', async () => {
       // Deploy some capital
-      (service as any).totalCapitalDeployed = new FinancialDecimal(5000);
-      (service as any).openPositionCount = 5;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        5000,
+      );
+      (service as any).liveState.openPositionCount = 5;
 
       const decision = await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1570,7 +1575,7 @@ describe('RiskManagerService', () => {
     it('should fail reservation when max open pairs reached (including reserved slots)', async () => {
       // Config: maxOpenPairs=10, bankroll=10000, maxPositionPct=0.03 → maxPositionSize=300
       // Fill 9 real positions
-      (service as any).openPositionCount = 9;
+      (service as any).liveState.openPositionCount = 9;
 
       // Reserve one slot → effective = 10
       await service.reserveBudget(
@@ -1592,7 +1597,9 @@ describe('RiskManagerService', () => {
       // Each reservation takes 300 (10000 * 0.03)
       // But maxOpenPairs=10 so we can only have 10 slots
       // Let's increase bankroll scenario: set open capital very low
-      (service as any).totalCapitalDeployed = new FinancialDecimal(9800);
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        9800,
+      );
 
       await expect(
         service.reserveBudget(makeReservationRequest()),
@@ -1601,7 +1608,7 @@ describe('RiskManagerService', () => {
 
     it('should reduce available budget for subsequent validatePosition calls', async () => {
       // maxOpenPairs=10, openPositionCount=9
-      (service as any).openPositionCount = 9;
+      (service as any).liveState.openPositionCount = 9;
 
       // Reserve 1 slot → effective = 10
       await service.reserveBudget(makeReservationRequest());
@@ -1616,13 +1623,13 @@ describe('RiskManagerService', () => {
     it('should commit reservation and convert to permanent state', async () => {
       const reservation = await service.reserveBudget(makeReservationRequest());
 
-      const prevCount = (service as any).openPositionCount;
-      const prevCapital = (service as any).totalCapitalDeployed;
+      const prevCount = (service as any).liveState.openPositionCount;
+      const prevCapital = (service as any).liveState.totalCapitalDeployed;
 
       await service.commitReservation(reservation.reservationId);
 
-      expect((service as any).openPositionCount).toBe(prevCount + 1);
-      expect((service as any).totalCapitalDeployed.toNumber()).toBe(
+      expect((service as any).liveState.openPositionCount).toBe(prevCount + 1);
+      expect((service as any).liveState.totalCapitalDeployed.toNumber()).toBe(
         prevCapital.add(new FinancialDecimal(300)).toNumber(),
       );
     });
@@ -1700,7 +1707,7 @@ describe('RiskManagerService', () => {
 
       // Commit the other
       await service.commitReservation(r2.reservationId);
-      expect((service as any).openPositionCount).toBe(1);
+      expect((service as any).liveState.openPositionCount).toBe(1);
     });
 
     it('should include reservation totals in getCurrentExposure', async () => {
@@ -1757,7 +1764,9 @@ describe('RiskManagerService', () => {
 
     it('should reject validatePosition when insufficient capital including reservations', async () => {
       // Deploy most capital, leaving less than maxPositionSize
-      (service as any).totalCapitalDeployed = new FinancialDecimal(9800);
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        9800,
+      );
 
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
@@ -1769,8 +1778,10 @@ describe('RiskManagerService', () => {
 
   describe('closePosition', () => {
     it('should decrement open position count', async () => {
-      (service as any).openPositionCount = 3;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).liveState.openPositionCount = 3;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        1000,
+      );
 
       await service.closePosition(
         new FinancialDecimal(300),
@@ -1781,8 +1792,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should subtract capital from total deployed', async () => {
-      (service as any).openPositionCount = 2;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).liveState.openPositionCount = 2;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        1000,
+      );
 
       await service.closePosition(
         new FinancialDecimal(300),
@@ -1796,9 +1809,11 @@ describe('RiskManagerService', () => {
     });
 
     it('should update daily P&L via updateDailyPnl', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
-      (service as any).dailyPnl = new FinancialDecimal(0);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        500,
+      );
+      (service as any).liveState.dailyPnl = new FinancialDecimal(0);
 
       await service.closePosition(
         new FinancialDecimal(500),
@@ -1810,8 +1825,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit BUDGET_RELEASED event', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        500,
+      );
 
       await service.closePosition(
         new FinancialDecimal(500),
@@ -1825,8 +1842,8 @@ describe('RiskManagerService', () => {
     });
 
     it('should not allow position count to go below 0', async () => {
-      (service as any).openPositionCount = 0;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(0);
+      (service as any).liveState.openPositionCount = 0;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(0);
 
       await service.closePosition(
         new FinancialDecimal(100),
@@ -1839,8 +1856,10 @@ describe('RiskManagerService', () => {
 
   describe('releasePartialCapital', () => {
     it('should reduce totalCapitalDeployed by capitalReleased', async () => {
-      (service as any).openPositionCount = 2;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).liveState.openPositionCount = 2;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        1000,
+      );
 
       await service.releasePartialCapital(
         new FinancialDecimal(300),
@@ -1854,8 +1873,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should clamp totalCapitalDeployed to 0 if release exceeds deployed', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(100);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        100,
+      );
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1869,8 +1890,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT decrement openPositionCount', async () => {
-      (service as any).openPositionCount = 3;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).liveState.openPositionCount = 3;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        1000,
+      );
 
       await service.releasePartialCapital(
         new FinancialDecimal(300),
@@ -1881,8 +1904,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT delete from paperActivePairIds', async () => {
-      (service as any).openPositionCount = 2;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(1000);
+      (service as any).liveState.openPositionCount = 2;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        1000,
+      );
       (service as any).paperActivePairIds.add('pair-1');
 
       await service.releasePartialCapital(
@@ -1895,9 +1920,11 @@ describe('RiskManagerService', () => {
     });
 
     it('should update dailyPnl with realizedPnl', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
-      (service as any).dailyPnl = new FinancialDecimal(0);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        500,
+      );
+      (service as any).liveState.dailyPnl = new FinancialDecimal(0);
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1909,8 +1936,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit BUDGET_RELEASED event with reason partial-exit', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        500,
+      );
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1928,8 +1957,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should persist state after release', async () => {
-      (service as any).openPositionCount = 1;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(500);
+      (service as any).liveState.openPositionCount = 1;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        500,
+      );
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1944,9 +1975,9 @@ describe('RiskManagerService', () => {
     it('should add reason to activeHaltReasons and halt trading', () => {
       service.haltTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(true);
-      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
-        true,
-      );
+      expect(
+        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+      ).toBe(true);
     });
 
     it('should emit SYSTEM_TRADING_HALTED event', () => {
@@ -1972,7 +2003,7 @@ describe('RiskManagerService', () => {
       service.haltTrading('daily_loss_limit');
       service.haltTrading('reconciliation_discrepancy');
       expect(service.isTradingHalted()).toBe(true);
-      expect((service as any).activeHaltReasons.size).toBe(2);
+      expect((service as any).liveState.activeHaltReasons.size).toBe(2);
     });
   });
 
@@ -1981,9 +2012,9 @@ describe('RiskManagerService', () => {
       service.haltTrading('daily_loss_limit');
       service.resumeTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(false);
-      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
-        false,
-      );
+      expect(
+        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+      ).toBe(false);
     });
 
     it('should emit SYSTEM_TRADING_RESUMED event', () => {
@@ -2013,7 +2044,9 @@ describe('RiskManagerService', () => {
       service.resumeTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(true);
       expect(
-        (service as any).activeHaltReasons.has('reconciliation_discrepancy'),
+        (service as any).liveState.activeHaltReasons.has(
+          'reconciliation_discrepancy',
+        ),
       ).toBe(true);
     });
 
@@ -2046,8 +2079,10 @@ describe('RiskManagerService', () => {
 
   describe('recalculateFromPositions', () => {
     it('should force-set openPositionCount and totalCapitalDeployed', async () => {
-      (service as any).openPositionCount = 5;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(2000);
+      (service as any).liveState.openPositionCount = 5;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        2000,
+      );
 
       await service.recalculateFromPositions(3, new Decimal('1200'));
 
@@ -2066,8 +2101,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should log the override with previous and new values', async () => {
-      (service as any).openPositionCount = 5;
-      (service as any).totalCapitalDeployed = new FinancialDecimal(2000);
+      (service as any).liveState.openPositionCount = 5;
+      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
+        2000,
+      );
       const logSpy = vi.spyOn(service['logger'], 'log');
 
       await service.recalculateFromPositions(3, new Decimal('1200'));
@@ -2158,7 +2195,9 @@ describe('RiskManagerService', () => {
 
       expect(svc.isTradingHalted()).toBe(true);
       expect(
-        (svc as any).activeHaltReasons.has('reconciliation_discrepancy'),
+        (svc as any).liveState.activeHaltReasons.has(
+          'reconciliation_discrepancy',
+        ),
       ).toBe(true);
     });
 
@@ -2204,7 +2243,9 @@ describe('RiskManagerService', () => {
 
       // Legacy format should be interpreted correctly
       expect(svc.isTradingHalted()).toBe(true);
-      expect((svc as any).activeHaltReasons.has('daily_loss_limit')).toBe(true);
+      expect(
+        (svc as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+      ).toBe(true);
     });
   });
 
@@ -2217,12 +2258,14 @@ describe('RiskManagerService', () => {
       await service.handleMidnightReset();
 
       // Daily loss should be cleared
-      expect((service as any).activeHaltReasons.has('daily_loss_limit')).toBe(
-        false,
-      );
+      expect(
+        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+      ).toBe(false);
       // Reconciliation halt should remain
       expect(
-        (service as any).activeHaltReasons.has('reconciliation_discrepancy'),
+        (service as any).liveState.activeHaltReasons.has(
+          'reconciliation_discrepancy',
+        ),
       ).toBe(true);
       // Trading should still be halted
       expect(service.isTradingHalted()).toBe(true);
@@ -2482,6 +2525,8 @@ describe('RiskManagerService', () => {
       await service.closePosition(
         new FinancialDecimal(300),
         new FinancialDecimal(0),
+        undefined,
+        true,
       );
 
       expect(warnSpy).toHaveBeenCalledWith(

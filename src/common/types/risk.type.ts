@@ -68,6 +68,7 @@ export interface ClusterAssignment {
 
 export interface RiskConfig {
   bankrollUsd: number;
+  paperBankrollUsd?: number;
   maxPositionPct: number;
   maxOpenPairs: number;
   dailyLossPct: number;

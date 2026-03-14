@@ -22,8 +22,9 @@ export interface IRiskManager {
   /**
    * Update daily P&L with a realized profit/loss delta.
    * @param pnlDelta - Decimal amount (positive = gain, negative = loss)
+   * @param isPaper - When true, targets paper mode risk state. Defaults to false (live).
    */
-  updateDailyPnl(pnlDelta: unknown): Promise<void>;
+  updateDailyPnl(pnlDelta: unknown, isPaper?: boolean): Promise<void>;
   /**
    * Check if trading is currently halted.
    */
@@ -47,6 +48,7 @@ export interface IRiskManager {
   recalculateFromPositions(
     openCount: number,
     capitalDeployed: Decimal,
+    mode?: 'live' | 'paper',
   ): Promise<void>;
   /**
    * Process an operator override for a rejected opportunity.
@@ -88,6 +90,7 @@ export interface IRiskManager {
     capitalReturned: unknown,
     pnlDelta: unknown,
     pairId?: PairId,
+    isPaper?: boolean,
   ): Promise<void>;
   /**
    * Release capital for a partial exit — reduces deployed capital and updates P&L
@@ -101,11 +104,16 @@ export interface IRiskManager {
     capitalReleased: unknown,
     realizedPnl: unknown,
     pairId?: PairId,
+    isPaper?: boolean,
   ): Promise<void>;
   /**
    * Get bankroll configuration from DB (bankroll value + last update timestamp).
    */
-  getBankrollConfig(): Promise<{ bankrollUsd: string; updatedAt: string }>;
+  getBankrollConfig(): Promise<{
+    bankrollUsd: string;
+    paperBankrollUsd: string | null;
+    updatedAt: string;
+  }>;
   /**
    * Get current bankroll as Decimal (for other services to read single source of truth).
    */

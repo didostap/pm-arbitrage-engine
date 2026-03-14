@@ -29,7 +29,7 @@ function createMockPrisma() {
       findMany: vi.fn(),
     },
     riskState: {
-      findUnique: vi.fn(),
+      findMany: vi.fn(),
     },
   } as unknown as PrismaService;
 }
@@ -69,6 +69,7 @@ function createMockRiskManager() {
   return {
     getBankrollConfig: vi.fn().mockResolvedValue({
       bankrollUsd: '10000',
+      paperBankrollUsd: null,
       updatedAt: new Date().toISOString(),
     }),
     getBankrollUsd: vi.fn().mockReturnValue(new Decimal('10000')),
@@ -130,8 +131,8 @@ describe('DashboardService', () => {
     );
 
     // Default mock for riskState (overview balance computation)
-    (prisma.riskState.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
-      null,
+    (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      [],
     );
   });
 
@@ -245,19 +246,80 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(10)
         .mockResolvedValueOnce(10);
 
+      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [
+          {
+            mode: 'live',
+            totalCapitalDeployed: new Decimal('500'),
+            reservedCapital: new Decimal('100'),
+          },
+        ],
+      );
+
+      const result = await service.getOverview();
+
+      expect(result.capitalOverview).not.toBeNull();
+      expect(result.capitalOverview!.live.bankroll).toBe('10000');
+      expect(result.capitalOverview!.live.deployed).toBe('500');
+      expect(result.capitalOverview!.live.reserved).toBe('100');
+      expect(result.capitalOverview!.live.available).toBe('9400');
+    });
+
+    it('should include paper capital overview from paper risk state and paperBankrollUsd', async () => {
       (
-        prisma.riskState.findUnique as ReturnType<typeof vi.fn>
+        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        { platform: 'KALSHI', status: 'healthy' },
+        { platform: 'POLYMARKET', status: 'healthy' },
+      ]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(0);
+      (
+        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
       ).mockResolvedValue({
-        totalCapitalDeployed: new Decimal('500'),
-        reservedCapital: new Decimal('100'),
+        _sum: { expectedEdge: null },
+      });
+      (prisma.order.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [
+          {
+            mode: 'live',
+            totalCapitalDeployed: new Decimal('200'),
+            reservedCapital: new Decimal('50'),
+          },
+          {
+            mode: 'paper',
+            totalCapitalDeployed: new Decimal('300'),
+            reservedCapital: new Decimal('0'),
+          },
+        ],
+      );
+
+      (
+        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
+        bankrollUsd: '10000',
+        paperBankrollUsd: '5000',
+        updatedAt: new Date().toISOString(),
       });
 
       const result = await service.getOverview();
 
-      expect(result.totalBankroll).toBe('10000');
-      expect(result.deployedCapital).toBe('500');
-      expect(result.reservedCapital).toBe('100');
-      expect(result.availableCapital).toBe('9400');
+      expect(result.capitalOverview).not.toBeNull();
+      // Live section uses live bankroll
+      expect(result.capitalOverview!.live.bankroll).toBe('10000');
+      expect(result.capitalOverview!.live.deployed).toBe('200');
+      expect(result.capitalOverview!.live.reserved).toBe('50');
+      expect(result.capitalOverview!.live.available).toBe('9750');
+      // Paper section uses paper bankroll
+      expect(result.capitalOverview!.paper.bankroll).toBe('5000');
+      expect(result.capitalOverview!.paper.deployed).toBe('300');
+      expect(result.capitalOverview!.paper.reserved).toBe('0');
+      expect(result.capitalOverview!.paper.available).toBe('4700');
     });
 
     it('should return null balance fields when bankroll is zero', async () => {
@@ -273,23 +335,21 @@ describe('DashboardService', () => {
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
-      (
-        prisma.riskState.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(null);
+      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [],
+      );
 
       (
         riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
       ).mockResolvedValue({
         bankrollUsd: '0',
+        paperBankrollUsd: null,
         updatedAt: new Date().toISOString(),
       });
 
       const result = await service.getOverview();
 
-      expect(result.totalBankroll).toBeNull();
-      expect(result.deployedCapital).toBeNull();
-      expect(result.availableCapital).toBeNull();
-      expect(result.reservedCapital).toBeNull();
+      expect(result.capitalOverview).toBeNull();
     });
 
     it('should floor availableCapital at zero when over-deployed', async () => {
@@ -307,16 +367,20 @@ describe('DashboardService', () => {
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(10)
         .mockResolvedValueOnce(10);
-      (
-        prisma.riskState.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        totalCapitalDeployed: new Decimal('9000'),
-        reservedCapital: new Decimal('2000'),
-      });
+      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [
+          {
+            mode: 'live',
+            totalCapitalDeployed: new Decimal('9000'),
+            reservedCapital: new Decimal('2000'),
+          },
+        ],
+      );
 
       const result = await service.getOverview();
 
-      expect(result.availableCapital).toBe('0');
+      expect(result.capitalOverview).not.toBeNull();
+      expect(result.capitalOverview!.live.available).toBe('0');
     });
 
     it('should use decimal.js for P&L calculation', async () => {
