@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import Decimal from 'decimal.js';
-import { computeTakeProfitThreshold } from './exit-thresholds';
+import {
+  computeTakeProfitThreshold,
+  calculateExitProximity,
+} from './exit-thresholds';
 
 describe('computeTakeProfitThreshold', () => {
   it('normal journey (baseline=0, edge=$3.00) → $2.40', () => {
@@ -88,5 +91,88 @@ describe('computeTakeProfitThreshold', () => {
       new Decimal('1'),
     );
     expect(result.toFixed(2)).toBe('0.80');
+  });
+});
+
+describe('calculateExitProximity', () => {
+  it('mid-range value (TP direction)', () => {
+    // baseline=0, target=10, currentPnl=5 → (5 - 0) / (10 - 0) = 0.5
+    const result = calculateExitProximity(
+      new Decimal('5'),
+      new Decimal('0'),
+      new Decimal('10'),
+    );
+    expect(result.toNumber()).toBe(0.5);
+  });
+
+  it('at-threshold returns 1', () => {
+    // currentPnl = target → (10 - 0) / (10 - 0) = 1
+    const result = calculateExitProximity(
+      new Decimal('10'),
+      new Decimal('0'),
+      new Decimal('10'),
+    );
+    expect(result.toNumber()).toBe(1);
+  });
+
+  it('at-baseline returns 0', () => {
+    // currentPnl = baseline → (0 - 0) / (10 - 0) = 0
+    const result = calculateExitProximity(
+      new Decimal('0'),
+      new Decimal('0'),
+      new Decimal('10'),
+    );
+    expect(result.toNumber()).toBe(0);
+  });
+
+  it('beyond-threshold clamps to 1', () => {
+    // currentPnl = 15, target = 10 → (15 - 0) / (10 - 0) = 1.5 → clamp 1
+    const result = calculateExitProximity(
+      new Decimal('15'),
+      new Decimal('0'),
+      new Decimal('10'),
+    );
+    expect(result.toNumber()).toBe(1);
+  });
+
+  it('beyond-baseline clamps to 0', () => {
+    // currentPnl = -5, baseline = 0, target = 10 → (-5 - 0) / (10 - 0) = -0.5 → clamp 0
+    const result = calculateExitProximity(
+      new Decimal('-5'),
+      new Decimal('0'),
+      new Decimal('10'),
+    );
+    expect(result.toNumber()).toBe(0);
+  });
+
+  it('zero denominator (target === baseline) returns 0', () => {
+    const result = calculateExitProximity(
+      new Decimal('5'),
+      new Decimal('3'),
+      new Decimal('3'),
+    );
+    expect(result.toNumber()).toBe(0);
+  });
+
+  it('SL direction: target < baseline — proximity rises as PnL drops', () => {
+    // baseline = -2, target = -4.4 (SL), currentPnl = -3.2
+    // (currentPnl - baseline) / (target - baseline) = (-3.2 - (-2)) / (-4.4 - (-2)) = -1.2 / -2.4 = 0.5
+    const result = calculateExitProximity(
+      new Decimal('-3.2'),
+      new Decimal('-2'),
+      new Decimal('-4.4'),
+    );
+    expect(result.toNumber()).toBe(0.5);
+  });
+
+  it('TP direction: target > baseline — proximity rises as PnL rises', () => {
+    // baseline = -2, target = 0.56, currentPnl = -0.72
+    // (-0.72 - (-2)) / (0.56 - (-2)) = 1.28 / 2.56 = 0.5
+    const result = calculateExitProximity(
+      new Decimal('-0.72'),
+      new Decimal('-2'),
+      new Decimal('0.56'),
+    );
+    expect(result.toNumber()).toBe(0.5);
   });
 });

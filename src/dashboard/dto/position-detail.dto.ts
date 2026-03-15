@@ -148,7 +148,12 @@ export class PositionFullDetailDto {
     description: 'Current prices per platform (null if unavailable)',
     nullable: true,
   })
-  currentPrices!: { kalshi: string | null; polymarket: string | null } | null;
+  currentPrices!: {
+    kalshi: string | null;
+    polymarket: string | null;
+    kalshiDepthSufficient?: boolean;
+    polymarketDepthSufficient?: boolean;
+  } | null;
 
   @ApiPropertyOptional({
     description: 'Current edge (decimal string, null if unavailable)',

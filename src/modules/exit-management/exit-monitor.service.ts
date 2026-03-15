@@ -7,6 +7,7 @@ import {
   FinancialMath,
   getResidualSize,
   calculateLegCapital,
+  calculateVwapClosePrice,
 } from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
@@ -979,20 +980,11 @@ export class ExitMonitorService {
       return new Decimal(levels[0]!.price);
     }
 
-    // With positionSize: VWAP across levels
-    let remainingQty = positionSize;
-    let totalCost = new Decimal(0);
-    for (const level of levels) {
-      const fillAtLevel = Decimal.min(
-        remainingQty,
-        new Decimal(level.quantity),
-      );
-      totalCost = totalCost.plus(fillAtLevel.mul(new Decimal(level.price)));
-      remainingQty = remainingQty.minus(fillAtLevel);
-      if (remainingQty.lte(0)) break;
-    }
-    const filledQty = positionSize.minus(remainingQty);
-    if (filledQty.isZero()) return null;
-    return totalCost.div(filledQty);
+    // With positionSize: delegate to shared VWAP function
+    return calculateVwapClosePrice(
+      orderBook,
+      originalSide as 'buy' | 'sell',
+      positionSize,
+    );
   }
 }

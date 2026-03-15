@@ -44,6 +44,24 @@ export class CurrentPricesDto {
     nullable: true,
   })
   polymarket!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether Kalshi order book has sufficient depth for full VWAP at position size. ' +
+      'False = price is an estimate based on partial depth.',
+    type: Boolean,
+    default: true,
+  })
+  kalshiDepthSufficient?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether Polymarket order book has sufficient depth for full VWAP at position size. ' +
+      'False = price is an estimate based on partial depth.',
+    type: Boolean,
+    default: true,
+  })
+  polymarketDepthSufficient?: boolean;
 }
 
 export class ExitProximityDto {

@@ -2,9 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import Decimal from 'decimal.js';
-import { FinancialMath } from './financial-math';
+import {
+  FinancialMath,
+  calculateVwapClosePrice,
+  calculateLegPnl,
+} from './financial-math';
 import { FeeSchedule } from '../types/platform.type';
 import { PlatformId } from '../types/platform.type';
+import type { NormalizedOrderBook } from '../types/normalized-order-book.type';
+import type { ContractId } from '../types/branded.type';
 
 interface CsvScenario {
   scenario_name: string;
@@ -377,5 +383,163 @@ describe('FinancialMath', () => {
       // baseline = -(0 + 2.54) = -2.54
       expect(result.toNumber()).toBeCloseTo(-2.54, 8);
     });
+  });
+});
+
+function makeOrderBook(
+  bids: Array<{ price: number; quantity: number }>,
+  asks: Array<{ price: number; quantity: number }>,
+): NormalizedOrderBook {
+  return {
+    platformId: 'kalshi' as unknown as NormalizedOrderBook['platformId'],
+    contractId: 'test-contract' as ContractId,
+    bids,
+    asks,
+    timestamp: new Date(),
+  };
+}
+
+describe('calculateVwapClosePrice', () => {
+  it('single-level book — returns that level price', () => {
+    const book = makeOrderBook([{ price: 0.6, quantity: 100 }], []);
+    const result = calculateVwapClosePrice(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.toNumber()).toBe(0.6);
+  });
+
+  it('multi-level book — correct weighted average (sell-to-close walks bids)', () => {
+    // Bids: 0.60 × 30, 0.58 × 70 → fill 50 from top
+    // VWAP = (0.60*30 + 0.58*20) / 50 = (18 + 11.6) / 50 = 0.592
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 30 },
+        { price: 0.58, quantity: 70 },
+      ],
+      [],
+    );
+    const result = calculateVwapClosePrice(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.toNumber()).toBeCloseTo(0.592, 10);
+  });
+
+  it('multi-level book — buy-to-close walks asks lowest-first', () => {
+    // Asks: 0.40 × 20, 0.42 × 80 → fill 50 from bottom
+    // VWAP = (0.40*20 + 0.42*30) / 50 = (8 + 12.6) / 50 = 0.412
+    const book = makeOrderBook(
+      [],
+      [
+        { price: 0.4, quantity: 20 },
+        { price: 0.42, quantity: 80 },
+      ],
+    );
+    const result = calculateVwapClosePrice(book, 'sell', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.toNumber()).toBeCloseTo(0.412, 10);
+  });
+
+  it('partial depth — returns VWAP across all available levels', () => {
+    // Only 30 available, need 50 → VWAP across all 30
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 20 },
+        { price: 0.58, quantity: 10 },
+      ],
+      [],
+    );
+    const result = calculateVwapClosePrice(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    // VWAP = (0.60*20 + 0.58*10) / 30 = (12 + 5.8) / 30 = 0.59333...
+    expect(result!.toNumber()).toBeCloseTo(17.8 / 30, 10);
+  });
+
+  it('zero-depth side — returns null', () => {
+    const book = makeOrderBook([], [{ price: 0.4, quantity: 100 }]);
+    // buy side → walk bids, but bids empty
+    const result = calculateVwapClosePrice(book, 'buy', new Decimal('50'));
+    expect(result).toBeNull();
+  });
+
+  it('empty order book — returns null', () => {
+    const book = makeOrderBook([], []);
+    expect(calculateVwapClosePrice(book, 'buy', new Decimal('50'))).toBeNull();
+    expect(calculateVwapClosePrice(book, 'sell', new Decimal('50'))).toBeNull();
+  });
+
+  it('zero position size — returns null', () => {
+    const book = makeOrderBook([{ price: 0.6, quantity: 100 }], []);
+    expect(calculateVwapClosePrice(book, 'buy', new Decimal('0'))).toBeNull();
+  });
+
+  it('negative position size — returns null', () => {
+    const book = makeOrderBook([{ price: 0.6, quantity: 100 }], []);
+    expect(calculateVwapClosePrice(book, 'buy', new Decimal('-10'))).toBeNull();
+  });
+
+  it('position size exactly matches available depth', () => {
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 30 },
+        { price: 0.58, quantity: 20 },
+      ],
+      [],
+    );
+    const result = calculateVwapClosePrice(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    // VWAP = (0.60*30 + 0.58*20) / 50 = (18 + 11.6) / 50 = 0.592
+    expect(result!.toNumber()).toBeCloseTo(0.592, 10);
+  });
+});
+
+describe('calculateLegPnl', () => {
+  it('buy-side profit', () => {
+    // Bought at 0.55, close at 0.60, size 100
+    const result = calculateLegPnl(
+      'buy',
+      new Decimal('0.55'),
+      new Decimal('0.60'),
+      new Decimal('100'),
+    );
+    expect(result.toNumber()).toBe(5.0);
+  });
+
+  it('buy-side loss', () => {
+    const result = calculateLegPnl(
+      'buy',
+      new Decimal('0.55'),
+      new Decimal('0.50'),
+      new Decimal('100'),
+    );
+    expect(result.toNumber()).toBe(-5.0);
+  });
+
+  it('sell-side profit', () => {
+    // Sold at 0.45, close at 0.40, size 100
+    const result = calculateLegPnl(
+      'sell',
+      new Decimal('0.45'),
+      new Decimal('0.40'),
+      new Decimal('100'),
+    );
+    expect(result.toNumber()).toBe(5.0);
+  });
+
+  it('sell-side loss', () => {
+    const result = calculateLegPnl(
+      'sell',
+      new Decimal('0.45'),
+      new Decimal('0.50'),
+      new Decimal('100'),
+    );
+    expect(result.toNumber()).toBe(-5.0);
+  });
+
+  it('zero-size position returns 0', () => {
+    const result = calculateLegPnl(
+      'buy',
+      new Decimal('0.55'),
+      new Decimal('0.60'),
+      new Decimal('0'),
+    );
+    expect(result.toNumber()).toBe(0);
   });
 });

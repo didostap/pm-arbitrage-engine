@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
-import { FinancialMath } from '../../common/utils/financial-math';
+import {
+  FinancialMath,
+  calculateLegPnl as sharedCalculateLegPnl,
+} from '../../common/utils/financial-math';
 import {
   SL_MULTIPLIER,
   computeTakeProfitThreshold,
@@ -205,11 +208,6 @@ export class ThresholdEvaluatorService {
     currentPrice: Decimal,
     size: Decimal,
   ): Decimal {
-    if (side === 'buy') {
-      // Bought at entry, close by selling at current → P&L = (current - entry) * size
-      return currentPrice.minus(entryPrice).mul(size);
-    }
-    // Sold at entry, close by buying at current → P&L = (entry - current) * size
-    return entryPrice.minus(currentPrice).mul(size);
+    return sharedCalculateLegPnl(side, entryPrice, currentPrice, size);
   }
 }

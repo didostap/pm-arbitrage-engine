@@ -45,3 +45,24 @@ export function computeTakeProfitThreshold(
   // Fallback (9-18): edge-relative TP when baseline dominates edge
   return Decimal.max(DECIMAL_ZERO, scaledInitialEdge.mul(TP_RATIO_DECIMAL));
 }
+
+/**
+ * Unified exit proximity calculation for both SL and TP.
+ * Formula: clamp(0, 1, (currentPnl - baseline) / (target - baseline))
+ *
+ * Works for both directions:
+ * - SL (target < baseline): both numerator and denominator are negative as PnL drops, producing positive proximity
+ * - TP (target > baseline): positive numerator/denominator as PnL rises
+ *
+ * Returns Decimal(0) when target === baseline (zero denominator guard).
+ */
+export function calculateExitProximity(
+  currentPnl: Decimal,
+  baseline: Decimal,
+  target: Decimal,
+): Decimal {
+  const denom = target.minus(baseline);
+  if (denom.isZero()) return DECIMAL_ZERO;
+  const raw = currentPnl.minus(baseline).div(denom);
+  return Decimal.min(new Decimal(1), Decimal.max(DECIMAL_ZERO, raw));
+}

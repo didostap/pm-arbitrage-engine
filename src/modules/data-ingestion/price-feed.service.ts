@@ -6,7 +6,10 @@ import {
   KALSHI_CONNECTOR_TOKEN,
   POLYMARKET_CONNECTOR_TOKEN,
 } from '../../connectors/connector.constants.js';
-import { FinancialMath } from '../../common/utils/financial-math.js';
+import {
+  FinancialMath,
+  calculateVwapClosePrice,
+} from '../../common/utils/financial-math.js';
 import { asContractId } from '../../common/types/branded.type.js';
 
 @Injectable()
@@ -43,6 +46,39 @@ export class PriceFeedService implements IPriceFeedService {
           platform,
           contractId,
           side,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return null;
+    }
+  }
+
+  async getVwapClosePrice(
+    platform: string,
+    contractId: string,
+    side: 'buy' | 'sell',
+    positionSize: Decimal,
+  ): Promise<{ price: Decimal; depthSufficient: boolean } | null> {
+    const connector = this.getConnector(platform);
+    try {
+      const orderBook = await connector.getOrderBook(asContractId(contractId));
+      const vwap = calculateVwapClosePrice(orderBook, side, positionSize);
+      if (vwap === null) return null;
+
+      // Determine depth sufficiency: sum available depth on the close side
+      const levels = side === 'buy' ? orderBook.bids : orderBook.asks;
+      const totalDepth = levels.reduce((sum, l) => sum + l.quantity, 0);
+      const depthSufficient = new Decimal(totalDepth).gte(positionSize);
+
+      return { price: vwap, depthSufficient };
+    } catch (error) {
+      this.logger.warn({
+        message: 'Failed to fetch VWAP close price — order book unavailable',
+        data: {
+          platform,
+          contractId,
+          side,
+          positionSize: positionSize.toString(),
           error: error instanceof Error ? error.message : String(error),
         },
       });

@@ -4,10 +4,12 @@ import type { IPriceFeedService } from '../common/interfaces/price-feed-service.
 import { PRICE_FEED_SERVICE_TOKEN } from '../common/interfaces/price-feed-service.interface.js';
 import type { PositionRepository } from '../persistence/repositories/position.repository.js';
 import { FinancialMath } from '../common/utils/financial-math.js';
+import { calculateLegPnl } from '../common/utils/financial-math.js';
 import { getResidualSize } from '../common/utils/residual-size.js';
 import {
   SL_MULTIPLIER,
   computeTakeProfitThreshold,
+  calculateExitProximity,
 } from '../common/constants/exit-thresholds.js';
 
 /** Position shape from findByStatusWithOrders() — includes pair + both orders */
@@ -16,7 +18,12 @@ type PositionWithOrders = Awaited<
 >[0];
 
 export interface EnrichedPosition {
-  currentPrices: { kalshi: string | null; polymarket: string | null };
+  currentPrices: {
+    kalshi: string | null;
+    polymarket: string | null;
+    kalshiDepthSufficient?: boolean;
+    polymarketDepthSufficient?: boolean;
+  };
   currentEdge: string | null;
   unrealizedPnl: string | null;
   exitProximity: { stopLoss: string; takeProfit: string } | null;
@@ -88,23 +95,34 @@ export class PositionEnrichmentService {
       return { status: 'failed', data: emptyData, errors };
     }
 
-    // Fetch current close prices
-    const [kalshiClosePrice, polymarketClosePrice] = await Promise.all([
-      this.priceFeed.getCurrentClosePrice(
+    // Extract sizes for VWAP depth calculation
+    const kalshiSize = new Decimal(kalshiOrder.fillSize.toString());
+    const polymarketSize = new Decimal(polymarketOrder.fillSize.toString());
+
+    // Fetch VWAP close prices (depth-aware)
+    const [kalshiVwap, polymarketVwap] = await Promise.all([
+      this.priceFeed.getVwapClosePrice(
         'kalshi',
         pair.kalshiContractId,
         position.kalshiSide as 'buy' | 'sell',
+        kalshiSize,
       ),
-      this.priceFeed.getCurrentClosePrice(
+      this.priceFeed.getVwapClosePrice(
         'polymarket',
         pair.polymarketClobTokenId!,
         position.polymarketSide as 'buy' | 'sell',
+        polymarketSize,
       ),
     ]);
 
-    const currentPrices = {
+    const kalshiClosePrice = kalshiVwap?.price ?? null;
+    const polymarketClosePrice = polymarketVwap?.price ?? null;
+
+    const currentPrices: EnrichedPosition['currentPrices'] = {
       kalshi: kalshiClosePrice?.toString() ?? null,
       polymarket: polymarketClosePrice?.toString() ?? null,
+      kalshiDepthSufficient: kalshiVwap?.depthSufficient ?? true,
+      polymarketDepthSufficient: polymarketVwap?.depthSufficient ?? true,
     };
 
     // If either price unavailable
@@ -138,8 +156,6 @@ export class PositionEnrichmentService {
     const polymarketEntryPrice = new Decimal(
       polymarketOrder.fillPrice.toString(),
     );
-    const kalshiSize = new Decimal(kalshiOrder.fillSize.toString());
-    const polymarketSize = new Decimal(polymarketOrder.fillSize.toString());
     const initialEdge = new Decimal(position.expectedEdge.toString());
 
     // Fee rates
@@ -152,14 +168,14 @@ export class PositionEnrichmentService {
       polymarketClosePrice,
     );
 
-    // Per-leg P&L (same formula as ThresholdEvaluatorService)
-    const kalshiPnl = this.calculateLegPnl(
+    // Per-leg P&L — shared function (AC #2, #8)
+    const kalshiPnl = calculateLegPnl(
       position.kalshiSide,
       kalshiEntryPrice,
       kalshiClosePrice,
       kalshiSize,
     );
-    const polymarketPnl = this.calculateLegPnl(
+    const polymarketPnl = calculateLegPnl(
       position.polymarketSide,
       polymarketEntryPrice,
       polymarketClosePrice,
@@ -267,27 +283,17 @@ export class PositionEnrichmentService {
       scaledInitialEdge,
     );
 
-    const slDenom = thresholdBaseline.minus(stopLossThreshold);
-    const stopLossProximity = slDenom.isZero()
-      ? new Decimal(0)
-      : Decimal.min(
-          new Decimal(1),
-          Decimal.max(
-            new Decimal(0),
-            thresholdBaseline.minus(currentPnl).div(slDenom),
-          ),
-        );
-
-    const tpDenom = takeProfitThreshold.minus(thresholdBaseline);
-    const takeProfitProximity = tpDenom.isZero()
-      ? new Decimal(0)
-      : Decimal.min(
-          new Decimal(1),
-          Decimal.max(
-            new Decimal(0),
-            currentPnl.minus(thresholdBaseline).div(tpDenom),
-          ),
-        );
+    // Shared proximity calculation (AC #3, #8)
+    const stopLossProximity = calculateExitProximity(
+      currentPnl,
+      thresholdBaseline,
+      stopLossThreshold,
+    );
+    const takeProfitProximity = calculateExitProximity(
+      currentPnl,
+      thresholdBaseline,
+      takeProfitThreshold,
+    );
 
     return {
       status: 'enriched',
@@ -305,18 +311,6 @@ export class PositionEnrichmentService {
         projectedTpPnl: takeProfitThreshold.toFixed(8),
       },
     };
-  }
-
-  private calculateLegPnl(
-    side: string,
-    entryPrice: Decimal,
-    currentPrice: Decimal,
-    size: Decimal,
-  ): Decimal {
-    if (side === 'buy') {
-      return currentPrice.minus(entryPrice).mul(size);
-    }
-    return entryPrice.minus(currentPrice).mul(size);
   }
 
   private computeTimeToResolution(resolutionDate: Date): string {

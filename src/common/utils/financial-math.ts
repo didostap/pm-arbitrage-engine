@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { FeeSchedule } from '../types/platform.type.js';
+import type { NormalizedOrderBook } from '../types/normalized-order-book.type.js';
 
 // Isolated Decimal constructor configured for financial precision.
 // Uses Decimal.clone() to avoid mutating the global Decimal settings,
@@ -218,4 +219,59 @@ export class FinancialMath {
       throw new Error(`FinancialMath: ${name} must not be Infinity`);
     }
   }
+}
+
+/**
+ * Calculate VWAP close price by walking order book levels.
+ * Buy position → sell to close → walk bids (highest first).
+ * Sell position → buy to close → walk asks (lowest first).
+ *
+ * Returns null when: empty side, zero/negative position size.
+ * When total depth < positionSize, returns VWAP across all available depth (partial fill).
+ */
+export function calculateVwapClosePrice(
+  orderBook: NormalizedOrderBook,
+  closeSide: 'buy' | 'sell',
+  positionSize: Decimal,
+): Decimal | null {
+  if (positionSize.lte(0)) return null;
+
+  const levels = closeSide === 'buy' ? orderBook.bids : orderBook.asks;
+  if (levels.length === 0) return null;
+
+  let remainingQty = positionSize;
+  let totalCost = new FinancialDecimal(0);
+
+  for (const level of levels) {
+    const levelQty = new FinancialDecimal(level.quantity);
+    const levelPrice = new FinancialDecimal(level.price);
+    const fillAtLevel = FinancialDecimal.min(remainingQty, levelQty);
+    totalCost = totalCost.plus(fillAtLevel.mul(levelPrice));
+    remainingQty = remainingQty.minus(fillAtLevel);
+    if (remainingQty.lte(0)) break;
+  }
+
+  const filledQty = positionSize.minus(remainingQty);
+  if (filledQty.isZero()) return null;
+  return totalCost.div(filledQty);
+}
+
+/**
+ * Calculate P&L for a single leg of an arbitrage position.
+ * Buy side: (closePrice - entryPrice) × size
+ * Sell side: (entryPrice - closePrice) × size
+ */
+export function calculateLegPnl(
+  side: string,
+  entryPrice: Decimal,
+  closePrice: Decimal,
+  size: Decimal,
+): Decimal {
+  const ep = new FinancialDecimal(entryPrice.toString());
+  const cp = new FinancialDecimal(closePrice.toString());
+  const sz = new FinancialDecimal(size.toString());
+  if (side === 'buy') {
+    return cp.minus(ep).mul(sz);
+  }
+  return ep.minus(cp).mul(sz);
 }

@@ -205,4 +205,79 @@ describe('PriceFeedService', () => {
       expect(result.toNumber()).toBeCloseTo(0.07, 6);
     });
   });
+
+  describe('getVwapClosePrice', () => {
+    it('delegates to calculateVwapClosePrice and sets depthSufficient=true', async () => {
+      // 100 available, need 50 → sufficient
+      vi.mocked(kalshiConnector.getOrderBook).mockResolvedValue(
+        makeOrderBook([{ price: 0.6, quantity: 100 }], []),
+      );
+
+      const result = await service.getVwapClosePrice(
+        'kalshi',
+        'contract-1',
+        'buy',
+        new Decimal('50'),
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.price.toNumber()).toBe(0.6);
+      expect(result!.depthSufficient).toBe(true);
+    });
+
+    it('sets depthSufficient=false when depth < positionSize', async () => {
+      // Only 30 available, need 50 → insufficient
+      vi.mocked(kalshiConnector.getOrderBook).mockResolvedValue(
+        makeOrderBook(
+          [
+            { price: 0.6, quantity: 20 },
+            { price: 0.58, quantity: 10 },
+          ],
+          [],
+        ),
+      );
+
+      const result = await service.getVwapClosePrice(
+        'kalshi',
+        'contract-1',
+        'buy',
+        new Decimal('50'),
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.depthSufficient).toBe(false);
+      // VWAP across all 30: (0.60*20 + 0.58*10) / 30
+      expect(result!.price.toNumber()).toBeCloseTo(17.8 / 30, 10);
+    });
+
+    it('returns null when connector returns empty side', async () => {
+      vi.mocked(polymarketConnector.getOrderBook).mockResolvedValue(
+        makeOrderBook([], []),
+      );
+
+      const result = await service.getVwapClosePrice(
+        'polymarket',
+        'contract-2',
+        'sell',
+        new Decimal('50'),
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when connector throws', async () => {
+      vi.mocked(kalshiConnector.getOrderBook).mockRejectedValue(
+        new Error('Connection lost'),
+      );
+
+      const result = await service.getVwapClosePrice(
+        'kalshi',
+        'contract-1',
+        'buy',
+        new Decimal('50'),
+      );
+
+      expect(result).toBeNull();
+    });
+  });
 });
