@@ -73,4 +73,5 @@ export const WS_EVENTS = {
   MATCH_PENDING: 'match.pending',
   BATCH_COMPLETE: 'batch.complete',
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
+  DIVERGENCE_ALERT: 'divergence.alert',
 } as const;

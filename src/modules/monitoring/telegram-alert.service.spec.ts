@@ -776,11 +776,44 @@ describe('TelegramAlertService', () => {
 
       expect(mockFetch).not.toHaveBeenCalled();
     });
+
+    it('should dispatch DATA_DIVERGENCE via formatter', async () => {
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
+      const { DataDivergenceEvent } =
+        await import('../../common/events/platform.events');
+      const { asContractId } = await import('../../common/types/branded.type');
+
+      service.sendEventAlert(
+        EVENT_NAMES.DATA_DIVERGENCE,
+        new DataDivergenceEvent(
+          'kalshi',
+          asContractId('DIV-TEST'),
+          '0.50',
+          '0.55',
+          '2026-03-15T00:00:00Z',
+          '0.47',
+          '0.52',
+          '2026-03-15T00:01:30Z',
+          '0.03',
+          90000,
+        ),
+      );
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0] as [string, RequestInit])[1]?.body as string,
+      ) as { text: string };
+      expect(body.text).toContain('Data Divergence');
+      expect(body.text).toContain('DIV-TEST');
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
+    });
   });
 
   describe('TELEGRAM_ELIGIBLE_EVENTS constant', () => {
-    it('should contain exactly 22 events', () => {
-      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(22);
+    it('should contain exactly 23 events', () => {
+      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(23);
     });
 
     it('should contain all expected events', () => {
@@ -807,6 +840,7 @@ describe('TelegramAlertService', () => {
         EVENT_NAMES.CLUSTER_LIMIT_BREACHED,
         EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
         EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
+        EVENT_NAMES.DATA_DIVERGENCE,
       ];
       for (const eventName of expected) {
         expect(TELEGRAM_ELIGIBLE_EVENTS.has(eventName)).toBe(true);

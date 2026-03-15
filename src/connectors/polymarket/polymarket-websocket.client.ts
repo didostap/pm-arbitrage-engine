@@ -45,6 +45,7 @@ export class PolymarketWebSocketClient {
   private shouldReconnect = true;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
+  private hasInitialSubscription = false;
 
   constructor(private readonly config: PolymarketWebSocketConfig) {
     this.eventEmitter = config.eventEmitter;
@@ -65,9 +66,10 @@ export class PolymarketWebSocketClient {
             platformId: PlatformId.POLYMARKET,
           });
 
-          // Resubscribe to all tracked tokens after reconnect
-          for (const tokenId of this.subscriptions) {
-            this.sendSubscribe(tokenId);
+          // Resubscribe to all tracked tokens after (re)connect
+          this.hasInitialSubscription = false;
+          if (this.subscriptions.size > 0) {
+            this.sendInitialSubscription([...this.subscriptions]);
           }
 
           // Start keepalive ping interval
@@ -139,6 +141,7 @@ export class PolymarketWebSocketClient {
       this.ws = null;
     }
     this.isConnected = false;
+    this.hasInitialSubscription = false;
     this.orderbookState.clear();
   }
 
@@ -152,6 +155,14 @@ export class PolymarketWebSocketClient {
   unsubscribe(tokenId: string): void {
     this.subscriptions.delete(tokenId);
     this.orderbookState.delete(tokenId);
+    if (this.isConnected && this.ws) {
+      this.ws.send(
+        JSON.stringify({
+          assets_ids: [tokenId],
+          operation: 'unsubscribe',
+        }),
+      );
+    }
   }
 
   onUpdate(callback: (book: PolymarketOrderBookMessage) => void): void {
@@ -162,14 +173,30 @@ export class PolymarketWebSocketClient {
     return this.isConnected;
   }
 
-  private sendSubscribe(tokenId: string): void {
+  /** Send initial subscription message (first subscription after connect). */
+  private sendInitialSubscription(tokenIds: string[]): void {
     if (!this.ws) return;
     this.ws.send(
       JSON.stringify({
-        auth: {},
-        type: 'subscribe',
-        markets: [],
+        type: 'market',
+        assets_ids: tokenIds,
+        custom_feature_enabled: true,
+      }),
+    );
+    this.hasInitialSubscription = true;
+  }
+
+  /** Send dynamic subscribe for a single token (after initial subscription). */
+  private sendSubscribe(tokenId: string): void {
+    if (!this.ws) return;
+    if (!this.hasInitialSubscription) {
+      this.sendInitialSubscription([tokenId]);
+      return;
+    }
+    this.ws.send(
+      JSON.stringify({
         assets_ids: [tokenId],
+        operation: 'subscribe',
       }),
     );
   }

@@ -23,10 +23,20 @@ export interface KalshiWebSocketMessage {
 
 export interface KalshiSubscribeCommand {
   id: number;
-  cmd: 'subscribe' | 'unsubscribe';
+  cmd: 'subscribe';
   params: {
     channels: string[];
     market_ticker: string;
+  };
+}
+
+export interface KalshiUpdateSubscriptionCommand {
+  id: number;
+  cmd: 'update_subscription';
+  params: {
+    sids: number[];
+    market_tickers: string[];
+    action: 'add_markets' | 'delete_markets';
   };
 }
 

@@ -1,4 +1,5 @@
 import { PlatformId, PlatformHealth } from '../types/platform.type';
+import type { ContractId } from '../types/branded.type';
 import { BaseEvent } from './base.event';
 
 /**
@@ -135,6 +136,28 @@ export class PlatformGasUpdatedEvent extends BaseEvent {
     public readonly previousEstimateUsd: string,
     public readonly newEstimateUsd: string,
     public readonly changePercent: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
+ * Event emitted when poll and WebSocket data diverge beyond threshold.
+ * [Story 10-0-1] Data path divergence monitoring
+ */
+export class DataDivergenceEvent extends BaseEvent {
+  constructor(
+    public readonly platformId: PlatformId,
+    public readonly contractId: ContractId,
+    public readonly pollBestBid: string,
+    public readonly pollBestAsk: string,
+    public readonly pollTimestamp: string,
+    public readonly wsBestBid: string,
+    public readonly wsBestAsk: string,
+    public readonly wsTimestamp: string,
+    public readonly priceDelta: string,
+    public readonly stalenessDeltaMs: number,
     correlationId?: string,
   ) {
     super(correlationId);

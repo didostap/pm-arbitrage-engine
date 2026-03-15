@@ -651,4 +651,59 @@ describe('KalshiConnector', () => {
       expect(mockGetAccountApiLimits).not.toHaveBeenCalled();
     });
   });
+
+  describe('subscribeToContracts / unsubscribeFromContracts (AC #2)', () => {
+    it('should not throw when subscribing with empty array', () => {
+      expect(() => connector.subscribeToContracts([])).not.toThrow();
+    });
+
+    it('should not throw when unsubscribing with empty array', () => {
+      expect(() => connector.unsubscribeFromContracts([])).not.toThrow();
+    });
+
+    it('should delegate to wsClient.addMarkets when subscriptionId is set', () => {
+      const wsClient = connector['wsClient'];
+      // Simulate subscribed state with an sid
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      (wsClient as any)['_subscriptionId'] = 42;
+      const addMarketsSpy = vi
+        .spyOn(wsClient, 'addMarkets')
+        .mockImplementation(() => {});
+
+      const contractIds = [asContractId('TICKER-A'), asContractId('TICKER-B')];
+      connector.subscribeToContracts(contractIds);
+
+      expect(addMarketsSpy).toHaveBeenCalledWith(['TICKER-A', 'TICKER-B']);
+      addMarketsSpy.mockRestore();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      (wsClient as any)['_subscriptionId'] = null;
+    });
+
+    it('should delegate to wsClient.subscribe for each ticker when no subscriptionId', () => {
+      const wsClient = connector['wsClient'];
+      const subscribeSpy = vi
+        .spyOn(wsClient, 'subscribe')
+        .mockImplementation(() => {});
+
+      const contractIds = [asContractId('TICKER-A'), asContractId('TICKER-B')];
+      connector.subscribeToContracts(contractIds);
+
+      expect(subscribeSpy).toHaveBeenCalledWith('TICKER-A');
+      expect(subscribeSpy).toHaveBeenCalledWith('TICKER-B');
+      subscribeSpy.mockRestore();
+    });
+
+    it('should delegate to wsClient.unsubscribe for each contract on unsubscribeFromContracts', () => {
+      const wsClient = connector['wsClient'];
+      const unsubscribeSpy = vi
+        .spyOn(wsClient, 'unsubscribe')
+        .mockImplementation(() => {});
+
+      const contractIds = [asContractId('TICKER-A')];
+      connector.unsubscribeFromContracts(contractIds);
+
+      expect(unsubscribeSpy).toHaveBeenCalledWith('TICKER-A');
+      unsubscribeSpy.mockRestore();
+    });
+  });
 });

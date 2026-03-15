@@ -8,6 +8,8 @@ import { PersistenceModule } from '../../common/persistence.module';
 import { ConnectorModule } from '../../connectors/connector.module';
 import { ContractMatchingModule } from '../contract-matching/contract-matching.module';
 import { PRICE_FEED_SERVICE_TOKEN } from '../../common/interfaces/price-feed-service.interface';
+import { PositionRepository } from '../../persistence/repositories/position.repository';
+import { DataDivergenceService } from './data-divergence.service';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { PRICE_FEED_SERVICE_TOKEN } from '../../common/interfaces/price-feed-ser
   providers: [
     DegradationProtocolService,
     DataIngestionService,
+    DataDivergenceService,
+    PositionRepository,
     OrderBookNormalizerService,
     PlatformHealthService,
     {
@@ -27,6 +31,7 @@ import { PRICE_FEED_SERVICE_TOKEN } from '../../common/interfaces/price-feed-ser
   ],
   exports: [
     DataIngestionService,
+    DataDivergenceService,
     PlatformHealthService,
     OrderBookNormalizerService,
     DegradationProtocolService,

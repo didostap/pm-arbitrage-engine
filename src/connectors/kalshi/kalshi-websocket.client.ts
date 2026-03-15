@@ -57,6 +57,18 @@ export class KalshiWebSocketClient {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastResubscribeTime = new Map<string, number>();
+  private _subscriptionId: number | null = null;
+  private _pendingSubscription = false;
+
+  /** Subscription ID from the Kalshi `subscribed` response. Used for update_subscription commands. */
+  get subscriptionId(): number | null {
+    return this._subscriptionId;
+  }
+
+  /** Whether a subscribe() call is in-flight awaiting a `subscribed` response with an sid. */
+  get pendingSubscription(): boolean {
+    return this._pendingSubscription;
+  }
 
   constructor(private readonly config: KalshiWebSocketConfig) {}
 
@@ -152,12 +164,15 @@ export class KalshiWebSocketClient {
       this.ws = null;
     }
     this.isConnected = false;
+    this._subscriptionId = null;
+    this._pendingSubscription = false;
     this.orderbookState.clear();
     this.lastSequence.clear();
     this.lastResubscribeTime.clear();
   }
 
   subscribe(ticker: string): void {
+    if (this.subscriptions.has(ticker)) return; // Already tracked, skip duplicate WS command
     this.subscriptions.add(ticker);
     if (this.isConnected) {
       this.sendSubscribe(ticker);
@@ -170,17 +185,40 @@ export class KalshiWebSocketClient {
     this.lastSequence.delete(ticker);
     this.lastResubscribeTime.delete(ticker);
     if (this.isConnected && this.ws) {
-      this.ws.send(
-        JSON.stringify({
-          id: ++this.commandId,
-          cmd: 'unsubscribe',
-          params: {
-            channels: ['orderbook_delta'],
-            market_ticker: ticker,
-          },
-        }),
-      );
+      this.removeMarkets([ticker]);
     }
+  }
+
+  /** Dynamically add markets to the existing orderbook_delta subscription. */
+  addMarkets(tickers: string[]): void {
+    if (!this.isConnected || !this.ws || this._subscriptionId === null) return;
+    this.ws.send(
+      JSON.stringify({
+        id: ++this.commandId,
+        cmd: 'update_subscription',
+        params: {
+          sids: [this._subscriptionId],
+          market_tickers: tickers,
+          action: 'add_markets',
+        },
+      }),
+    );
+  }
+
+  /** Dynamically remove markets from the existing orderbook_delta subscription. */
+  removeMarkets(tickers: string[]): void {
+    if (!this.isConnected || !this.ws || this._subscriptionId === null) return;
+    this.ws.send(
+      JSON.stringify({
+        id: ++this.commandId,
+        cmd: 'update_subscription',
+        params: {
+          sids: [this._subscriptionId],
+          market_tickers: tickers,
+          action: 'delete_markets',
+        },
+      }),
+    );
   }
 
   onUpdate(callback: (book: NormalizedOrderBook) => void): void {
@@ -193,6 +231,7 @@ export class KalshiWebSocketClient {
 
   private sendSubscribe(ticker: string): void {
     if (!this.ws) return;
+    this._pendingSubscription = true;
     this.ws.send(
       JSON.stringify({
         id: ++this.commandId,
@@ -224,6 +263,17 @@ export class KalshiWebSocketClient {
           break;
         case 'orderbook_delta':
           this.handleDelta(message.msg as KalshiOrderbookDeltaMsg);
+          break;
+        case 'subscribed':
+          this._subscriptionId = message.sid;
+          this._pendingSubscription = false;
+          this.logger.log({
+            message: 'Subscription confirmed',
+            module: 'connector',
+            timestamp: new Date().toISOString(),
+            platformId: PlatformId.KALSHI,
+            metadata: { sid: message.sid },
+          });
           break;
         case 'error':
           this.logger.error({
@@ -406,7 +456,11 @@ export class KalshiWebSocketClient {
       return;
     }
     this.lastResubscribeTime.set(ticker, now);
-    this.sendSubscribe(ticker);
+    if (this._subscriptionId !== null) {
+      this.addMarkets([ticker]);
+    } else {
+      this.sendSubscribe(ticker);
+    }
   }
 
   private scheduleReconnect(): void {

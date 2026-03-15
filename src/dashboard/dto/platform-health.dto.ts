@@ -24,4 +24,20 @@ export class PlatformHealthDto {
 
   @ApiProperty({ description: 'Platform mode', enum: ['live', 'paper'] })
   mode!: 'live' | 'paper';
+
+  @ApiProperty({ description: 'Number of active WebSocket subscriptions' })
+  wsSubscriptionCount!: number;
+
+  @ApiProperty({
+    description: 'Data divergence status between poll and WebSocket paths',
+    enum: ['normal', 'divergent'],
+  })
+  divergenceStatus!: 'normal' | 'divergent';
+
+  @ApiProperty({
+    description: 'ISO timestamp of most recent WS message received',
+    nullable: true,
+    example: '2026-03-01T12:00:00.000Z',
+  })
+  wsLastMessageTimestamp!: string | null;
 }

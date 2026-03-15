@@ -38,6 +38,8 @@ export const createMockPlatformConnector = (
       : {}),
   }),
   onOrderBookUpdate: vi.fn(),
+  subscribeToContracts: vi.fn(),
+  unsubscribeFromContracts: vi.fn(),
   ...overrides,
 });
 

@@ -51,4 +51,10 @@ export interface IPlatformConnector {
 
   /** Register a callback for real-time order book updates. */
   onOrderBookUpdate(callback: (book: NormalizedOrderBook) => void): void;
+
+  /** Subscribe to real-time order book updates for the given contracts. Best-effort — does not throw on failure. */
+  subscribeToContracts(contractIds: ContractId[]): void;
+
+  /** Unsubscribe from real-time order book updates for the given contracts. Best-effort — does not throw on failure. */
+  unsubscribeFromContracts(contractIds: ContractId[]): void;
 }

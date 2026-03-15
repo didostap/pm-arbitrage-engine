@@ -59,6 +59,14 @@ export class PaperTradingConnector implements IPlatformConnector {
     return this.realConnector.disconnect();
   }
 
+  subscribeToContracts(contractIds: ContractId[]): void {
+    this.realConnector.subscribeToContracts(contractIds);
+  }
+
+  unsubscribeFromContracts(contractIds: ContractId[]): void {
+    this.realConnector.unsubscribeFromContracts(contractIds);
+  }
+
   // --- Execution method interception (simulated) ---
 
   submitOrder(params: OrderParams): Promise<OrderResult> {

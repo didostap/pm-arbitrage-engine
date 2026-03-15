@@ -35,6 +35,10 @@ import type { PositionId } from '../common/types/branded.type';
 import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
 import { RISK_MANAGER_TOKEN } from '../modules/risk-management/risk-management.module';
 import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
+import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service';
+import { DataDivergenceService } from '../modules/data-ingestion/data-divergence.service';
+import { PlatformHealthService } from '../modules/data-ingestion/platform-health.service';
+import { PlatformId } from '../common/types/platform.type';
 import type { BankrollConfigDto } from './dto/bankroll-config.dto';
 
 @Injectable()
@@ -50,6 +54,9 @@ export class DashboardService {
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
     private readonly engineConfigRepository: EngineConfigRepository,
+    private readonly dataIngestionService: DataIngestionService,
+    private readonly divergenceService: DataDivergenceService,
+    private readonly healthService: PlatformHealthService,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -177,6 +184,10 @@ export class DashboardService {
           `PLATFORM_MODE_${platformKey}`,
           'live',
         );
+        const platformId =
+          platformKey === 'KALSHI' ? PlatformId.KALSHI : PlatformId.POLYMARKET;
+        const wsTimestamp =
+          this.healthService.getWsLastMessageTimestamp(platformId);
         return {
           platformId: log.platform.toLowerCase(),
           status: log.status as
@@ -188,6 +199,13 @@ export class DashboardService {
           dataFresh: log.status === 'healthy',
           lastUpdate: log.created_at.toISOString(),
           mode: configuredMode === 'paper' ? 'paper' : 'live',
+          wsSubscriptionCount:
+            this.dataIngestionService.getActiveSubscriptionCount(platformId),
+          divergenceStatus:
+            this.divergenceService.getDivergenceStatus(platformId),
+          wsLastMessageTimestamp: wsTimestamp
+            ? wsTimestamp.toISOString()
+            : null,
         };
       });
     } catch (error) {

@@ -13,6 +13,8 @@ import { ExitTriggeredEvent } from '../common/events/execution.events';
 import { BatchCompleteEvent } from '../common/events/batch.events';
 import { MatchApprovedEvent } from '../common/events/match-approved.event';
 import { MatchRejectedEvent } from '../common/events/match-rejected.event';
+import { DataDivergenceEvent } from '../common/events/platform.events';
+import { asContractId } from '../common/types/branded.type';
 import { WS_EVENTS } from './dto';
 
 vi.mock('../common/services/correlation-context', () => ({
@@ -308,6 +310,32 @@ describe('DashboardEventMapperService', () => {
 
       expect(result.data.batchId).toBe('batch-empty');
       expect(result.data.results).toEqual([]);
+    });
+  });
+
+  describe('mapDivergenceAlert', () => {
+    it('should map DataDivergenceEvent to divergence.alert WS envelope (AC #12)', () => {
+      const event = new DataDivergenceEvent(
+        PlatformId.KALSHI,
+        asContractId('TEST-DIV'),
+        '0.50',
+        '0.55',
+        '2026-03-15T00:00:00Z',
+        '0.47',
+        '0.52',
+        '2026-03-15T00:01:30Z',
+        '0.03',
+        90000,
+      );
+
+      const result = mapper.mapDivergenceAlert(event);
+
+      expect(result.event).toBe('divergence.alert');
+      expect(result.data.platformId).toBe(PlatformId.KALSHI);
+      expect(result.data.contractId).toBe('TEST-DIV');
+      expect(result.data.priceDelta).toBe('0.03');
+      expect(result.data.stalenessDeltaMs).toBe(90000);
+      expect(result.timestamp).toBeDefined();
     });
   });
 });

@@ -48,6 +48,148 @@ describe('PolymarketWebSocketClient', () => {
     });
   });
 
+  describe('WS protocol correctness (AC #5)', () => {
+    interface MockWs {
+      on: ReturnType<typeof vi.fn>;
+      send: ReturnType<typeof vi.fn>;
+      ping: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      terminate: ReturnType<typeof vi.fn>;
+      readyState: number;
+      listeners: Record<string, ((...args: unknown[]) => void)[]>;
+    }
+    let mockWs: MockWs;
+
+    function createMockWs(): MockWs {
+      const ws: MockWs = {
+        on: vi.fn(),
+        send: vi.fn(),
+        ping: vi.fn(),
+        close: vi.fn(),
+        terminate: vi.fn(),
+        readyState: 1,
+        listeners: {},
+      };
+      ws.on.mockImplementation(
+        (event: string, handler: (...args: unknown[]) => void) => {
+          if (!ws.listeners[event]) ws.listeners[event] = [];
+          ws.listeners[event].push(handler);
+          return ws;
+        },
+      );
+      return ws;
+    }
+
+    let polyClient: PolymarketWebSocketClient;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      mockWs = createMockWs();
+      __wsMockInstance = mockWs;
+      polyClient = new PolymarketWebSocketClient({
+        wsUrl: 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+        eventEmitter:
+          mockEventEmitter as unknown as import('@nestjs/event-emitter').EventEmitter2,
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function triggerWsEvent(ws: MockWs, event: string, ...args: unknown[]) {
+      const handlers = ws.listeners[event] || [];
+      for (const h of handlers) h(...args);
+    }
+
+    it('should send initial format on first subscribe when no prior subscriptions', async () => {
+      const connectPromise = polyClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // No subscriptions tracked before connect, so hasInitialSubscription is false
+      mockWs.send.mockClear();
+
+      polyClient.subscribe('token-abc');
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      // First subscribe after connect with no prior subscriptions uses initial format
+      expect(payload).toEqual({
+        type: 'market',
+        assets_ids: ['token-abc'],
+        custom_feature_enabled: true,
+      });
+    });
+
+    it('should send dynamic subscribe format for subsequent subscribes (internal subsystem verification)', async () => {
+      polyClient.subscribe('token-pre'); // pre-track before connect
+      const connectPromise = polyClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // Connect resubscribed token-pre using initial format. Now subscribe another.
+      mockWs.send.mockClear();
+
+      polyClient.subscribe('token-new');
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(payload).toEqual({
+        assets_ids: ['token-new'],
+        operation: 'subscribe',
+      });
+    });
+
+    it('should send unsubscribe message over WS (internal subsystem verification)', async () => {
+      polyClient.subscribe('token-abc');
+      const connectPromise = polyClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+      mockWs.send.mockClear();
+
+      polyClient.unsubscribe('token-abc');
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(payload).toEqual({
+        assets_ids: ['token-abc'],
+        operation: 'unsubscribe',
+      });
+    });
+
+    it('should not send unsubscribe when disconnected', () => {
+      client.subscribe('token-abc');
+      client.unsubscribe('token-abc');
+      // No error, just local cleanup
+      expect(client.getConnectionStatus()).toBe(false);
+    });
+
+    it('should use initial format for first subscription on connect (type: market)', async () => {
+      polyClient.subscribe('token-initial');
+      const connectPromise = polyClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // First send after open should be initial format
+      expect(mockWs.send).toHaveBeenCalled();
+      const firstPayload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(firstPayload).toEqual({
+        type: 'market',
+        assets_ids: ['token-initial'],
+        custom_feature_enabled: true,
+      });
+    });
+  });
+
   describe('handleMessage - book snapshot', () => {
     it('should parse book snapshot and notify subscribers', () => {
       const callback = vi.fn();

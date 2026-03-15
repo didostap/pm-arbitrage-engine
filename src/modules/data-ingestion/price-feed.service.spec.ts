@@ -22,6 +22,8 @@ function createMockConnector(
     connect: vi.fn(),
     disconnect: vi.fn(),
     onOrderBookUpdate: vi.fn(),
+    subscribeToContracts: vi.fn(),
+    unsubscribeFromContracts: vi.fn(),
     ...overrides,
   } as IPlatformConnector;
 }

@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PolymarketConnector } from './polymarket.connector.js';
 import { GasEstimationService } from './gas-estimation.service.js';
 import { PlatformId } from '../../common/types/index.js';
+import { asContractId } from '../../common/types/branded.type.js';
 import { PlatformApiError } from '../../common/errors/index.js';
 import { OrderBookNormalizerService } from '../../modules/data-ingestion/order-book-normalizer.service.js';
 
@@ -1012,6 +1013,63 @@ describe('PolymarketConnector', () => {
       const util = rateLimiter.getUtilization();
       expect(util.read).toBeLessThan(2);
       expect(util.write).toBeCloseTo(0, 0);
+    });
+  });
+
+  describe('subscribeToContracts / unsubscribeFromContracts (AC #3)', () => {
+    it('should not throw when subscribing with contract IDs (wsClient not initialized)', () => {
+      // Before connect(), wsClient is null — method should not throw
+      expect(() =>
+        connector.subscribeToContracts([asContractId('token-abc')]),
+      ).not.toThrow();
+    });
+
+    it('should not throw when unsubscribing with contract IDs (wsClient not initialized)', () => {
+      expect(() =>
+        connector.unsubscribeFromContracts([asContractId('token-abc')]),
+      ).not.toThrow();
+    });
+
+    it('should not throw with empty array', () => {
+      expect(() => connector.subscribeToContracts([])).not.toThrow();
+      expect(() => connector.unsubscribeFromContracts([])).not.toThrow();
+    });
+
+    it('should delegate to wsClient.subscribe for each contractId when wsClient exists', () => {
+      // Set up wsClient manually
+      const mockWsClient = {
+        subscribe: vi.fn(),
+        unsubscribe: vi.fn(),
+      };
+      connector['wsClient'] = mockWsClient as never;
+
+      connector.subscribeToContracts([
+        asContractId('token-1'),
+        asContractId('token-2'),
+      ]);
+
+      expect(mockWsClient.subscribe).toHaveBeenCalledWith('token-1');
+      expect(mockWsClient.subscribe).toHaveBeenCalledWith('token-2');
+      expect(mockWsClient.subscribe).toHaveBeenCalledTimes(2);
+
+      // Clean up
+      connector['wsClient'] = null as never;
+    });
+
+    it('should delegate to wsClient.unsubscribe for each contractId when wsClient exists', () => {
+      const mockWsClient = {
+        subscribe: vi.fn(),
+        unsubscribe: vi.fn(),
+      };
+      connector['wsClient'] = mockWsClient as never;
+
+      connector.unsubscribeFromContracts([asContractId('token-1')]);
+
+      expect(mockWsClient.unsubscribe).toHaveBeenCalledWith('token-1');
+      expect(mockWsClient.unsubscribe).toHaveBeenCalledTimes(1);
+
+      // Clean up
+      connector['wsClient'] = null as never;
     });
   });
 });

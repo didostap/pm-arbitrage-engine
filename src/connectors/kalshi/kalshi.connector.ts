@@ -595,8 +595,60 @@ export class KalshiConnector
     this.wsClient.onUpdate(callback);
   }
 
-  subscribeToTicker(ticker: string): void {
-    this.wsClient.subscribe(ticker);
+  subscribeToContracts(contractIds: ContractId[]): void {
+    try {
+      const tickers = contractIds.map((id) => id as string);
+      if (this.wsClient.subscriptionId !== null) {
+        // Existing subscription — batch add via update_subscription
+        this.wsClient.addMarkets(tickers);
+      } else if (!this.wsClient.pendingSubscription) {
+        // No subscription and none pending — subscribe to first ticker to establish one
+        if (tickers.length > 0) {
+          this.wsClient.subscribe(tickers[0]!);
+          // Remaining tickers are tracked in wsClient.subscriptions and will be
+          // added via debouncedResubscribe on reconnect or picked up on next subscribe call
+          for (let i = 1; i < tickers.length; i++) {
+            this.wsClient.subscribe(tickers[i]!);
+          }
+        }
+      } else {
+        // Subscription pending — just track tickers (they'll be resubscribed on reconnect)
+        for (const ticker of tickers) {
+          this.wsClient.subscribe(ticker);
+        }
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to subscribe to contracts',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: {
+          contractIds,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  unsubscribeFromContracts(contractIds: ContractId[]): void {
+    try {
+      // unsubscribe() handles both WS message (via removeMarkets if sid set) and local cleanup
+      for (const ticker of contractIds) {
+        this.wsClient.unsubscribe(ticker as string);
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to unsubscribe from contracts',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.KALSHI,
+        metadata: {
+          contractIds,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private mapError(error: unknown): PlatformApiError {

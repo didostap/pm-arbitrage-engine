@@ -26,6 +26,7 @@ import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { EVENT_NAMES } from '../common/events/event-catalog';
 import type { BankrollUpdatedEvent } from '../common/events/config.events';
+import type { DataDivergenceEvent } from '../common/events/platform.events';
 import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
@@ -160,6 +161,12 @@ export class DashboardGateway
       },
       timestamp: new Date().toISOString(),
     });
+  }
+
+  @OnEvent(EVENT_NAMES.DATA_DIVERGENCE)
+  handleDataDivergence(event: DataDivergenceEvent): void {
+    const envelope = this.mapper.mapDivergenceAlert(event);
+    this.broadcast(envelope);
   }
 
   // --- Private helpers ---

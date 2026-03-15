@@ -16,6 +16,8 @@ import { ContractPairLoaderService } from '../contract-matching/contract-pair-lo
 import { ContractPairConfig } from '../contract-matching/types/contract-pair-config.type';
 import { vi } from 'vitest';
 import { DegradationProtocolService } from './degradation-protocol.service';
+import { DataDivergenceService } from './data-divergence.service';
+import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { createMockPlatformConnector } from '../../test/mock-factories.js';
 
 const TEST_PAIRS: ContractPairConfig[] = [
@@ -89,6 +91,18 @@ describe('DataIngestionService', () => {
     }),
   };
 
+  const mockPositionRepository = {
+    findByStatusWithPair: vi.fn().mockResolvedValue([]),
+    findByIdWithPair: vi.fn().mockResolvedValue(null),
+  };
+
+  const mockDivergenceService = {
+    recordPollData: vi.fn(),
+    recordWsData: vi.fn(),
+    clearContractData: vi.fn(),
+    getDivergenceStatus: vi.fn().mockReturnValue('normal'),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -111,6 +125,8 @@ describe('DataIngestionService', () => {
           useValue: mockContractPairLoader,
         },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PositionRepository, useValue: mockPositionRepository },
+        { provide: DataDivergenceService, useValue: mockDivergenceService },
       ],
     }).compile();
 
@@ -122,6 +138,7 @@ describe('DataIngestionService', () => {
     // Re-apply default mock return values after clearAllMocks
     mockDegradationService.isDegraded.mockReturnValue(false);
     mockContractPairLoader.getActivePairs.mockResolvedValue(TEST_PAIRS);
+    mockPositionRepository.findByStatusWithPair.mockResolvedValue([]);
   });
 
   it('should be defined', () => {
@@ -206,6 +223,50 @@ describe('DataIngestionService', () => {
 
       expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
+    });
+
+    it('should rehydrate WS subscriptions from active positions on startup (AC #6)', async () => {
+      mockPositionRepository.findByStatusWithPair.mockResolvedValue([
+        {
+          id: 'pos-1',
+          pairId: 'pair-1',
+          status: 'OPEN',
+          pair: {
+            kalshiContractId: 'KALSHI-REHYDRATE',
+            polymarketClobTokenId: 'POLY-REHYDRATE',
+          },
+        },
+        {
+          id: 'pos-2',
+          pairId: 'pair-2',
+          status: 'SINGLE_LEG_EXPOSED',
+          pair: {
+            kalshiContractId: 'KALSHI-SLE',
+            polymarketClobTokenId: 'POLY-SLE',
+          },
+        },
+      ]);
+
+      await service.onModuleInit();
+
+      expect(mockPositionRepository.findByStatusWithPair).toHaveBeenCalledWith({
+        in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+      });
+      expect(mockKalshiConnector.subscribeToContracts).toHaveBeenCalledTimes(2);
+      expect(
+        mockPolymarketConnector.subscribeToContracts,
+      ).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle empty active positions on startup gracefully', async () => {
+      mockPositionRepository.findByStatusWithPair.mockResolvedValue([]);
+
+      await service.onModuleInit();
+
+      expect(mockKalshiConnector.subscribeToContracts).not.toHaveBeenCalled();
+      expect(
+        mockPolymarketConnector.subscribeToContracts,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -589,6 +650,7 @@ describe('DataIngestionService', () => {
         PlatformId.KALSHI,
         'TEST-MARKET',
         expect.any(Number),
+        'ws',
       );
     });
 
@@ -633,6 +695,7 @@ describe('DataIngestionService', () => {
         PlatformId.POLYMARKET,
         'POLYMARKET-TOKEN',
         expect.any(Number),
+        'ws',
       );
     });
 
@@ -680,6 +743,131 @@ describe('DataIngestionService', () => {
         polymarketEvent![1].orderBook.platformId,
       );
       /* eslint-enable @typescript-eslint/no-unsafe-member-access */
+    });
+  });
+
+  describe('divergence recording wiring (AC #9, #12)', () => {
+    it('should call recordPollData for each Kalshi poll result', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-TICKER-1',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      expect(mockDivergenceService.recordPollData).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        'KALSHI-TICKER-1',
+        expect.objectContaining({ platformId: PlatformId.KALSHI }),
+      );
+    });
+
+    it('should call recordPollData for each Polymarket poll result', async () => {
+      mockKalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-TICKER-1',
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      });
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [{ price: 0.55, quantity: 1500 }],
+          asks: [{ price: 0.58, quantity: 1200 }],
+          timestamp: new Date(),
+        },
+      ]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      expect(mockDivergenceService.recordPollData).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        'pm-token-1',
+        expect.objectContaining({ platformId: PlatformId.POLYMARKET }),
+      );
+    });
+
+    it('should call recordWsData for WebSocket updates', async () => {
+      const wsBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'WS-MARKET',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service['processWebSocketUpdate'](wsBook);
+
+      expect(mockDivergenceService.recordWsData).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        'WS-MARKET',
+        expect.objectContaining({ platformId: PlatformId.KALSHI }),
+      );
+    });
+  });
+
+  describe('unsubscribeForPosition - clearContractData (AC #9, Task 7)', () => {
+    it('should call divergenceService.clearContractData when last position for a contract unsubscribes', () => {
+      const pairId =
+        'pair-clear-test' as unknown as import('../../common/types/branded.type').PairId;
+      const kalshiId =
+        'KALSHI-CLEAR' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId =
+        'POLY-CLEAR' as unknown as import('../../common/types/branded.type').ContractId;
+
+      service.subscribeForPosition(pairId, kalshiId, polyId);
+      service.unsubscribeForPosition(pairId);
+
+      expect(mockDivergenceService.clearContractData).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        kalshiId,
+      );
+      expect(mockDivergenceService.clearContractData).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        polyId,
+      );
+    });
+
+    it('should NOT call clearContractData when other positions still reference the contract', () => {
+      const pairId1 =
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId;
+      const pairId2 =
+        'pair-2' as unknown as import('../../common/types/branded.type').PairId;
+      const sharedKalshiId =
+        'SHARED-KALSHI' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId1 =
+        'POLY-1' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId2 =
+        'POLY-2' as unknown as import('../../common/types/branded.type').ContractId;
+
+      service.subscribeForPosition(pairId1, sharedKalshiId, polyId1);
+      service.subscribeForPosition(pairId2, sharedKalshiId, polyId2);
+      service.unsubscribeForPosition(pairId1);
+
+      // Kalshi clearContractData should NOT be called (refCount still > 0)
+      const kalshiClearCalls =
+        mockDivergenceService.clearContractData.mock.calls.filter(
+          (c: unknown[]) => c[0] === PlatformId.KALSHI,
+        );
+      expect(kalshiClearCalls).toHaveLength(0);
+
+      // Polymarket clearContractData SHOULD be called (refCount dropped to 0)
+      expect(mockDivergenceService.clearContractData).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        polyId1,
+      );
     });
   });
 
@@ -1144,6 +1332,255 @@ describe('DataIngestionService', () => {
       expect(emittedContractIds).toContain('pm-a');
       expect(emittedContractIds).toContain('pm-b');
       expect(emittedContractIds).toContain('pm-c');
+    });
+  });
+
+  describe('subscribeForPosition / unsubscribeForPosition (AC #6, #7, #8)', () => {
+    it('should call connector.subscribeToContracts on first position for a contract', () => {
+      service.subscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+        'KALSHI-T1' as unknown as import('../../common/types/branded.type').ContractId,
+        'POLY-T1' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+
+      expect(mockKalshiConnector.subscribeToContracts).toHaveBeenCalledWith([
+        'KALSHI-T1',
+      ]);
+      expect(mockPolymarketConnector.subscribeToContracts).toHaveBeenCalledWith(
+        ['POLY-T1'],
+      );
+    });
+
+    it('should NOT call connector.subscribeToContracts when second position shares same contract', () => {
+      const kalshiId =
+        'KALSHI-SHARED' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId =
+        'POLY-SHARED' as unknown as import('../../common/types/branded.type').ContractId;
+
+      service.subscribeForPosition(
+        'pair-A' as unknown as import('../../common/types/branded.type').PairId,
+        kalshiId,
+        polyId,
+      );
+      vi.clearAllMocks();
+
+      service.subscribeForPosition(
+        'pair-B' as unknown as import('../../common/types/branded.type').PairId,
+        kalshiId,
+        polyId,
+      );
+
+      // Second subscribe should NOT call connector (ref count went from 1→2)
+      expect(mockKalshiConnector.subscribeToContracts).not.toHaveBeenCalled();
+      expect(
+        mockPolymarketConnector.subscribeToContracts,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call connector.unsubscribeFromContracts while other positions reference same contract', () => {
+      const kalshiId =
+        'KALSHI-SHARED' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId =
+        'POLY-SHARED' as unknown as import('../../common/types/branded.type').ContractId;
+
+      service.subscribeForPosition(
+        'pair-A' as unknown as import('../../common/types/branded.type').PairId,
+        kalshiId,
+        polyId,
+      );
+      service.subscribeForPosition(
+        'pair-B' as unknown as import('../../common/types/branded.type').PairId,
+        kalshiId,
+        polyId,
+      );
+      vi.clearAllMocks();
+
+      service.unsubscribeForPosition(
+        'pair-A' as unknown as import('../../common/types/branded.type').PairId,
+      );
+
+      // One position still references these contracts
+      expect(
+        mockKalshiConnector.unsubscribeFromContracts,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockPolymarketConnector.unsubscribeFromContracts,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should call connector.unsubscribeFromContracts when last position for a contract closes', () => {
+      const kalshiId =
+        'KALSHI-LAST' as unknown as import('../../common/types/branded.type').ContractId;
+      const polyId =
+        'POLY-LAST' as unknown as import('../../common/types/branded.type').ContractId;
+
+      service.subscribeForPosition(
+        'pair-X' as unknown as import('../../common/types/branded.type').PairId,
+        kalshiId,
+        polyId,
+      );
+      vi.clearAllMocks();
+
+      service.unsubscribeForPosition(
+        'pair-X' as unknown as import('../../common/types/branded.type').PairId,
+      );
+
+      expect(mockKalshiConnector.unsubscribeFromContracts).toHaveBeenCalledWith(
+        ['KALSHI-LAST'],
+      );
+      expect(
+        mockPolymarketConnector.unsubscribeFromContracts,
+      ).toHaveBeenCalledWith(['POLY-LAST']);
+    });
+
+    it('should be idempotent — double subscribe for same pairId is a no-op', () => {
+      service.subscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+        'K1' as unknown as import('../../common/types/branded.type').ContractId,
+        'P1' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      vi.clearAllMocks();
+
+      service.subscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+        'K1' as unknown as import('../../common/types/branded.type').ContractId,
+        'P1' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+
+      expect(mockKalshiConnector.subscribeToContracts).not.toHaveBeenCalled();
+    });
+
+    it('should be idempotent — double unsubscribe for same pairId is a no-op', () => {
+      service.subscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+        'K1' as unknown as import('../../common/types/branded.type').ContractId,
+        'P1' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      service.unsubscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+      );
+      vi.clearAllMocks();
+
+      service.unsubscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+      );
+
+      expect(
+        mockKalshiConnector.unsubscribeFromContracts,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should return correct active subscription count per platform', () => {
+      service.subscribeForPosition(
+        'pair-1' as unknown as import('../../common/types/branded.type').PairId,
+        'K1' as unknown as import('../../common/types/branded.type').ContractId,
+        'P1' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      service.subscribeForPosition(
+        'pair-2' as unknown as import('../../common/types/branded.type').PairId,
+        'K2' as unknown as import('../../common/types/branded.type').ContractId,
+        'P2' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+
+      expect(service.getActiveSubscriptionCount(PlatformId.KALSHI)).toBe(2);
+      expect(service.getActiveSubscriptionCount(PlatformId.POLYMARKET)).toBe(2);
+    });
+  });
+
+  describe('event-driven subscription lifecycle (AC #7, #8)', () => {
+    it('should subscribe on ORDER_FILLED when position is OPEN', async () => {
+      mockPositionRepository.findByIdWithPair.mockResolvedValue({
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'OPEN',
+        pair: {
+          kalshiContractId: 'K-FILLED',
+          polymarketClobTokenId: 'P-FILLED',
+        },
+      });
+
+      await service.handleOrderFilled({
+        positionId: 'pos-1',
+      } as unknown as import('../../common/events/execution.events').OrderFilledEvent);
+
+      expect(mockKalshiConnector.subscribeToContracts).toHaveBeenCalledWith([
+        'K-FILLED',
+      ]);
+      expect(mockPolymarketConnector.subscribeToContracts).toHaveBeenCalledWith(
+        ['P-FILLED'],
+      );
+    });
+
+    it('should NOT subscribe on ORDER_FILLED when position is not OPEN yet', async () => {
+      mockPositionRepository.findByIdWithPair.mockResolvedValue({
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        status: 'SINGLE_LEG_EXPOSED',
+        pair: {
+          kalshiContractId: 'K-1',
+          polymarketClobTokenId: 'P-1',
+        },
+      });
+
+      await service.handleOrderFilled({
+        positionId: 'pos-1',
+      } as unknown as import('../../common/events/execution.events').OrderFilledEvent);
+
+      expect(mockKalshiConnector.subscribeToContracts).not.toHaveBeenCalled();
+    });
+
+    it('should unsubscribe on EXIT_TRIGGERED', () => {
+      // First subscribe
+      service.subscribeForPosition(
+        'pair-exit' as unknown as import('../../common/types/branded.type').PairId,
+        'K-EXIT' as unknown as import('../../common/types/branded.type').ContractId,
+        'P-EXIT' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      vi.clearAllMocks();
+
+      service.handleExitTriggered({
+        pairId: 'pair-exit',
+      } as unknown as import('../../common/events/execution.events').ExitTriggeredEvent);
+
+      expect(mockKalshiConnector.unsubscribeFromContracts).toHaveBeenCalledWith(
+        ['K-EXIT'],
+      );
+    });
+
+    it('should unsubscribe on SINGLE_LEG_RESOLVED when resolution is closed', () => {
+      service.subscribeForPosition(
+        'pair-sle' as unknown as import('../../common/types/branded.type').PairId,
+        'K-SLE' as unknown as import('../../common/types/branded.type').ContractId,
+        'P-SLE' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      vi.clearAllMocks();
+
+      service.handleSingleLegResolved({
+        pairId: 'pair-sle',
+        resolutionType: 'closed',
+      } as unknown as import('../../common/events/execution.events').SingleLegResolvedEvent);
+
+      expect(mockKalshiConnector.unsubscribeFromContracts).toHaveBeenCalledWith(
+        ['K-SLE'],
+      );
+    });
+
+    it('should NOT unsubscribe on SINGLE_LEG_RESOLVED when resolution is retried', () => {
+      service.subscribeForPosition(
+        'pair-retry' as unknown as import('../../common/types/branded.type').PairId,
+        'K-R' as unknown as import('../../common/types/branded.type').ContractId,
+        'P-R' as unknown as import('../../common/types/branded.type').ContractId,
+      );
+      vi.clearAllMocks();
+
+      service.handleSingleLegResolved({
+        pairId: 'pair-retry',
+        resolutionType: 'retried',
+      } as unknown as import('../../common/events/execution.events').SingleLegResolvedEvent);
+
+      expect(
+        mockKalshiConnector.unsubscribeFromContracts,
+      ).not.toHaveBeenCalled();
     });
   });
 });

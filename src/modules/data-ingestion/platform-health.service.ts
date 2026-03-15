@@ -46,6 +46,9 @@ export class PlatformHealthService {
   // Memory: ~40 bytes per entry. 100K entries = ~4MB — acceptable, no cleanup needed.
   private readonly lastContractUpdateTime = new Map<string, number>();
 
+  /** Last WS message received timestamp per platform (Story 10-0-1). */
+  private readonly lastWsMessageTimestamp = new Map<PlatformId, Date>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
@@ -321,6 +324,11 @@ export class PlatformHealthService {
     return { stale: false };
   }
 
+  /** Returns the last WS message timestamp for a platform, or null if none received. */
+  getWsLastMessageTimestamp(platformId: PlatformId): Date | null {
+    return this.lastWsMessageTimestamp.get(platformId) ?? null;
+  }
+
   /**
    * Calculates current health status for a platform.
    * Checks: connection state, staleness, latency thresholds.
@@ -421,11 +429,16 @@ export class PlatformHealthService {
     platform: PlatformId,
     contractId: string,
     latencyMs: number,
+    source: 'poll' | 'ws' = 'poll',
   ): void {
     const key = `${platform}:${contractId}`;
     this.lastContractUpdateTime.set(key, Date.now());
     // Also update platform-level tracking for backward compatibility (health calculation)
     this.recordUpdate(platform, latencyMs);
+
+    if (source === 'ws') {
+      this.lastWsMessageTimestamp.set(platform, new Date());
+    }
   }
 
   /**

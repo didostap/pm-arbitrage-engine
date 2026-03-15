@@ -698,3 +698,22 @@ export function formatBankrollUpdated(event: {
   const footer = formatCorrelationFooter(event as BaseEvent);
   return smartTruncate(`${header}\n\n${body}${footer}`);
 }
+
+export function formatDataDivergence(event: {
+  platformId: string;
+  contractId: unknown;
+  priceDelta: string;
+  stalenessDeltaMs: number;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.warning} <b>⚠️ Data Divergence</b>`;
+  const body = [
+    `Platform: <code>${escapeHtml(String(event.platformId))}</code>`,
+    `Contract: <code>${escapeHtml(String(event.contractId))}</code>`,
+    `Price Delta: <code>${escapeHtml(event.priceDelta)}</code>`,
+    `Staleness: <code>${event.stalenessDeltaMs}ms</code>`,
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}

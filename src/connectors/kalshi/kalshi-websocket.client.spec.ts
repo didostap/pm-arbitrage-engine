@@ -177,6 +177,210 @@ describe('KalshiWebSocketClient', () => {
     });
   });
 
+  describe('subscription ID tracking (AC #5)', () => {
+    interface MockWs {
+      on: ReturnType<typeof vi.fn>;
+      send: ReturnType<typeof vi.fn>;
+      ping: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      terminate: ReturnType<typeof vi.fn>;
+      readyState: number;
+      listeners: Record<string, ((...args: unknown[]) => void)[]>;
+    }
+    let mockWs: MockWs;
+
+    function createMockWs(): MockWs {
+      const ws: MockWs = {
+        on: vi.fn(),
+        send: vi.fn(),
+        ping: vi.fn(),
+        close: vi.fn(),
+        terminate: vi.fn(),
+        readyState: 1,
+        listeners: {},
+      };
+      ws.on.mockImplementation(
+        (event: string, handler: (...args: unknown[]) => void) => {
+          if (!ws.listeners[event]) ws.listeners[event] = [];
+          ws.listeners[event].push(handler);
+          return ws;
+        },
+      );
+      return ws;
+    }
+
+    let kalshiClient: KalshiWebSocketClient;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      mockWs = createMockWs();
+      __wsMockInstance = mockWs;
+      kalshiClient = new KalshiWebSocketClient({
+        apiKeyId: 'test-key-id',
+        privateKeyPem: '',
+        wsUrl: 'wss://demo-api.kalshi.co/trade-api/ws/v2',
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function triggerWsEvent(ws: MockWs, event: string, ...args: unknown[]) {
+      const handlers = ws.listeners[event] || [];
+      for (const h of handlers) h(...args);
+    }
+
+    it('should store sid from subscribed response', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // Simulate subscribed response
+      const subscribedMsg = JSON.stringify({
+        type: 'subscribed',
+        sid: 42,
+        msg: { channel: 'orderbook_delta', sid: 42 },
+      });
+      triggerWsEvent(mockWs, 'message', subscribedMsg);
+
+      expect(kalshiClient.subscriptionId).toBe(42);
+    });
+
+    it('should have null subscriptionId initially', () => {
+      expect(kalshiClient.subscriptionId).toBeNull();
+    });
+
+    it('should send correct addMarkets payload via WS (internal subsystem verification)', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // Set sid as if subscribed response was received
+      kalshiClient['_subscriptionId'] = 1;
+      mockWs.send.mockClear();
+
+      kalshiClient.addMarkets(['TICKER-A', 'TICKER-B']);
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(payload).toEqual(
+        expect.objectContaining({
+          cmd: 'update_subscription',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          params: expect.objectContaining({
+            sids: [1],
+            market_tickers: ['TICKER-A', 'TICKER-B'],
+            action: 'add_markets',
+          }),
+        }),
+      );
+    });
+
+    it('should send correct removeMarkets payload via WS (internal subsystem verification)', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      kalshiClient['_subscriptionId'] = 1;
+      mockWs.send.mockClear();
+
+      kalshiClient.removeMarkets(['TICKER-A']);
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(payload).toEqual(
+        expect.objectContaining({
+          cmd: 'update_subscription',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          params: expect.objectContaining({
+            sids: [1],
+            market_tickers: ['TICKER-A'],
+            action: 'delete_markets',
+          }),
+        }),
+      );
+    });
+
+    it('should not send addMarkets when disconnected', () => {
+      kalshiClient.addMarkets(['TICKER-A']);
+      // No ws exists, so nothing should be sent (no error thrown)
+      expect(kalshiClient.getConnectionStatus()).toBe(false);
+    });
+
+    it('should not send removeMarkets when disconnected', () => {
+      kalshiClient.removeMarkets(['TICKER-A']);
+      expect(kalshiClient.getConnectionStatus()).toBe(false);
+    });
+
+    it('should use update_subscription format for unsubscribe when sid is set', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      kalshiClient['_subscriptionId'] = 5;
+      kalshiClient.subscribe('CPI-22DEC');
+      mockWs.send.mockClear();
+
+      kalshiClient.unsubscribe('CPI-22DEC');
+
+      expect(mockWs.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        mockWs.send.mock.calls[0]![0] as string,
+      ) as Record<string, unknown>;
+      expect(payload).toEqual(
+        expect.objectContaining({
+          cmd: 'update_subscription',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          params: expect.objectContaining({
+            sids: [5],
+            market_tickers: ['CPI-22DEC'],
+            action: 'delete_markets',
+          }),
+        }),
+      );
+    });
+
+    it('should use addMarkets in debouncedResubscribe when sid is set', async () => {
+      const connectPromise = kalshiClient.connect();
+      triggerWsEvent(mockWs, 'open');
+      await connectPromise;
+
+      // Set sid and subscribe
+      kalshiClient['_subscriptionId'] = 1;
+      kalshiClient.subscribe('CPI-22DEC');
+      mockWs.send.mockClear();
+
+      // Simulate a sequence gap delta that triggers debouncedResubscribe
+      const delta = JSON.stringify({
+        type: 'orderbook_delta',
+        sid: 1,
+        msg: {
+          seq: 999,
+          market_ticker: 'CPI-22DEC',
+          price_dollars: '0.50',
+          delta_fp: '10.00',
+          side: 'yes',
+        },
+      });
+      triggerWsEvent(mockWs, 'message', delta);
+
+      // Should have sent addMarkets (not subscribe) since sid exists
+      const sendCalls = mockWs.send.mock.calls.map(
+        (call: unknown[]) =>
+          JSON.parse(call[0] as string) as Record<string, unknown>,
+      );
+      const addMarketsCalls = sendCalls.filter(
+        (p: Record<string, unknown>) => p.cmd === 'update_subscription',
+      );
+      expect(addMarketsCalls.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   describe('onUpdate', () => {
     it('should invoke registered callback when snapshot is emitted', () => {
       const callback = vi.fn();

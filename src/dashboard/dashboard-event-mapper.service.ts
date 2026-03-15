@@ -13,6 +13,7 @@ import type {
 } from '../common/events/risk.events';
 import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
+import type { DataDivergenceEvent } from '../common/events/platform.events';
 import type {
   WsEventEnvelope,
   WsHealthChangePayload,
@@ -218,6 +219,24 @@ export class DashboardEventMapperService {
           realizedPnl: r.realizedPnl,
           error: r.error,
         })),
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapDivergenceAlert(event: DataDivergenceEvent): WsEventEnvelope<{
+    platformId: string;
+    contractId: string;
+    priceDelta: string;
+    stalenessDeltaMs: number;
+  }> {
+    return {
+      event: WS_EVENTS.DIVERGENCE_ALERT,
+      data: {
+        platformId: event.platformId,
+        contractId: event.contractId as string,
+        priceDelta: event.priceDelta,
+        stalenessDeltaMs: event.stalenessDeltaMs,
       },
       timestamp: new Date().toISOString(),
     };

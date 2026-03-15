@@ -1,6 +1,14 @@
+/**
+ * Dual data path architecture (Story 10-0-1):
+ * - Polling path (ingestCurrentOrderBooks): authoritative for ENTRY decisions (detection pipeline).
+ *   TradingEngineService calls this each cycle.
+ * - WebSocket path (processWebSocketUpdate): authoritative for EXIT decisions (exit monitor).
+ *   Connectors push real-time updates via onOrderBookUpdate callbacks.
+ * - Divergence monitoring: DataDivergenceService compares both paths. Read-only and observational.
+ */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import pLimit from 'p-limit';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -15,11 +23,24 @@ import {
 import { PlatformId } from '../../common/types/platform.type';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { OrderBookUpdatedEvent } from '../../common/events/orderbook.events';
-import { asContractId } from '../../common/types/branded.type';
+import type {
+  OrderFilledEvent,
+  ExitTriggeredEvent,
+  SingleLegResolvedEvent,
+} from '../../common/events/execution.events';
+import {
+  asContractId,
+  asPairId,
+  unwrapId,
+  ContractId,
+  PairId,
+} from '../../common/types/branded.type';
 import { SystemHealthError } from '../../common/errors';
 import { toPlatformEnum } from '../../common/utils';
 import { DegradationProtocolService } from './degradation-protocol.service';
+import { DataDivergenceService } from './data-divergence.service';
 import { ContractPairLoaderService } from '../contract-matching/contract-pair-loader.service';
+import { PositionRepository } from '../../persistence/repositories/position.repository';
 
 /** Serialize price levels to Prisma JSON: build JsonObject so types align without cast. */
 function priceLevelsToJsonArray(levels: PriceLevel[]): Prisma.JsonArray {
@@ -38,6 +59,15 @@ export class DataIngestionService implements OnModuleInit {
 
   private readonly kalshiConcurrency: number;
 
+  /** Active WS subscriptions keyed by PairId string. */
+  private readonly activeSubscriptions = new Map<
+    string,
+    { kalshiContractId: ContractId; polymarketContractId: ContractId }
+  >();
+
+  /** Ref-counts per platform:contractId to avoid duplicate subscribe/unsubscribe calls. */
+  private readonly contractRefCounts = new Map<string, number>();
+
   constructor(
     private readonly kalshiConnector: KalshiConnector,
     private readonly polymarketConnector: PolymarketConnector,
@@ -47,6 +77,8 @@ export class DataIngestionService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly contractPairLoader: ContractPairLoaderService,
     private readonly configService: ConfigService,
+    private readonly positionRepository: PositionRepository,
+    private readonly divergenceService: DataDivergenceService,
   ) {
     this.kalshiConcurrency = this.configService.get<number>(
       'KALSHI_POLLING_CONCURRENCY',
@@ -101,6 +133,49 @@ export class DataIngestionService implements OnModuleInit {
       correlationId,
       timestamp: new Date().toISOString(),
     });
+
+    // Startup subscription rehydration (AC #6)
+    try {
+      // Rehydrate both live and paper positions — paper mode uses real WS data (AC #4)
+      const [livePositions, paperPositions] = await Promise.all([
+        this.positionRepository.findByStatusWithPair({
+          in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+        }),
+        this.positionRepository.findByStatusWithPair(
+          { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
+          true,
+        ),
+      ]);
+      const activePositions = [...livePositions, ...paperPositions];
+
+      for (const position of activePositions) {
+        if (
+          position.pair?.kalshiContractId &&
+          position.pair?.polymarketClobTokenId
+        ) {
+          this.subscribeForPosition(
+            asPairId(position.pairId),
+            asContractId(position.pair.kalshiContractId),
+            asContractId(position.pair.polymarketClobTokenId),
+          );
+        }
+      }
+
+      this.logger.log({
+        message: `Rehydrated ${this.activeSubscriptions.size} WS subscriptions for ${activePositions.length} active positions`,
+        module: 'data-ingestion',
+        correlationId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Startup subscription rehydration failed',
+        module: 'data-ingestion',
+        correlationId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // Startup warning: estimate polling cycle time (AC #11)
     const { kalshiTickers } = await this.getConfiguredTickers(correlationId);
@@ -160,6 +235,7 @@ export class DataIngestionService implements OnModuleInit {
     };
   }
 
+  /** Polling path — authoritative for ENTRY decisions (detection pipeline). */
   async ingestCurrentOrderBooks(): Promise<void> {
     const methodStartTime = Date.now();
     const correlationId = randomUUID();
@@ -204,6 +280,12 @@ export class DataIngestionService implements OnModuleInit {
                 PlatformId.KALSHI,
                 ticker,
                 latency,
+              );
+
+              this.divergenceService.recordPollData(
+                PlatformId.KALSHI,
+                normalized.contractId,
+                normalized,
               );
 
               this.logger.log({
@@ -275,6 +357,12 @@ export class DataIngestionService implements OnModuleInit {
             batchLatency,
           );
 
+          this.divergenceService.recordPollData(
+            PlatformId.POLYMARKET,
+            normalized.contractId,
+            normalized,
+          );
+
           this.logger.log({
             message: 'Order book ingested (polling)',
             module: 'data-ingestion',
@@ -340,10 +428,7 @@ export class DataIngestionService implements OnModuleInit {
     }
   }
 
-  /**
-   * WebSocket path - processes real-time updates (already normalized by connector).
-   * Called by connector's WebSocket callback.
-   */
+  /** WebSocket path — authoritative for EXIT decisions (exit monitor). */
   private async processWebSocketUpdate(
     normalized: NormalizedOrderBook,
   ): Promise<void> {
@@ -366,6 +451,13 @@ export class DataIngestionService implements OnModuleInit {
         normalized.platformId,
         normalized.contractId,
         latency,
+        'ws',
+      );
+
+      this.divergenceService.recordWsData(
+        normalized.platformId,
+        normalized.contractId,
+        normalized,
       );
 
       this.logger.log({
@@ -463,6 +555,168 @@ export class DataIngestionService implements OnModuleInit {
           // Log but don't crash — platform is already degraded
         }
       }
+    }
+  }
+
+  /**
+   * Subscribe to WS updates for a position's contracts on both platforms.
+   * Ref-counted: only calls connector.subscribeToContracts when refCount goes 0→1.
+   */
+  subscribeForPosition(
+    pairId: PairId,
+    kalshiContractId: ContractId,
+    polymarketContractId: ContractId,
+  ): void {
+    const key = pairId as string;
+    if (this.activeSubscriptions.has(key)) {
+      return; // Already subscribed for this pair
+    }
+
+    this.activeSubscriptions.set(key, {
+      kalshiContractId,
+      polymarketContractId,
+    });
+
+    // Kalshi ref-count
+    const kalshiKey = `${PlatformId.KALSHI}:${kalshiContractId as string}`;
+    const kalshiCount = (this.contractRefCounts.get(kalshiKey) ?? 0) + 1;
+    this.contractRefCounts.set(kalshiKey, kalshiCount);
+    if (kalshiCount === 1) {
+      this.kalshiConnector.subscribeToContracts([kalshiContractId]);
+    }
+
+    // Polymarket ref-count
+    const polyKey = `${PlatformId.POLYMARKET}:${polymarketContractId as string}`;
+    const polyCount = (this.contractRefCounts.get(polyKey) ?? 0) + 1;
+    this.contractRefCounts.set(polyKey, polyCount);
+    if (polyCount === 1) {
+      this.polymarketConnector.subscribeToContracts([polymarketContractId]);
+    }
+
+    this.logger.log({
+      message: 'Subscribed for position',
+      module: 'data-ingestion',
+      timestamp: new Date().toISOString(),
+      metadata: {
+        pairId: key,
+        kalshiContractId,
+        polymarketContractId,
+        kalshiRefCount: kalshiCount,
+        polyRefCount: polyCount,
+      },
+    });
+  }
+
+  /**
+   * Unsubscribe from WS updates for a position's contracts on both platforms.
+   * Ref-counted: only calls connector.unsubscribeFromContracts when refCount goes 1→0.
+   */
+  unsubscribeForPosition(pairId: PairId): void {
+    const key = pairId as string;
+    const entry = this.activeSubscriptions.get(key);
+    if (!entry) {
+      return; // Not subscribed for this pair
+    }
+
+    this.activeSubscriptions.delete(key);
+
+    // Kalshi ref-count
+    const kalshiKey = `${PlatformId.KALSHI}:${entry.kalshiContractId as string}`;
+    const kalshiCount = (this.contractRefCounts.get(kalshiKey) ?? 1) - 1;
+    if (kalshiCount <= 0) {
+      this.contractRefCounts.delete(kalshiKey);
+      this.kalshiConnector.unsubscribeFromContracts([entry.kalshiContractId]);
+      this.divergenceService.clearContractData(
+        PlatformId.KALSHI,
+        entry.kalshiContractId,
+      );
+    } else {
+      this.contractRefCounts.set(kalshiKey, kalshiCount);
+    }
+
+    // Polymarket ref-count
+    const polyKey = `${PlatformId.POLYMARKET}:${entry.polymarketContractId as string}`;
+    const polyCount = (this.contractRefCounts.get(polyKey) ?? 1) - 1;
+    if (polyCount <= 0) {
+      this.contractRefCounts.delete(polyKey);
+      this.polymarketConnector.unsubscribeFromContracts([
+        entry.polymarketContractId,
+      ]);
+      this.divergenceService.clearContractData(
+        PlatformId.POLYMARKET,
+        entry.polymarketContractId,
+      );
+    } else {
+      this.contractRefCounts.set(polyKey, polyCount);
+    }
+
+    this.logger.log({
+      message: 'Unsubscribed for position',
+      module: 'data-ingestion',
+      timestamp: new Date().toISOString(),
+      metadata: { pairId: key },
+    });
+  }
+
+  /** Count active WS subscriptions for a given platform. */
+  getActiveSubscriptionCount(platformId: PlatformId): number {
+    let count = 0;
+    for (const [refKey] of this.contractRefCounts) {
+      if (refKey.startsWith(`${platformId}:`)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * When both legs are filled (position OPEN), subscribe to WS for the pair.
+   */
+  @OnEvent(EVENT_NAMES.ORDER_FILLED, { async: true })
+  async handleOrderFilled(event: OrderFilledEvent): Promise<void> {
+    try {
+      const position = await this.positionRepository.findByIdWithPair(
+        unwrapId(event.positionId),
+      );
+      if (
+        !position ||
+        position.status !== 'OPEN' ||
+        !position.pair?.kalshiContractId ||
+        !position.pair?.polymarketClobTokenId
+      ) {
+        return; // Not fully open yet or missing pair data
+      }
+
+      this.subscribeForPosition(
+        asPairId(position.pairId),
+        asContractId(position.pair.kalshiContractId),
+        asContractId(position.pair.polymarketClobTokenId),
+      );
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to subscribe on order filled',
+        module: 'data-ingestion',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /**
+   * When a position exits, unsubscribe from WS for the pair.
+   */
+  @OnEvent(EVENT_NAMES.EXIT_TRIGGERED, { async: true })
+  handleExitTriggered(event: ExitTriggeredEvent): void {
+    this.unsubscribeForPosition(event.pairId);
+  }
+
+  /**
+   * When single-leg is resolved to CLOSED, unsubscribe from WS for the pair.
+   */
+  @OnEvent(EVENT_NAMES.SINGLE_LEG_RESOLVED, { async: true })
+  handleSingleLegResolved(event: SingleLegResolvedEvent): void {
+    if (event.resolutionType === 'closed') {
+      this.unsubscribeForPosition(event.pairId);
     }
   }
 

@@ -75,6 +75,27 @@ describe('PaperTradingConnector', () => {
     });
   });
 
+  describe('subscription delegation (AC #4)', () => {
+    it('should delegate subscribeToContracts to real connector', () => {
+      const contractIds = [
+        'contract-1',
+        'contract-2',
+      ] as unknown as import('../../common/types/branded.type').ContractId[];
+      connector.subscribeToContracts(contractIds);
+      expect(mockReal.subscribeToContracts).toHaveBeenCalledWith(contractIds);
+    });
+
+    it('should delegate unsubscribeFromContracts to real connector', () => {
+      const contractIds = [
+        'contract-1',
+      ] as unknown as import('../../common/types/branded.type').ContractId[];
+      connector.unsubscribeFromContracts(contractIds);
+      expect(mockReal.unsubscribeFromContracts).toHaveBeenCalledWith(
+        contractIds,
+      );
+    });
+  });
+
   describe('execution method interception', () => {
     const order: OrderParams = {
       contractId: 'contract-1',

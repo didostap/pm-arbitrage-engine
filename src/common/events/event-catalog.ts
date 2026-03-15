@@ -139,6 +139,10 @@ export const EVENT_NAMES = {
   /** Emitted when gas estimate changes significantly (>10% delta) */
   PLATFORM_GAS_UPDATED: 'platform.gas.updated',
 
+  // [Story 10-0-1] Data Divergence Events
+  /** Emitted when poll and WebSocket data diverge beyond threshold */
+  DATA_DIVERGENCE: 'platform.data.divergence',
+
   // [Story 6.4] Compliance Events
   /** Emitted when trade is blocked by compliance validation */
   COMPLIANCE_BLOCKED: 'execution.compliance.blocked',

@@ -128,6 +128,15 @@ describe('DashboardService', () => {
       eventEmitter,
       riskManager,
       engineConfigRepo as unknown as EngineConfigRepository,
+      {
+        getActiveSubscriptionCount: vi.fn().mockReturnValue(0),
+      } as unknown as import('../modules/data-ingestion/data-ingestion.service').DataIngestionService,
+      {
+        getDivergenceStatus: vi.fn().mockReturnValue('normal'),
+      } as unknown as import('../modules/data-ingestion/data-divergence.service').DataDivergenceService,
+      {
+        getWsLastMessageTimestamp: vi.fn().mockReturnValue(null),
+      } as unknown as import('../modules/data-ingestion/platform-health.service').PlatformHealthService,
     );
 
     // Default mock for riskState (overview balance computation)
@@ -429,6 +438,28 @@ describe('DashboardService', () => {
       expect(result[0]!.status).toBe('healthy');
       expect(result[1]!.platformId).toBe('polymarket');
       expect(result[1]!.status).toBe('degraded');
+    });
+
+    it('should populate wsSubscriptionCount, divergenceStatus, and wsLastMessageTimestamp (AC #11)', async () => {
+      (
+        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          platform: 'KALSHI',
+          status: 'healthy',
+          created_at: new Date('2026-03-01T12:00:00Z'),
+          connection_state: 'connected',
+        },
+      ]);
+
+      const result = await service.getHealth();
+      expect(result).toHaveLength(1);
+      expect(result[0]).toHaveProperty('wsSubscriptionCount');
+      expect(result[0]).toHaveProperty('divergenceStatus');
+      expect(result[0]).toHaveProperty('wsLastMessageTimestamp');
+      expect(result[0]!.wsSubscriptionCount).toBe(0);
+      expect(result[0]!.divergenceStatus).toBe('normal');
+      expect(result[0]!.wsLastMessageTimestamp).toBeNull();
     });
   });
 

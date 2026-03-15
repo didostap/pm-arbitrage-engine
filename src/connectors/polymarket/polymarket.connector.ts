@@ -417,6 +417,48 @@ export class PolymarketConnector
     }
   }
 
+  subscribeToContracts(contractIds: ContractId[]): void {
+    try {
+      if (this.wsClient) {
+        for (const contractId of contractIds) {
+          this.wsClient.subscribe(contractId as string);
+        }
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to subscribe to contracts',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.POLYMARKET,
+        metadata: {
+          contractIds,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  unsubscribeFromContracts(contractIds: ContractId[]): void {
+    try {
+      if (this.wsClient) {
+        for (const contractId of contractIds) {
+          this.wsClient.unsubscribe(contractId as string);
+        }
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to unsubscribe from contracts',
+        module: 'connector',
+        timestamp: new Date().toISOString(),
+        platformId: PlatformId.POLYMARKET,
+        metadata: {
+          contractIds,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
   getHealth(): PlatformHealth {
     const wsConnected = this.wsClient?.getConnectionStatus() ?? false;
     let status: PlatformHealth['status'] = 'disconnected';
