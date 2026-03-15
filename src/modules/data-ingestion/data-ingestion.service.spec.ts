@@ -57,6 +57,7 @@ describe('DataIngestionService', () => {
   const mockHealthService = {
     recordUpdate: vi.fn(),
     recordContractUpdate: vi.fn(),
+    publishHealth: vi.fn().mockResolvedValue(undefined),
   };
 
   const mockPrismaService = {
@@ -952,6 +953,106 @@ describe('DataIngestionService', () => {
       expect(mockPolymarketConnector.getOrderBook).toHaveBeenCalledWith(
         'pm-token-2',
       );
+    });
+
+    it('should call publishHealth() after successful ingestion (Story 9-20 AC #6)', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-TICKER-1',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      expect(mockHealthService.publishHealth).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call publishHealth() even when ingestion has partial failures (Story 9-20)', async () => {
+      // Kalshi fails, Polymarket succeeds
+      mockKalshiConnector.getOrderBook.mockRejectedValue(
+        new Error('API error'),
+      );
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+
+      await service.ingestCurrentOrderBooks();
+
+      // publishHealth should still be called — partial data is still data
+      expect(mockHealthService.publishHealth).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call publishHealth() even when all platforms fail (Story 9-20)', async () => {
+      // Both Kalshi and Polymarket fail
+      mockKalshiConnector.getOrderBook.mockRejectedValue(
+        new Error('Kalshi API error'),
+      );
+      mockPolymarketConnector.getOrderBooks.mockRejectedValue(
+        new Error('Polymarket API error'),
+      );
+
+      await service.ingestCurrentOrderBooks();
+
+      // publishHealth should still be called — evaluate health even on total failure
+      expect(mockHealthService.publishHealth).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not call publishHealth() when no pairs configured (Story 9-20)', async () => {
+      mockContractPairLoader.getActivePairs.mockResolvedValue([]);
+
+      await service.ingestCurrentOrderBooks();
+
+      // No data fetched → no health evaluation needed
+      expect(mockHealthService.publishHealth).not.toHaveBeenCalled();
+    });
+
+    it('should not fail ingestion when publishHealth() throws (Story 9-20 code review fix)', async () => {
+      const kalshiBook = {
+        platformId: PlatformId.KALSHI,
+        contractId: 'KALSHI-TICKER-1',
+        bids: [{ price: 0.6, quantity: 1000 }],
+        asks: [{ price: 0.65, quantity: 800 }],
+        timestamp: new Date(),
+      };
+
+      mockKalshiConnector.getOrderBook.mockResolvedValue(kalshiBook);
+      mockPolymarketConnector.getOrderBooks.mockResolvedValue([
+        {
+          platformId: PlatformId.POLYMARKET,
+          contractId: 'pm-token-1',
+          bids: [],
+          asks: [],
+          timestamp: new Date(),
+        },
+      ]);
+      mockPrismaService.orderBookSnapshot.create.mockResolvedValue({});
+      mockHealthService.publishHealth.mockRejectedValue(
+        new Error('Health check DB error'),
+      );
+
+      // Should not throw — health check failure shouldn't block ingestion
+      await expect(service.ingestCurrentOrderBooks()).resolves.not.toThrow();
     });
   });
 

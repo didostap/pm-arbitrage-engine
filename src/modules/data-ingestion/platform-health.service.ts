@@ -123,6 +123,21 @@ export class PlatformHealthService {
             });
             // Continue processing - persistence failure shouldn't block monitoring
           }
+
+          // Staleness transition logging (Story 9-20 AC #8)
+          const lastUpdate = this.lastUpdateTime.get(platform) || 0;
+          this.logger.log({
+            message: 'Platform health transition',
+            module: 'data-ingestion',
+            correlationId,
+            platform,
+            previousStatus,
+            newStatus: health.status,
+            timestamp: new Date().toISOString(),
+            lastUpdateAgeMs:
+              lastUpdate > 0 ? Date.now() - lastUpdate : undefined,
+            reason: (health.metadata?.degradationReason as string) || 'none',
+          });
         }
 
         // Emit base health update event (every tick, regardless of DB write)

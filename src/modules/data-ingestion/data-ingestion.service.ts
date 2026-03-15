@@ -306,6 +306,7 @@ export class DataIngestionService implements OnModuleInit {
     await this.pollDegradedPlatforms(correlationId);
 
     // Polling cycle duration metric (AC #12)
+    // Captured before publishHealth() so the metric reflects pure data-fetching time.
     const pollingDuration = Date.now() - methodStartTime;
     this.logger.log({
       message: 'Polling cycle complete',
@@ -318,6 +319,25 @@ export class DataIngestionService implements OnModuleInit {
         kalshiConcurrency: this.kalshiConcurrency,
       },
     });
+
+    // Post-ingestion health evaluation (Story 9-20 AC #6)
+    // Trigger health check right after data ingestion while lastUpdateTime is fresh.
+    // Prevents false staleness during the post-ingestion pipeline stages
+    // (detection, edge calc, risk, execution) where lastUpdateTime stagnates.
+    // The 30s cron continues as a fallback for genuine staleness detection.
+    // Note: double healthy ticks with the cron are harmless — unhealthy ticks
+    // cannot fire right after fresh ingestion.
+    try {
+      await this.healthService.publishHealth();
+    } catch (error) {
+      this.logger.error({
+        message: 'Post-ingestion health check failed',
+        module: 'data-ingestion',
+        correlationId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      // Continue — health check failure shouldn't block ingestion completion
+    }
   }
 
   /**

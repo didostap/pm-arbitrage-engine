@@ -353,6 +353,86 @@ describe('PlatformHealthService', () => {
       expect(statuses).toContain('healthy');
       expect(statuses).toContain('degraded');
     });
+
+    it('should log structured transition entry on healthy → degraded (AC #8)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      const logSpy = vi.spyOn(service['logger'], 'log');
+
+      // Establish healthy baseline
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      logSpy.mockClear();
+
+      // Make Kalshi stale → degraded
+      const sixtyOneSecondsAgo = Date.now() - 61_000;
+      service['lastUpdateTime'].set(PlatformId.KALSHI, sixtyOneSecondsAgo);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+
+      await service.publishHealth();
+
+      const transitionCalls = logSpy.mock.calls.filter(
+        (call) =>
+          typeof call[0] === 'object' &&
+          (call[0] as Record<string, unknown>).message ===
+            'Platform health transition',
+      );
+      expect(transitionCalls).toHaveLength(1);
+      const logEntry = transitionCalls[0][0] as Record<string, unknown>;
+      expect(logEntry).toMatchObject({
+        message: 'Platform health transition',
+        module: 'data-ingestion',
+        platform: PlatformId.KALSHI,
+        previousStatus: 'healthy',
+        newStatus: 'degraded',
+        reason: 'stale_data',
+      });
+      expect(logEntry).toHaveProperty('correlationId');
+      expect(logEntry).toHaveProperty('timestamp');
+      expect(logEntry).toHaveProperty('lastUpdateAgeMs');
+      expect(logEntry.lastUpdateAgeMs).toBeGreaterThanOrEqual(61_000);
+    });
+
+    it('should log structured transition entry on degraded → healthy (AC #8)', async () => {
+      mockPrismaService.platformHealthLog.create.mockResolvedValue({});
+      const logSpy = vi.spyOn(service['logger'], 'log');
+
+      // Establish healthy → degraded
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+      service['lastUpdateTime'].set(PlatformId.KALSHI, Date.now() - 61_000);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth(); // Kalshi now degraded
+      logSpy.mockClear();
+
+      // Recover Kalshi
+      service.recordUpdate(PlatformId.KALSHI, 100);
+      service.recordUpdate(PlatformId.POLYMARKET, 100);
+      await service.publishHealth();
+
+      const transitionCalls = logSpy.mock.calls.filter(
+        (call) =>
+          typeof call[0] === 'object' &&
+          (call[0] as Record<string, unknown>).message ===
+            'Platform health transition',
+      );
+      expect(transitionCalls).toHaveLength(1);
+      const logEntry = transitionCalls[0][0] as Record<string, unknown>;
+      expect(logEntry).toMatchObject({
+        message: 'Platform health transition',
+        module: 'data-ingestion',
+        platform: PlatformId.KALSHI,
+        previousStatus: 'degraded',
+        newStatus: 'healthy',
+        reason: 'none',
+      });
+      expect(logEntry).toHaveProperty('correlationId');
+      expect(logEntry).toHaveProperty('timestamp');
+      expect(logEntry).toHaveProperty('lastUpdateAgeMs');
+      // Platform just recovered — lastUpdateAgeMs should be small (< 5s)
+      expect(logEntry.lastUpdateAgeMs).toBeLessThan(5_000);
+    });
   });
 
   describe('calculateHealth()', () => {
