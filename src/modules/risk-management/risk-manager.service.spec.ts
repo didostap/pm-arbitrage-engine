@@ -2591,4 +2591,157 @@ describe('RiskManagerService', () => {
       );
     });
   });
+
+  describe('validatePosition mode-awareness', () => {
+    it('should approve paper trade when only live halt is active', async () => {
+      // Halt live trading
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted(false)).toBe(true);
+      expect(service.isTradingHalted(true)).toBe(false);
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        true,
+      );
+      expect(decision.approved).toBe(true);
+    });
+
+    it('should reject paper trade when paper halt is active', async () => {
+      // Trigger paper halt via paper daily loss
+      await service.updateDailyPnl(new Decimal('-600'), true);
+      expect(service.isTradingHalted(true)).toBe(true);
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        true,
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toBe('Trading halted: daily loss limit breached');
+    });
+
+    it('should reject live trade when live halt is active (regression)', async () => {
+      service.haltTrading('reconciliation_discrepancy');
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        false,
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toBe('Trading halted: daily loss limit breached');
+    });
+
+    it('should use paper state openPositionCount and totalCapitalDeployed', async () => {
+      // Set paper state to max open pairs
+      const paperState = (service as any).paperState;
+      paperState.openPositionCount = 10; // maxOpenPairs = 10
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        true,
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toContain('Max open pairs limit reached');
+
+      // Live state should still allow
+      const liveDecision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        false,
+      );
+      expect(liveDecision.approved).toBe(true);
+    });
+
+    it('should use paper bankroll for capital checks', async () => {
+      // Set paper bankroll to a very small amount
+      (service as any).config.paperBankrollUsd = '100';
+      // Deploy most of paper capital
+      (service as any).paperState.totalCapitalDeployed = new Decimal('98');
+
+      const decision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        true,
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toContain('Insufficient available capital');
+
+      // Live should still be fine (bankroll = 10000)
+      const liveDecision = await service.validatePosition(
+        makeEnrichedOpportunity(),
+        false,
+      );
+      expect(liveDecision.approved).toBe(true);
+    });
+  });
+
+  describe('isTradingHalted mode-awareness', () => {
+    it('should return false for paper when only live halt exists', () => {
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted(true)).toBe(false);
+    });
+
+    it('should return true for live when live halt exists', () => {
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted(false)).toBe(true);
+    });
+
+    it('should return true for paper when paper halt exists', async () => {
+      await service.updateDailyPnl(new Decimal('-600'), true);
+      expect(service.isTradingHalted(true)).toBe(true);
+    });
+
+    it('should default to live (backward compat)', () => {
+      service.haltTrading('reconciliation_discrepancy');
+      expect(service.isTradingHalted()).toBe(true);
+    });
+  });
+
+  describe('getCurrentExposure mode-awareness', () => {
+    it('should return paper state values when isPaper=true', () => {
+      // Set up paper state with specific values
+      (service as any).paperState.openPositionCount = 3;
+      (service as any).paperState.totalCapitalDeployed = new Decimal('500');
+      (service as any).paperState.dailyPnl = new Decimal('-50');
+      (service as any).config.paperBankrollUsd = '5000';
+
+      const exposure = service.getCurrentExposure(true);
+      expect(exposure.openPairCount).toBe(3);
+      expect(exposure.bankrollUsd.toNumber()).toBe(5000);
+      expect(exposure.dailyPnl.toNumber()).toBe(-50);
+      expect(exposure.totalCapitalDeployed.toNumber()).toBe(500);
+    });
+
+    it('should default to live (backward compat)', () => {
+      (service as any).liveState.openPositionCount = 2;
+      const exposure = service.getCurrentExposure();
+      expect(exposure.openPairCount).toBe(2);
+      expect(exposure.bankrollUsd.toNumber()).toBe(10000);
+    });
+  });
+
+  describe('processOverride mode-awareness regression', () => {
+    it('should reject during live halt (existing behavior preserved)', async () => {
+      await service.updateDailyPnl(new Decimal('-600'));
+      expect(service.isTradingHalted()).toBe(true);
+
+      const decision = await service.processOverride(
+        asOpportunityId('opp-123'),
+        'High conviction based on analysis',
+      );
+      expect(decision.approved).toBe(false);
+      expect(decision.reason).toBe('Override denied: daily loss halt active');
+    });
+
+    it('should NOT reject when only paper halt is active', async () => {
+      // Only paper mode is halted
+      await service.updateDailyPnl(new Decimal('-600'), true);
+      expect(service.isTradingHalted(true)).toBe(true);
+      expect(service.isTradingHalted(false)).toBe(false);
+
+      // processOverride checks live halt only (default isPaper=false)
+      const decision = await service.processOverride(
+        asOpportunityId('opp-123'),
+        'High conviction based on analysis',
+      );
+      expect(decision.approved).toBe(true);
+    });
+  });
 });

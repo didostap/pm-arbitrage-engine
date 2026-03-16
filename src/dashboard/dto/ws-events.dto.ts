@@ -65,6 +65,11 @@ export interface WsBatchCompletePayload {
   }>;
 }
 
+export interface WsTradingHaltPayload {
+  halted: boolean;
+  reasons: string[];
+}
+
 export const WS_EVENTS = {
   HEALTH_CHANGE: 'health.change',
   EXECUTION_COMPLETE: 'execution.complete',
@@ -74,4 +79,5 @@ export const WS_EVENTS = {
   BATCH_COMPLETE: 'batch.complete',
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
   DIVERGENCE_ALERT: 'divergence.alert',
+  TRADING_HALT: 'trading.halt',
 } as const;

@@ -15,9 +15,17 @@ export interface IRiskManager {
   /**
    * Validate whether an opportunity passes risk checks.
    * @param opportunity - EnrichedOpportunity from arbitrage-detection module
+   * @param isPaper - When true, checks paper mode state. Defaults to false (live).
    */
-  validatePosition(opportunity: unknown): Promise<RiskDecision>;
-  getCurrentExposure(): RiskExposure;
+  validatePosition(
+    opportunity: unknown,
+    isPaper?: boolean,
+  ): Promise<RiskDecision>;
+  /**
+   * Get current risk exposure metrics.
+   * @param isPaper - When true, checks paper mode state. Defaults to false (live).
+   */
+  getCurrentExposure(isPaper?: boolean): RiskExposure;
   getOpenPositionCount(): number;
   /**
    * Update daily P&L with a realized profit/loss delta.
@@ -27,8 +35,14 @@ export interface IRiskManager {
   updateDailyPnl(pnlDelta: unknown, isPaper?: boolean): Promise<void>;
   /**
    * Check if trading is currently halted.
+   * @param isPaper - When true, checks paper mode state. Defaults to false (live).
    */
-  isTradingHalted(): boolean;
+  isTradingHalted(isPaper?: boolean): boolean;
+  /**
+   * Get active halt reason strings from in-memory state.
+   * @param isPaper - When true, checks paper mode state. Defaults to false (live).
+   */
+  getActiveHaltReasons(isPaper?: boolean): string[];
   /**
    * Halt trading for the given reason. Adds to the set of active halt reasons.
    * @param reason - The halt reason string (from HALT_REASONS)

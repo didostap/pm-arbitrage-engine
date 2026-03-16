@@ -489,19 +489,25 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
   }
 
-  async validatePosition(opportunity: unknown): Promise<RiskDecision> {
+  async validatePosition(
+    opportunity: unknown,
+    isPaper: boolean = false,
+  ): Promise<RiskDecision> {
+    const state = this.getState(isPaper);
+    const bankrollUsd = this.getBankrollForMode(isPaper);
+
     // FIRST: Check daily loss halt (Story 4.2) — before any other computation
-    if (this.isTradingHalted()) {
+    if (this.isTradingHalted(isPaper)) {
       return {
         approved: false,
         reason: 'Trading halted: daily loss limit breached',
         maxPositionSizeUsd: new FinancialDecimal(0),
-        currentOpenPairs: this.liveState.openPositionCount,
-        dailyPnl: this.liveState.dailyPnl,
+        currentOpenPairs: state.openPositionCount,
+        dailyPnl: state.dailyPnl,
       };
     }
 
-    let maxPositionSizeUsd = new FinancialDecimal(this.config.bankrollUsd).mul(
+    let maxPositionSizeUsd = new FinancialDecimal(bankrollUsd).mul(
       new FinancialDecimal(this.config.maxPositionPct),
     );
 
@@ -542,13 +548,13 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
 
     // Check max open pairs limit (including reserved slots)
     const effectiveOpenPairs =
-      this.liveState.openPositionCount + this.getReservedPositionSlots();
+      state.openPositionCount + this.getReservedPositionSlots(isPaper);
     if (effectiveOpenPairs >= this.config.maxOpenPairs) {
       this.logger.warn({
         message: 'Opportunity rejected: max open pairs exceeded',
         data: {
-          currentOpenPairs: this.liveState.openPositionCount,
-          reservedSlots: this.getReservedPositionSlots(),
+          currentOpenPairs: state.openPositionCount,
+          reservedSlots: this.getReservedPositionSlots(isPaper),
           maxOpenPairs: this.config.maxOpenPairs,
         },
       });
@@ -556,7 +562,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: `Max open pairs limit reached (${effectiveOpenPairs}/${this.config.maxOpenPairs})`,
         maxPositionSizeUsd,
-        currentOpenPairs: this.liveState.openPositionCount,
+        currentOpenPairs: state.openPositionCount,
         ...(rawConfidence != null && { confidenceScore: rawConfidence }),
         ...(confidenceAdjustedSizeUsd !== undefined && {
           confidenceAdjustedSizeUsd,
@@ -565,12 +571,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     }
 
     // Check available capital (including reserved capital) — cheap pre-screen
-    const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
-    const reservedCapital = this.getReservedCapital();
+    const reservedCapital = this.getReservedCapital(isPaper);
     const availableCapital = new FinancialDecimal(
-      bankrollUsd
-        .minus(this.liveState.totalCapitalDeployed)
-        .minus(reservedCapital),
+      bankrollUsd.minus(state.totalCapitalDeployed).minus(reservedCapital),
     );
     if (availableCapital.lt(maxPositionSizeUsd)) {
       this.logger.warn({
@@ -585,7 +588,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         approved: false,
         reason: `Insufficient available capital (${availableCapital.toFixed(2)} < ${maxPositionSizeUsd.toFixed(2)})`,
         maxPositionSizeUsd,
-        currentOpenPairs: this.liveState.openPositionCount,
+        currentOpenPairs: state.openPositionCount,
         ...(rawConfidence != null && { confidenceScore: rawConfidence }),
         ...(confidenceAdjustedSizeUsd !== undefined && {
           confidenceAdjustedSizeUsd,
@@ -633,7 +636,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: aggregate cluster exposure ${aggregateExposurePct.mul(100).toFixed(1)}% >= ${aggregateLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.liveState.openPositionCount,
+          currentOpenPairs: state.openPositionCount,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
           ...(confidenceAdjustedSizeUsd !== undefined && {
             confidenceAdjustedSizeUsd,
@@ -713,7 +716,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: cluster hard limit — exposure ${clusterExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.liveState.openPositionCount,
+          currentOpenPairs: state.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
@@ -784,7 +787,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           approved: false,
           reason: `Rejected: cluster hard limit — projected ${projectedExposurePct.mul(100).toFixed(1)}% >= ${hardLimitPct.mul(100).toFixed(0)}% limit`,
           maxPositionSizeUsd,
-          currentOpenPairs: this.liveState.openPositionCount,
+          currentOpenPairs: state.openPositionCount,
           clusterExposurePct,
           triageRecommendations: triage,
           ...(rawConfidence != null && { confidenceScore: rawConfidence }),
@@ -803,7 +806,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
         EVENT_NAMES.LIMIT_APPROACHED,
         new LimitApproachedEvent(
           'max_open_pairs',
-          this.liveState.openPositionCount,
+          state.openPositionCount,
           this.config.maxOpenPairs,
           percentUsed,
         ),
@@ -814,7 +817,7 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
       approved: true,
       reason: 'Position within risk limits',
       maxPositionSizeUsd,
-      currentOpenPairs: this.liveState.openPositionCount,
+      currentOpenPairs: state.openPositionCount,
       ...(adjustedMaxPositionSizeUsd !== undefined && {
         adjustedMaxPositionSizeUsd,
       }),
@@ -1069,8 +1072,12 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState(isPaper ? 'paper' : 'live');
   }
 
-  isTradingHalted(): boolean {
-    return this.liveState.activeHaltReasons.size > 0;
+  isTradingHalted(isPaper: boolean = false): boolean {
+    return this.getState(isPaper).activeHaltReasons.size > 0;
+  }
+
+  getActiveHaltReasons(isPaper: boolean = false): string[] {
+    return [...this.getState(isPaper).activeHaltReasons];
   }
 
   haltTrading(reason: string): void {
@@ -1180,23 +1187,24 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
     await this.persistState('paper');
   }
 
-  getCurrentExposure(): RiskExposure {
-    const bankrollUsd = new FinancialDecimal(this.config.bankrollUsd);
-    const dailyLossLimitUsd = new FinancialDecimal(this.config.bankrollUsd).mul(
+  getCurrentExposure(isPaper: boolean = false): RiskExposure {
+    const state = this.getState(isPaper);
+    const bankrollUsd = this.getBankrollForMode(isPaper);
+    const dailyLossLimitUsd = new FinancialDecimal(bankrollUsd).mul(
       new FinancialDecimal(this.config.dailyLossPct),
     );
-    const reserved: Decimal = this.getReservedCapital();
+    const reserved: Decimal = this.getReservedCapital(isPaper);
     return {
       openPairCount:
-        this.liveState.openPositionCount + this.getReservedPositionSlots(),
+        state.openPositionCount + this.getReservedPositionSlots(isPaper),
       totalCapitalDeployed: new FinancialDecimal(
-        this.liveState.totalCapitalDeployed.add(reserved),
+        state.totalCapitalDeployed.add(reserved),
       ),
       bankrollUsd,
       availableCapital: new FinancialDecimal(
-        bankrollUsd.minus(this.liveState.totalCapitalDeployed).minus(reserved),
+        bankrollUsd.minus(state.totalCapitalDeployed).minus(reserved),
       ),
-      dailyPnl: this.liveState.dailyPnl,
+      dailyPnl: state.dailyPnl,
       dailyLossLimitUsd,
       clusterExposures: this.correlationTracker.getClusterExposures(),
       aggregateClusterExposurePct:

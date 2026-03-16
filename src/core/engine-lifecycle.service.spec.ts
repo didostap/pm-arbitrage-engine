@@ -248,6 +248,64 @@ describe('EngineLifecycleService', () => {
       );
     });
 
+    it('should call resumeTrading after clean reconciliation (no discrepancies)', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockResolvedValue({
+          positionsChecked: 3,
+          positionsResolved: 3,
+          discrepanciesFound: 0,
+          discrepancies: [],
+        }),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRisk.resumeTrading).toHaveBeenCalledWith(
+        'reconciliation_discrepancy',
+      );
+    });
+
+    it('should NOT call resumeTrading when discrepancies are found', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockResolvedValue({
+          positionsChecked: 3,
+          positionsResolved: 1,
+          discrepanciesFound: 2,
+          discrepancies: [{ type: 'status_mismatch' }],
+        }),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRisk.resumeTrading).not.toHaveBeenCalled();
+    });
+
     it('should log platform modes at startup (both live)', async () => {
       const logSpy = vi.spyOn(service['logger'], 'log');
       await service.onApplicationBootstrap();

@@ -74,6 +74,8 @@ function createMockRiskManager() {
     }),
     getBankrollUsd: vi.fn().mockReturnValue(new Decimal('10000')),
     reloadBankroll: vi.fn().mockResolvedValue(undefined),
+    isTradingHalted: vi.fn().mockReturnValue(false),
+    getActiveHaltReasons: vi.fn().mockReturnValue([]),
   } as unknown as IRiskManager;
 }
 
@@ -410,6 +412,50 @@ describe('DashboardService', () => {
 
       const result = await service.getOverview();
       expect(result.trailingPnl7d).toBe('0.1');
+    });
+
+    it('should return tradingHalted=false when not halted', async () => {
+      (
+        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      (
+        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+      (prisma.order.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const result = await service.getOverview();
+      expect(result.tradingHalted).toBe(false);
+      expect(result.haltReasons).toEqual([]);
+    });
+
+    it('should return tradingHalted=true with halt reasons when halted', async () => {
+      (riskManager.isTradingHalted as ReturnType<typeof vi.fn>).mockReturnValue(
+        true,
+      );
+      (
+        riskManager.getActiveHaltReasons as ReturnType<typeof vi.fn>
+      ).mockReturnValue(['daily_loss_limit']);
+      (
+        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      (
+        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+      (prisma.order.count as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const result = await service.getOverview();
+      expect(result.tradingHalted).toBe(true);
+      expect(result.haltReasons).toEqual(['daily_loss_limit']);
     });
   });
 

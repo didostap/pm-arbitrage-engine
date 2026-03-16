@@ -27,6 +27,10 @@ import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { EVENT_NAMES } from '../common/events/event-catalog';
 import type { BankrollUpdatedEvent } from '../common/events/config.events';
 import type { DataDivergenceEvent } from '../common/events/platform.events';
+import type {
+  TradingHaltedEvent,
+  TradingResumedEvent,
+} from '../common/events/system.events';
 import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
@@ -167,6 +171,39 @@ export class DashboardGateway
   handleDataDivergence(event: DataDivergenceEvent): void {
     const envelope = this.mapper.mapDivergenceAlert(event);
     this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.SYSTEM_TRADING_HALTED)
+  handleTradingHalted(event: TradingHaltedEvent): void {
+    // Extract all active reasons from event details when available (emitted by RiskManagerService),
+    // fall back to single triggering reason (e.g., time_drift from TradingEngineService)
+    const details =
+      typeof event.details === 'object' && event.details !== null
+        ? (event.details as Record<string, unknown>)
+        : null;
+    const reasons = Array.isArray(details?.activeReasons)
+      ? (details.activeReasons as string[])
+      : [event.reason];
+    this.broadcast({
+      event: WS_EVENTS.TRADING_HALT,
+      data: {
+        halted: true,
+        reasons,
+      },
+      timestamp: event.haltTimestamp.toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.SYSTEM_TRADING_RESUMED)
+  handleTradingResumed(event: TradingResumedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.TRADING_HALT,
+      data: {
+        halted: event.remainingReasons.length > 0,
+        reasons: event.remainingReasons,
+      },
+      timestamp: event.resumeTimestamp.toISOString(),
+    });
   }
 
   // --- Private helpers ---

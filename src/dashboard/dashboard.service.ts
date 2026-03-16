@@ -129,12 +129,20 @@ export class DashboardService {
         });
       }
 
+      // Trading halt status from in-memory risk manager (most current)
+      const tradingHalted = this.riskManager.isTradingHalted();
+      const haltReasons = tradingHalted
+        ? this.riskManager.getActiveHaltReasons()
+        : [];
+
       return {
         systemHealth,
         trailingPnl7d,
         executionQualityRatio,
         openPositionCount,
         activeAlertCount,
+        tradingHalted,
+        haltReasons,
         capitalOverview,
       };
     } catch (error) {

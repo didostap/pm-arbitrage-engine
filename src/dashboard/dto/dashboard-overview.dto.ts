@@ -47,6 +47,19 @@ export class DashboardOverviewDto {
   @ApiProperty({ description: 'Number of active (unacknowledged) alerts' })
   activeAlertCount!: number;
 
+  @ApiProperty({
+    description: 'Whether live trading is currently halted',
+    example: false,
+  })
+  tradingHalted!: boolean;
+
+  @ApiProperty({
+    description: 'Active halt reasons (empty when not halted)',
+    example: ['daily_loss_limit'],
+    type: [String],
+  })
+  haltReasons!: string[];
+
   @ApiPropertyOptional({
     description: 'Per-mode capital breakdown (live and paper)',
     type: CapitalOverviewDto,

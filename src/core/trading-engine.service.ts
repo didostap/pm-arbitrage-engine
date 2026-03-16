@@ -160,9 +160,15 @@ export class TradingEngineService {
 
         // STEP 3: Risk Pre-filter (cheap pre-screen before execution queue)
         const riskStart = Date.now();
+        const isPaper =
+          this.kalshiConnector.getHealth().mode === 'paper' ||
+          this.polymarketConnector.getHealth().mode === 'paper';
         const approvedOpportunities: RankedOpportunity[] = [];
         for (const opportunity of edgeResult.opportunities) {
-          const decision = await this.riskManager.validatePosition(opportunity);
+          const decision = await this.riskManager.validatePosition(
+            opportunity,
+            isPaper,
+          );
           this.logger.log({
             message: decision.approved
               ? 'Opportunity approved by risk manager'
@@ -201,9 +207,7 @@ export class TradingEngineService {
                   decision.maxPositionSizeUsd,
                 ),
                 pairId: asPairId(matchId),
-                isPaper:
-                  this.kalshiConnector.getHealth().mode === 'paper' ||
-                  this.polymarketConnector.getHealth().mode === 'paper',
+                isPaper,
               },
             });
           }

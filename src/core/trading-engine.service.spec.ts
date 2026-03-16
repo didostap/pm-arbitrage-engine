@@ -425,6 +425,12 @@ describe('TradingEngineService', () => {
       setupSingleOpportunity();
       await svc.executeCycle();
 
+      // Verify validatePosition receives isPaper=true
+      expect(mockRiskManager.validatePosition).toHaveBeenCalledWith(
+        expect.anything(),
+        true,
+      );
+
       const passedOpps = mockExecutionQueue.processOpportunities.mock
         .calls[0]?.[0] as Array<{ reservationRequest: { isPaper: boolean } }>;
       expect(passedOpps).toHaveLength(1);
@@ -434,6 +440,12 @@ describe('TradingEngineService', () => {
     it('should set isPaper false when both connectors are in live mode', async () => {
       setupSingleOpportunity();
       await service.executeCycle();
+
+      // Verify validatePosition receives isPaper=false
+      expect(mockRiskManager.validatePosition).toHaveBeenCalledWith(
+        expect.anything(),
+        false,
+      );
 
       const passedOpps = mockExecutionQueue.processOpportunities.mock
         .calls[0]?.[0] as Array<{ reservationRequest: { isPaper: boolean } }>;

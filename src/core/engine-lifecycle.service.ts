@@ -139,6 +139,9 @@ export class EngineLifecycleService
               positionsChecked: reconResult.positionsChecked,
             },
           });
+        } else {
+          // Clean reconciliation — clear any stale halt from a previous failed boot
+          this.riskManager.resumeTrading('reconciliation_discrepancy');
         }
       } catch (error) {
         // Check if active positions exist

@@ -6,6 +6,10 @@ import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 import type { PlatformHealth } from '../common/types/platform.type';
 import { PlatformId } from '../common/types/platform.type';
 import { BatchCompleteEvent } from '../common/events/batch.events';
+import {
+  TradingHaltedEvent,
+  TradingResumedEvent,
+} from '../common/events/system.events';
 
 vi.mock('../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -183,6 +187,83 @@ describe('DashboardGateway', () => {
       expect(sent.event).toBe('batch.complete');
       expect(sent.data.batchId).toBe('batch-123');
       expect(sent.data.results).toHaveLength(1);
+    });
+  });
+
+  describe('trading halt events', () => {
+    it('should broadcast all active reasons from event details', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token') as never,
+      );
+
+      const event = new TradingHaltedEvent(
+        'reconciliation_discrepancy',
+        { activeReasons: ['daily_loss_limit', 'reconciliation_discrepancy'] },
+        new Date('2026-03-16T12:00:00Z'),
+        'critical',
+      );
+      gateway.handleTradingHalted(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: { halted: boolean; reasons: string[] };
+      };
+      expect(sent.event).toBe('trading.halt');
+      expect(sent.data.halted).toBe(true);
+      expect(sent.data.reasons).toEqual([
+        'daily_loss_limit',
+        'reconciliation_discrepancy',
+      ]);
+    });
+
+    it('should fall back to single reason when details lacks activeReasons', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token') as never,
+      );
+
+      // time_drift event passes a number as details, not an object with activeReasons
+      const event = new TradingHaltedEvent(
+        'time_drift',
+        1500,
+        new Date('2026-03-16T12:00:00Z'),
+        'critical',
+      );
+      gateway.handleTradingHalted(event);
+
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: { halted: boolean; reasons: string[] };
+      };
+      expect(sent.data.reasons).toEqual(['time_drift']);
+    });
+
+    it('should broadcast resumed state on TradingResumedEvent', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token') as never,
+      );
+
+      const event = new TradingResumedEvent(
+        'daily_loss_limit',
+        [],
+        new Date('2026-03-16T12:00:00Z'),
+      );
+      gateway.handleTradingResumed(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: { halted: boolean; reasons: string[] };
+      };
+      expect(sent.event).toBe('trading.halt');
+      expect(sent.data.halted).toBe(false);
+      expect(sent.data.reasons).toEqual([]);
     });
   });
 });
