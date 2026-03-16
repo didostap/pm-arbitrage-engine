@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsEnum,
   IsInt,
+  IsISO8601,
   IsUUID,
   Min,
   Max,
@@ -24,6 +25,14 @@ export class ApproveMatchDto {
   @IsNotEmpty()
   @MaxLength(1000)
   rationale!: string;
+
+  @ApiPropertyOptional({
+    description: 'Resolution date (ISO 8601)',
+    example: '2026-06-30T00:00:00Z',
+  })
+  @IsOptional()
+  @IsISO8601()
+  resolutionDate?: string;
 }
 
 export class RejectMatchDto {

@@ -18,6 +18,7 @@ import {
 } from '../../connectors/connector.constants';
 import { RISK_MANAGER_TOKEN } from '../risk-management/risk-management.constants';
 import { ExecutionLockService } from './execution-lock.service';
+import { PrismaService } from '../../common/prisma.service';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import {
   ExitTriggeredEvent,
@@ -53,6 +54,7 @@ export class PositionCloseService implements IPositionCloseService {
     private readonly riskManager: IRiskManager,
     private readonly eventEmitter: EventEmitter2,
     private readonly executionLockService: ExecutionLockService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async closePosition(
@@ -148,10 +150,10 @@ export class PositionCloseService implements IPositionCloseService {
 
         // Zero residual on both legs → position should already be CLOSED
         if (kalshiEffectiveSize.isZero() && polymarketEffectiveSize.isZero()) {
-          await this.positionRepository.updateStatus(
-            position.positionId,
-            'CLOSED',
-          );
+          await this.prisma.openPosition.update({
+            where: { positionId: position.positionId },
+            data: { status: 'CLOSED', realizedPnl: 0 },
+          });
           await this.riskManager.closePosition(
             new Decimal(0),
             new Decimal(0),
@@ -472,11 +474,14 @@ export class PositionCloseService implements IPositionCloseService {
       );
 
       if (isFullExit) {
-        // Full exit → CLOSED
-        await this.positionRepository.updateStatus(
-          position.positionId,
-          'CLOSED',
-        );
+        // Full exit → CLOSED with realizedPnl
+        await this.prisma.openPosition.update({
+          where: { positionId: position.positionId },
+          data: {
+            status: 'CLOSED',
+            realizedPnl: realizedPnl.toDecimalPlaces(8),
+          },
+        });
         await this.riskManager.closePosition(
           capitalReturned,
           realizedPnl,

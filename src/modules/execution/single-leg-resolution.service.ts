@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import { FinancialMath } from '../../common/utils';
+import { PrismaService } from '../../common/prisma.service';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -70,6 +71,7 @@ export class SingleLegResolutionService {
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
     private readonly eventEmitter: EventEmitter2,
+    private readonly prisma: PrismaService,
   ) {}
 
   async retryLeg(
@@ -422,8 +424,11 @@ export class SingleLegResolutionService {
     }
     const realizedPnl = rawPnl.minus(closeFee);
 
-    // Update position status to CLOSED
-    await this.positionRepository.updateStatus(positionId, 'CLOSED');
+    // Update position status to CLOSED with realizedPnl
+    await this.prisma.openPosition.update({
+      where: { positionId },
+      data: { status: 'CLOSED', realizedPnl: realizedPnl.toDecimalPlaces(8) },
+    });
 
     // Release budget via risk manager
     const entryCapital = entryFillPrice.mul(qty);

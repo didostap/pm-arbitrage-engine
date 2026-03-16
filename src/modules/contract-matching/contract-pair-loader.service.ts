@@ -257,7 +257,7 @@ export class ContractPairLoaderService implements OnModuleInit {
         dto.operatorVerificationTimestamp,
       ),
       primaryLeg: dto.primaryLeg ?? PrimaryLeg.KALSHI,
-      resolutionDate: null,
+      resolutionDate: dto.resolutionDate ? new Date(dto.resolutionDate) : null,
       confidenceScore: null,
     };
   }

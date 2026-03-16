@@ -791,5 +791,38 @@ describe('ContractPairLoaderService', () => {
         expect(pair.confidenceScore).toBeNull();
       }
     });
+
+    it('should parse resolutionDate from YAML when provided', async () => {
+      const yamlWithResolution = {
+        pairs: [
+          {
+            polymarketContractId: 'poly-1',
+            polymarketClobTokenId: 'clob-1',
+            kalshiContractId: 'kalshi-1',
+            eventDescription: 'Will event A happen?',
+            operatorVerificationTimestamp: '2026-02-15T10:30:00Z',
+            primaryLeg: 'kalshi',
+            resolutionDate: '2026-06-30T00:00:00Z',
+          },
+        ],
+      };
+      mockFsWithContent(yamlWithResolution);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getYamlPairs();
+      expect(pairs[0]!.resolutionDate).toEqual(
+        new Date('2026-06-30T00:00:00Z'),
+      );
+    });
+
+    it('should set resolutionDate to null when not provided in YAML', async () => {
+      mockFsWithContent(VALID_YAML_CONTENT);
+      const service = await createService();
+      await service.onModuleInit();
+
+      const pairs = service.getYamlPairs();
+      expect(pairs[0]!.resolutionDate).toBeNull();
+    });
   });
 });

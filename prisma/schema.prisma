@@ -218,6 +218,7 @@ model OpenPosition {
   entryPrices       Json           @map("entry_prices") // {polymarket: string, kalshi: string}
   sizes             Json // {polymarket: string, kalshi: string}
   expectedEdge      Decimal        @map("expected_edge") @db.Decimal(20, 8)
+  realizedPnl       Decimal?       @map("realized_pnl") @db.Decimal(20, 8)
   status            PositionStatus
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz

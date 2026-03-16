@@ -41,6 +41,7 @@ import {
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import type { EnrichedOpportunity } from '../arbitrage-detection/types/enriched-opportunity.type';
+import type { SingleLegContext } from './single-leg-context.type';
 import { FinancialMath } from '../../common/utils/financial-math';
 import {
   asContractId,
@@ -552,25 +553,24 @@ export class ExecutionService implements IExecutionEngine {
         type: 'limit',
       });
     } catch (err) {
-      return this.handleSingleLeg(
+      return this.handleSingleLeg({
         pairId,
         primaryLeg,
-        primaryOrderRecord.orderId,
+        primaryOrderId: primaryOrderRecord.orderId,
         primaryOrder,
         primarySide,
         secondarySide,
-        targetPrice,
-        secondaryTargetPrice,
-        targetSize,
+        primaryPrice: targetPrice,
+        secondaryPrice: secondaryTargetPrice,
+        primarySize: targetSize,
         secondarySize,
         enriched,
         opportunity,
-        reservation,
-        EXECUTION_ERROR_CODES.ORDER_REJECTED,
-        `Secondary leg submission failed: ${err instanceof Error ? err.message : String(err)}`,
+        errorCode: EXECUTION_ERROR_CODES.ORDER_REJECTED,
+        errorMessage: `Secondary leg submission failed: ${err instanceof Error ? err.message : String(err)}`,
         isPaper,
         mixedMode,
-      );
+      });
     }
 
     // Check secondary fill status
@@ -601,27 +601,27 @@ export class ExecutionService implements IExecutionEngine {
         });
       }
 
-      return this.handleSingleLeg(
+      return this.handleSingleLeg({
         pairId,
         primaryLeg,
-        primaryOrderRecord.orderId,
+        primaryOrderId: primaryOrderRecord.orderId,
         primaryOrder,
         primarySide,
         secondarySide,
-        targetPrice,
-        secondaryTargetPrice,
-        targetSize,
+        primaryPrice: targetPrice,
+        secondaryPrice: secondaryTargetPrice,
+        primarySize: targetSize,
         secondarySize,
         enriched,
         opportunity,
-        reservation,
-        secondaryOrder.status === 'pending'
-          ? EXECUTION_ERROR_CODES.ORDER_TIMEOUT
-          : EXECUTION_ERROR_CODES.ORDER_REJECTED,
-        `Secondary leg ${secondaryOrder.status} on ${secondaryPlatform}`,
+        errorCode:
+          secondaryOrder.status === 'pending'
+            ? EXECUTION_ERROR_CODES.ORDER_TIMEOUT
+            : EXECUTION_ERROR_CODES.ORDER_REJECTED,
+        errorMessage: `Secondary leg ${secondaryOrder.status} on ${secondaryPlatform}`,
         isPaper,
         mixedMode,
-      );
+      });
     }
 
     // === BOTH LEGS FILLED — PERSIST ===
@@ -918,24 +918,27 @@ export class ExecutionService implements IExecutionEngine {
   }
 
   private async handleSingleLeg(
-    pairId: string,
-    primaryLeg: string,
-    primaryOrderId: string,
-    primaryOrder: OrderResult,
-    primarySide: string,
-    secondarySide: string,
-    primaryPrice: Decimal,
-    secondaryPrice: Decimal,
-    primarySize: number,
-    secondarySize: number,
-    enriched: EnrichedOpportunity,
-    opportunity: RankedOpportunity,
-    _reservation: BudgetReservation,
-    errorCode: number,
-    errorMessage: string,
-    isPaper: boolean,
-    mixedMode: boolean,
+    context: SingleLegContext,
   ): Promise<ExecutionResult> {
+    const {
+      pairId,
+      primaryLeg,
+      primaryOrderId,
+      primaryOrder,
+      primarySide,
+      secondarySide,
+      primaryPrice,
+      secondaryPrice,
+      primarySize,
+      secondarySize,
+      enriched,
+      opportunity,
+      errorCode,
+      errorMessage,
+      isPaper,
+      mixedMode,
+    } = context;
+
     const kalshiSide = primaryLeg === 'kalshi' ? primarySide : secondarySide;
     const polymarketSide =
       primaryLeg === 'kalshi' ? secondarySide : primarySide;

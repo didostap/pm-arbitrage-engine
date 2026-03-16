@@ -39,6 +39,10 @@ export class ContractPairDto {
   @IsOptional()
   @IsEnum(PrimaryLeg)
   primaryLeg?: PrimaryLeg = PrimaryLeg.KALSHI;
+
+  @IsOptional()
+  @IsISO8601()
+  resolutionDate?: string;
 }
 
 // Sprint 0 scope: schema + validation logic only. Startup wiring (loading contract-pairs.yaml,

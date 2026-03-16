@@ -111,6 +111,7 @@ export class MatchApprovalController {
       const match = await this.matchApprovalService.approveMatch(
         matchId,
         dto.rationale,
+        dto.resolutionDate,
       );
       return {
         data: {

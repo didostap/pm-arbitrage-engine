@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- vitest expect.any() returns any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -22,6 +23,7 @@ import {
 import { PlatformApiError } from '../../common/errors/platform-api-error';
 import { KALSHI_ERROR_CODES } from '../../common/errors/platform-api-error';
 import { ExecutionLockService } from './execution-lock.service';
+import { PrismaService } from '../../common/prisma.service';
 import {
   createMockPlatformConnector,
   createMockRiskManager,
@@ -86,6 +88,7 @@ describe('PositionCloseService', () => {
   let riskManager: ReturnType<typeof createMockRiskManager>;
   let eventEmitter: Record<string, ReturnType<typeof vi.fn>>;
   let executionLockService: Record<string, ReturnType<typeof vi.fn>>;
+  let prisma: { openPosition: { update: ReturnType<typeof vi.fn> } };
 
   beforeEach(async () => {
     positionRepository = {
@@ -160,6 +163,12 @@ describe('PositionCloseService', () => {
       release: vi.fn(),
     };
 
+    prisma = {
+      openPosition: {
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PositionCloseService,
@@ -170,6 +179,7 @@ describe('PositionCloseService', () => {
         { provide: RISK_MANAGER_TOKEN, useValue: riskManager },
         { provide: EventEmitter2, useValue: eventEmitter },
         { provide: ExecutionLockService, useValue: executionLockService },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
 
@@ -190,10 +200,11 @@ describe('PositionCloseService', () => {
 
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBeDefined();
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        asPositionId('pos-1'),
-        'CLOSED',
-      );
+
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: { status: 'CLOSED', realizedPnl: expect.any(Decimal) },
+      });
       expect(riskManager.closePosition).toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.EXIT_TRIGGERED,
@@ -463,10 +474,10 @@ describe('PositionCloseService', () => {
 
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBe('0.00000000');
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        asPositionId('pos-1'),
-        'CLOSED',
-      );
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: { status: 'CLOSED', realizedPnl: 0 },
+      });
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),
         new Decimal(0),
@@ -799,6 +810,95 @@ describe('PositionCloseService', () => {
       };
       expect(batchEvent.results[0].status).toBe('failure');
       expect(batchEvent.results[0].error).toContain('not in a closeable state');
+    });
+  });
+
+  describe('realizedPnl persistence', () => {
+    it('should persist realizedPnl to DB on full exit', async () => {
+      const position = createMockPosition();
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(position)
+        .mockResolvedValueOnce(position);
+
+      await service.closePosition(asPositionId('pos-1'));
+
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: {
+          status: 'CLOSED',
+          realizedPnl: expect.any(Decimal),
+        },
+      });
+      // Verify realizedPnl is a Decimal with 8 decimal places
+      const callArgs = prisma.openPosition.update.mock.calls[0]![0] as {
+        data: { realizedPnl: Decimal };
+      };
+      expect(callArgs.data.realizedPnl.decimalPlaces()).toBeLessThanOrEqual(8);
+    });
+
+    it('should persist realizedPnl=0 on zero-residual EXIT_PARTIAL close', async () => {
+      const position = createMockPosition({ status: 'EXIT_PARTIAL' });
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(position)
+        .mockResolvedValueOnce(position);
+
+      // Exit orders (different IDs from entry) that exactly match entry fills → zero residual
+      orderRepository.findByPairId!.mockResolvedValue([
+        {
+          orderId: asOrderId('exit-kalshi-1'),
+          platform: 'KALSHI',
+          side: 'sell',
+          fillPrice: new Decimal('0.66'),
+          fillSize: new Decimal('100'),
+        },
+        {
+          orderId: asOrderId('exit-poly-1'),
+          platform: 'POLYMARKET',
+          side: 'buy',
+          fillPrice: new Decimal('0.62'),
+          fillSize: new Decimal('100'),
+        },
+      ]);
+
+      const result = await service.closePosition(asPositionId('pos-1'));
+      expect(result.success).toBe(true);
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: { status: 'CLOSED', realizedPnl: 0 },
+      });
+    });
+
+    it('should NOT persist realizedPnl on partial exit (EXIT_PARTIAL status)', async () => {
+      const position = createMockPosition();
+      positionRepository
+        .findByIdWithOrders!.mockResolvedValueOnce(position)
+        .mockResolvedValueOnce(position);
+
+      // Partial fills on both legs
+      kalshiConnector.submitOrder.mockResolvedValue({
+        orderId: asOrderId('kalshi-close-1'),
+        status: 'partial',
+        filledPrice: 0.66,
+        filledQuantity: 50, // only 50 of 100 filled
+        timestamp: new Date(),
+      });
+      polymarketConnector.submitOrder.mockResolvedValue({
+        orderId: asOrderId('poly-close-1'),
+        status: 'partial',
+        filledPrice: 0.62,
+        filledQuantity: 50,
+        timestamp: new Date(),
+      });
+
+      const result = await service.closePosition(asPositionId('pos-1'));
+      expect(result.success).toBe(true);
+      // updateStatus is called with EXIT_PARTIAL — no realizedPnl persisted
+      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+        asPositionId('pos-1'),
+        'EXIT_PARTIAL',
+      );
+      // prisma.openPosition.update should NOT be called for partial exit
+      expect(prisma.openPosition.update).not.toHaveBeenCalled();
     });
   });
 });

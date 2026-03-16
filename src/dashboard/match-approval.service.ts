@@ -146,6 +146,7 @@ export class MatchApprovalService {
   async approveMatch(
     matchId: string,
     rationale: string,
+    resolutionDate?: string,
   ): Promise<MatchSummaryDto> {
     const result = await this.prisma.contractMatch.updateMany({
       where: { matchId, operatorApproved: false },
@@ -153,6 +154,9 @@ export class MatchApprovalService {
         operatorApproved: true,
         operatorRationale: rationale,
         operatorApprovalTimestamp: new Date(),
+        ...(resolutionDate !== undefined
+          ? { resolutionDate: new Date(resolutionDate) }
+          : {}),
       },
     });
 

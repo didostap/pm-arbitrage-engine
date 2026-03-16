@@ -384,18 +384,24 @@ export class DashboardService {
               });
             }
 
-            // Compute realized P&L for closed positions
+            // Realized P&L for closed positions: prefer DB-persisted value, fall back to computation
             let realizedPnl: string | null = null;
             let exitType: string | null = null;
 
             if (pos.status === 'CLOSED') {
               exitType = exitTypeByPairId.get(pos.pairId) ?? null;
-              realizedPnl = this.computeRealizedPnl(
-                pos,
-                (ordersByPairId.get(pos.pairId) ?? []).filter(
-                  (o): o is NonNullable<typeof o> => o !== null,
-                ),
-              );
+              if (pos.realizedPnl !== null && pos.realizedPnl !== undefined) {
+                realizedPnl = new Decimal(pos.realizedPnl.toString()).toFixed(
+                  8,
+                );
+              } else {
+                realizedPnl = this.computeRealizedPnl(
+                  pos,
+                  (ordersByPairId.get(pos.pairId) ?? []).filter(
+                    (o): o is NonNullable<typeof o> => o !== null,
+                  ),
+                );
+              }
             }
 
             return {
@@ -496,7 +502,10 @@ export class DashboardService {
         timeToResolution: enrichment.data.timeToResolution,
         isPaper: pos.isPaper,
         status: pos.status,
-        realizedPnl: null,
+        realizedPnl:
+          pos.realizedPnl !== null && pos.realizedPnl !== undefined
+            ? new Decimal(pos.realizedPnl.toString()).toFixed(8)
+            : null,
         exitType: null,
         projectedSlPnl: enrichment.data.projectedSlPnl ?? null,
         projectedTpPnl: enrichment.data.projectedTpPnl ?? null,
@@ -676,6 +685,12 @@ export class DashboardService {
         currentPrices: enrichment.data.currentPrices,
         currentEdge: enrichment.data.currentEdge,
         unrealizedPnl: enrichment.data.unrealizedPnl,
+        realizedPnl:
+          pos.realizedPnl !== null && pos.realizedPnl !== undefined
+            ? new Decimal(pos.realizedPnl.toString()).toFixed(8)
+            : pos.status === 'CLOSED'
+              ? this.computeRealizedPnl(pos, allOrders)
+              : null,
         timeHeld,
         entryReasoning,
         exitType,

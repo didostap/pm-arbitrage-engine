@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- vitest expect.any() returns any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import Decimal from 'decimal.js';
 import { SingleLegResolutionService } from './single-leg-resolution.service';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
@@ -78,6 +80,7 @@ describe('SingleLegResolutionService', () => {
   let polymarketConnector: ReturnType<typeof createMockPlatformConnector>;
   let riskManager: ReturnType<typeof createMockRiskManager>;
   let eventEmitter: Record<string, ReturnType<typeof vi.fn>>;
+  let prisma: { openPosition: { update: ReturnType<typeof vi.fn> } };
 
   beforeEach(async () => {
     positionRepository = {
@@ -126,7 +129,15 @@ describe('SingleLegResolutionService', () => {
         SingleLegResolutionService,
         { provide: PositionRepository, useValue: positionRepository },
         { provide: OrderRepository, useValue: orderRepository },
-        { provide: PrismaService, useValue: {} },
+        {
+          provide: PrismaService,
+          useFactory: () => {
+            prisma = {
+              openPosition: { update: vi.fn().mockResolvedValue({}) },
+            };
+            return prisma;
+          },
+        },
         { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
         { provide: POLYMARKET_CONNECTOR_TOKEN, useValue: polymarketConnector },
         { provide: RISK_MANAGER_TOKEN, useValue: riskManager },
@@ -388,11 +399,12 @@ describe('SingleLegResolutionService', () => {
         }),
       );
 
-      // Position should be updated to CLOSED
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
-        asPositionId('pos-1'),
-        'CLOSED',
-      );
+      // Position should be updated to CLOSED with realizedPnl
+
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: { status: 'CLOSED', realizedPnl: expect.any(Decimal) },
+      });
 
       // Risk manager should be called to close position
       expect(riskManager.closePosition).toHaveBeenCalled();
@@ -620,6 +632,50 @@ describe('SingleLegResolutionService', () => {
 
       expect(result.success).toBe(true);
       expect(result.closeOrderId).toBe('order-close-exit');
+    });
+  });
+
+  describe('realizedPnl persistence', () => {
+    it('should persist realizedPnl to DB via prisma.openPosition.update on closeLeg', async () => {
+      const position = createMockPosition();
+      positionRepository.findByIdWithPair?.mockResolvedValue(position);
+      orderRepository.findById?.mockResolvedValue(createMockOrder());
+
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [{ price: 0.43, quantity: 500 }],
+        asks: [{ price: 0.47, quantity: 500 }],
+        timestamp: new Date(),
+      });
+      kalshiConnector.submitOrder.mockResolvedValue({
+        orderId: asOrderId('order-close-1'),
+        status: 'filled',
+        filledPrice: 0.43,
+        filledQuantity: 200,
+        timestamp: new Date(),
+      });
+      orderRepository.create?.mockResolvedValue({
+        orderId: asOrderId('order-close-1'),
+      });
+
+      const result = await service.closeLeg(asPositionId('pos-1'));
+
+      expect(result.success).toBe(true);
+      expect(result.realizedPnl).toBeDefined();
+
+      expect(prisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: asPositionId('pos-1') },
+        data: {
+          status: 'CLOSED',
+          realizedPnl: expect.any(Decimal),
+        },
+      });
+      // Verify decimal precision
+      const callArgs = prisma.openPosition.update.mock.calls[0]![0] as {
+        data: { realizedPnl: Decimal };
+      };
+      expect(callArgs.data.realizedPnl.decimalPlaces()).toBeLessThanOrEqual(8);
     });
   });
 });

@@ -170,6 +170,14 @@ export class PositionFullDetailDto {
   unrealizedPnl!: string | null;
 
   @ApiPropertyOptional({
+    description:
+      'Realized P&L in USD for closed positions (decimal string, null for open)',
+    type: String,
+    nullable: true,
+  })
+  realizedPnl!: string | null;
+
+  @ApiPropertyOptional({
     description: 'Time held since entry (human-readable)',
     type: String,
     nullable: true,

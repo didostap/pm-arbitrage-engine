@@ -207,11 +207,32 @@ describe('MatchApprovalController', () => {
       expect(service.approveMatch).toHaveBeenCalledWith(
         'match-1',
         'Good match',
+        undefined,
       );
       expect(result.data.matchId).toBe('match-1');
       expect(result.data.status).toBe('approved');
       expect(result.data.operatorRationale).toBe('Good match');
       expect(result.timestamp).toBeDefined();
+    });
+
+    it('should pass resolutionDate to service when provided', async () => {
+      const approved = buildMatchDto({
+        operatorApproved: true,
+        operatorRationale: 'Good match',
+        resolutionDate: '2026-06-30T00:00:00.000Z',
+      });
+      service.approveMatch.mockResolvedValue(approved);
+
+      await controller.approveMatch('match-1', {
+        rationale: 'Good match',
+        resolutionDate: '2026-06-30T00:00:00Z',
+      });
+
+      expect(service.approveMatch).toHaveBeenCalledWith(
+        'match-1',
+        'Good match',
+        '2026-06-30T00:00:00Z',
+      );
     });
 
     it('should propagate 409 from service', async () => {

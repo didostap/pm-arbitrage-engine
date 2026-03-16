@@ -401,4 +401,82 @@ describe('ContractMatchSyncService', () => {
       }),
     );
   });
+
+  describe('resolutionDate sync', () => {
+    it('should include resolutionDate in create when pair has resolutionDate', async () => {
+      const pair = makePair({
+        resolutionDate: new Date('2026-06-30T00:00:00Z'),
+      });
+      pairLoader.getYamlPairs.mockReturnValue([pair]);
+
+      await service.syncPairsToDatabase();
+
+      expect(prisma.contractMatch.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            resolutionDate: new Date('2026-06-30T00:00:00Z'),
+          }),
+        }),
+      );
+    });
+
+    it('should set resolutionDate to null in create when pair omits resolutionDate', async () => {
+      const pair = makePair(); // no resolutionDate set
+      pairLoader.getYamlPairs.mockReturnValue([pair]);
+
+      await service.syncPairsToDatabase();
+
+      expect(prisma.contractMatch.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            resolutionDate: null,
+          }),
+        }),
+      );
+    });
+
+    it('should include resolutionDate in update when pair has resolutionDate', async () => {
+      const pair = makePair({
+        resolutionDate: new Date('2026-06-30T00:00:00Z'),
+      });
+      pairLoader.getYamlPairs.mockReturnValue([pair]);
+
+      await service.syncPairsToDatabase();
+
+      expect(prisma.contractMatch.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            resolutionDate: new Date('2026-06-30T00:00:00Z'),
+          }),
+        }),
+      );
+    });
+
+    it('should NOT include resolutionDate in update when pair omits field (preserves DB value)', async () => {
+      const pair = makePair(); // resolutionDate is undefined
+      pairLoader.getYamlPairs.mockReturnValue([pair]);
+
+      await service.syncPairsToDatabase();
+
+      const upsertCall = prisma.contractMatch.upsert.mock.calls[0]![0] as {
+        update: Record<string, unknown>;
+      };
+      expect(upsertCall.update).not.toHaveProperty('resolutionDate');
+    });
+
+    it('should set resolutionDate to null in update when pair explicitly specifies null (clears DB value)', async () => {
+      const pair = makePair({ resolutionDate: null });
+      pairLoader.getYamlPairs.mockReturnValue([pair]);
+
+      await service.syncPairsToDatabase();
+
+      expect(prisma.contractMatch.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            resolutionDate: null,
+          }),
+        }),
+      );
+    });
+  });
 });
