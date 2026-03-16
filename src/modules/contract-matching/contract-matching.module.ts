@@ -12,6 +12,8 @@ import { LlmScoringStrategy } from './llm-scoring.strategy.js';
 import { ConfidenceScorerService } from './confidence-scorer.service.js';
 import { CatalogSyncService } from './catalog-sync.service.js';
 import { CandidateDiscoveryService } from './candidate-discovery.service.js';
+import { OutcomeDirectionValidator } from './outcome-direction-validator.js';
+import { AuditRevalidationService } from './audit-revalidation.command.js';
 import { ResolutionPollerService } from './resolution-poller.service.js';
 import { CalibrationService } from './calibration.service.js';
 import { CalibrationController } from './calibration.controller.js';
@@ -36,6 +38,8 @@ export { SCORING_STRATEGY_TOKEN };
     },
     ConfidenceScorerService,
     CatalogSyncService,
+    OutcomeDirectionValidator,
+    AuditRevalidationService,
     CandidateDiscoveryService,
     ResolutionPollerService,
     CalibrationService,

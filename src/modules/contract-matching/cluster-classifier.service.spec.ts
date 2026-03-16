@@ -33,7 +33,7 @@ describe('ClusterClassifierService', () => {
       create: ReturnType<typeof vi.fn>;
     };
     clusterTagMapping: {
-      findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
     };
     contractMatch: {
@@ -62,7 +62,7 @@ describe('ClusterClassifierService', () => {
         create: vi.fn(),
       },
       clusterTagMapping: {
-        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
       },
       contractMatch: {
@@ -147,17 +147,15 @@ describe('ClusterClassifierService', () => {
         slug: 'economics',
       };
 
-      // First call for kalshi category
-      prisma.clusterTagMapping.findFirst
-        .mockResolvedValueOnce({
-          clusterId: 'econ-id',
-          cluster: economicsCluster,
-        })
-        // Second call for polymarket category
-        .mockResolvedValueOnce({
-          clusterId: 'econ-id',
-          cluster: economicsCluster,
-        });
+      // First findMany for kalshi category → single unambiguous mapping
+      prisma.clusterTagMapping.findMany
+        .mockResolvedValueOnce([
+          { clusterId: 'econ-id', cluster: economicsCluster },
+        ])
+        // Second findMany for polymarket category → same cluster
+        .mockResolvedValueOnce([
+          { clusterId: 'econ-id', cluster: economicsCluster },
+        ]);
 
       const result = await service.classifyMatch(
         'Federal Reserve',
@@ -170,20 +168,22 @@ describe('ClusterClassifierService', () => {
       expect(result.clusterName).toBe('Economics');
     });
 
-    it('should use fast-path when only one side has a mapping', async () => {
-      const politicsCluster = {
-        id: 'politics-id',
-        name: 'US Politics',
-        slug: 'us-politics',
-      };
+    it('should fall through to LLM when only one side has a mapping', async () => {
+      // One-sided mappings should NOT fast-path (prevents snowballing)
+      prisma.clusterTagMapping.findMany
+        .mockResolvedValueOnce([]) // kalshi: no mapping (category is null)
+        .mockResolvedValueOnce([
+          {
+            clusterId: 'politics-id',
+            cluster: {
+              id: 'politics-id',
+              name: 'US Politics',
+              slug: 'us-politics',
+            },
+          },
+        ]); // poly: has mapping
 
-      // kalshiCategory is null → kalshi lookup skipped entirely
-      // Only polymarket lookup fires → returns the mapping
-      prisma.clusterTagMapping.findFirst.mockResolvedValueOnce({
-        clusterId: 'politics-id',
-        cluster: politicsCluster,
-      });
-
+      // LLM call will fail with default mocks → Uncategorized fallback
       const result = await service.classifyMatch(
         'Elections',
         null,
@@ -191,29 +191,66 @@ describe('ClusterClassifierService', () => {
         'Presidential election outcome',
       );
 
-      expect(result.clusterId).toBe(asClusterId('politics-id'));
-      expect(result.clusterName).toBe('US Politics');
+      // Should NOT return US Politics — should fall to LLM (which fails → Uncategorized)
+      expect(result.clusterId).toBe(asClusterId('uncategorized-id'));
+      expect(result.clusterName).toBe('Uncategorized');
     });
 
     it('should fall through to LLM when both sides map to different clusters', async () => {
-      prisma.clusterTagMapping.findFirst
-        .mockResolvedValueOnce({
-          clusterId: 'econ-id',
-          cluster: { id: 'econ-id', name: 'Economics', slug: 'economics' },
-        })
-        .mockResolvedValueOnce({
-          clusterId: 'politics-id',
-          cluster: {
-            id: 'politics-id',
-            name: 'US Politics',
-            slug: 'us-politics',
+      prisma.clusterTagMapping.findMany
+        .mockResolvedValueOnce([
+          {
+            clusterId: 'econ-id',
+            cluster: { id: 'econ-id', name: 'Economics', slug: 'economics' },
           },
-        });
+        ])
+        .mockResolvedValueOnce([
+          {
+            clusterId: 'politics-id',
+            cluster: {
+              id: 'politics-id',
+              name: 'US Politics',
+              slug: 'us-politics',
+            },
+          },
+        ]);
 
       // LLM call will fail with default mocks → Uncategorized fallback
       const result = await service.classifyMatch(
         'Tags',
         'Category',
+        'desc1',
+        'desc2',
+      );
+
+      expect(result.clusterId).toBe(asClusterId('uncategorized-id'));
+      expect(result.clusterName).toBe('Uncategorized');
+    });
+
+    it('should fall through to LLM when category maps to multiple clusters (ambiguous)', async () => {
+      // "Sports" maps to both FIFA and Boxing → ambiguous → LLM
+      prisma.clusterTagMapping.findMany
+        .mockResolvedValueOnce([
+          {
+            clusterId: 'fifa-id',
+            cluster: { id: 'fifa-id', name: 'FIFA', slug: 'fifa' },
+          },
+          {
+            clusterId: 'boxing-id',
+            cluster: { id: 'boxing-id', name: 'Boxing', slug: 'boxing' },
+          },
+        ]) // kalshi "Sports" → 2 clusters
+        .mockResolvedValueOnce([
+          {
+            clusterId: 'fifa-id',
+            cluster: { id: 'fifa-id', name: 'FIFA', slug: 'fifa' },
+          },
+        ]); // poly → single cluster
+
+      // LLM call will fail with default mocks → Uncategorized fallback
+      const result = await service.classifyMatch(
+        'Soccer',
+        'Sports',
         'desc1',
         'desc2',
       );

@@ -18,6 +18,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { SchedulerRegistry } from '@nestjs/schedule';
 import type { PrismaService } from '../../common/prisma.service';
 import { asClusterId } from '../../common/types/branded.type';
+import type { OutcomeDirectionValidator } from './outcome-direction-validator';
 
 vi.mock('../../common/services/correlation-context', () => ({
   withCorrelationId: <T>(fn: () => Promise<T>) => fn(),
@@ -58,6 +59,7 @@ describe('CandidateDiscoveryService', () => {
   let preFilter: { filterCandidates: ReturnType<typeof vi.fn> };
   let scoringStrategy: IScoringStrategy;
   let clusterClassifier: IClusterClassifier;
+  let directionValidator: { validateDirection: ReturnType<typeof vi.fn> };
   let prisma: {
     contractMatch: {
       findFirst: ReturnType<typeof vi.fn>;
@@ -86,6 +88,12 @@ describe('CandidateDiscoveryService', () => {
     catalogSync = { syncCatalogs: vi.fn() };
     preFilter = { filterCandidates: vi.fn() };
     scoringStrategy = { scoreMatch: vi.fn() };
+    directionValidator = {
+      validateDirection: vi.fn().mockResolvedValue({
+        aligned: null,
+        reason: 'Labels missing — skipping validation',
+      }),
+    };
     clusterClassifier = {
       classifyMatch: vi.fn().mockResolvedValue({
         clusterId: asClusterId('test-cluster-id'),
@@ -120,6 +128,7 @@ describe('CandidateDiscoveryService', () => {
       preFilter as unknown as PreFilterService,
       scoringStrategy,
       clusterClassifier,
+      directionValidator as unknown as OutcomeDirectionValidator,
       prisma as unknown as PrismaService,
       eventEmitter as unknown as EventEmitter2,
       configService,
@@ -143,6 +152,7 @@ describe('CandidateDiscoveryService', () => {
         preFilter as unknown as PreFilterService,
         scoringStrategy,
         clusterClassifier,
+        directionValidator as unknown as OutcomeDirectionValidator,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -167,6 +177,7 @@ describe('CandidateDiscoveryService', () => {
         preFilter as unknown as PreFilterService,
         scoringStrategy,
         clusterClassifier,
+        directionValidator as unknown as OutcomeDirectionValidator,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -196,6 +207,7 @@ describe('CandidateDiscoveryService', () => {
         preFilter as unknown as PreFilterService,
         scoringStrategy,
         clusterClassifier,
+        directionValidator as unknown as OutcomeDirectionValidator,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -869,6 +881,7 @@ describe('CandidateDiscoveryService', () => {
           preFilter as unknown as PreFilterService,
           scoringStrategy,
           clusterClassifier,
+          directionValidator as unknown as OutcomeDirectionValidator,
           prisma as unknown as PrismaService,
           eventEmitter as unknown as EventEmitter2,
           configService,
@@ -1023,6 +1036,7 @@ describe('CandidateDiscoveryService', () => {
           preFilter as unknown as PreFilterService,
           scoringStrategy,
           clusterClassifier,
+          directionValidator as unknown as OutcomeDirectionValidator,
           prisma as unknown as PrismaService,
           eventEmitter as unknown as EventEmitter2,
           configService,
@@ -1223,6 +1237,7 @@ describe('CandidateDiscoveryService', () => {
         preFilter as unknown as PreFilterService,
         scoringStrategy,
         clusterClassifier,
+        directionValidator as unknown as OutcomeDirectionValidator,
         prisma as unknown as PrismaService,
         eventEmitter as unknown as EventEmitter2,
         configService,
@@ -1236,6 +1251,118 @@ describe('CandidateDiscoveryService', () => {
       // Reset
       configValues['LLM_MIN_REVIEW_THRESHOLD'] = 40;
       configValues['LLM_AUTO_APPROVE_THRESHOLD'] = 85;
+    });
+  });
+
+  describe('outcome direction validation gate', () => {
+    const polyContracts = [
+      makeContract(PlatformId.POLYMARKET, 'P1', {
+        outcomeLabel: 'Fighter A wins',
+        outcomeTokens: [
+          { tokenId: 'token-a', outcomeLabel: 'Fighter A wins' },
+          { tokenId: 'token-b', outcomeLabel: 'Fighter B wins' },
+        ],
+      }),
+    ];
+    const kalshiContracts = [
+      makeContract(PlatformId.KALSHI, 'K1', {
+        outcomeLabel: 'Fighter B wins',
+      }),
+    ];
+
+    beforeEach(() => {
+      catalogSync.syncCatalogs.mockResolvedValue(
+        new Map([
+          [PlatformId.POLYMARKET, polyContracts],
+          [PlatformId.KALSHI, kalshiContracts],
+        ]),
+      );
+      preFilter.filterCandidates
+        .mockReturnValueOnce([
+          {
+            id: 'K1',
+            description: 'Title K1',
+            combinedScore: 0.5,
+            tfidfScore: 0.4,
+            keywordOverlap: 0.6,
+          },
+        ])
+        .mockReturnValue([]);
+      (
+        scoringStrategy.scoreMatch as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeScoringResult(90));
+    });
+
+    it('should block auto-approval when direction is mismatched', async () => {
+      directionValidator.validateDirection.mockResolvedValue({
+        aligned: false,
+        reason: 'No aligning token found',
+      });
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: false,
+          confidenceScore: 50,
+          divergenceNotes: expect.stringContaining('Direction mismatch'),
+        }),
+      });
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.MATCH_AUTO_APPROVED,
+        expect.anything(),
+      );
+    });
+
+    it('should apply self-correction when validator provides correctedTokenId', async () => {
+      directionValidator.validateDirection.mockResolvedValue({
+        aligned: true,
+        correctedTokenId: 'token-b',
+        correctedLabel: 'Fighter B wins',
+        reason: 'Self-corrected: swapped token',
+      });
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          polymarketClobTokenId: 'token-b',
+          operatorApproved: true,
+          polymarketOutcomeLabel: 'Fighter B wins',
+        }),
+      });
+    });
+
+    it('should proceed normally when aligned=null (labels missing)', async () => {
+      directionValidator.validateDirection.mockResolvedValue({
+        aligned: null,
+        reason: 'Labels missing',
+      });
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          operatorApproved: true,
+          confidenceScore: 90,
+        }),
+      });
+    });
+
+    it('should persist outcome labels in ContractMatch creation', async () => {
+      directionValidator.validateDirection.mockResolvedValue({
+        aligned: true,
+        reason: 'Substring match',
+      });
+
+      await service.runDiscovery();
+
+      expect(prisma.contractMatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          polymarketOutcomeLabel: 'Fighter A wins',
+          kalshiOutcomeLabel: 'Fighter B wins',
+        }),
+      });
     });
   });
 });

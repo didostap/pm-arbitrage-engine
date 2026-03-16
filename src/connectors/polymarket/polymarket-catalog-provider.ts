@@ -4,6 +4,7 @@ import type {
   IContractCatalogProvider,
   ContractSummary,
   ResolutionOutcome,
+  OutcomeToken,
 } from '../../common/interfaces/contract-catalog-provider.interface.js';
 import { PlatformId } from '../../common/types/platform.type.js';
 import { PlatformApiError } from '../../common/errors/platform-api-error.js';
@@ -22,6 +23,7 @@ interface PolymarketMarket {
   description?: string;
   endDate?: string;
   clobTokenIds?: string;
+  outcomes?: string;
 }
 
 interface PolymarketEvent {
@@ -161,6 +163,10 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
     market: PolymarketMarket,
   ): ContractSummary {
     const clobTokenIds = JSON.parse(market.clobTokenIds ?? '[]') as string[];
+    const outcomeTokens = this.parseOutcomeTokens(
+      market.outcomes,
+      clobTokenIds,
+    );
 
     return {
       contractId: market.conditionId,
@@ -171,7 +177,44 @@ export class PolymarketCatalogProvider implements IContractCatalogProvider {
       category: event.tags?.[0]?.label,
       settlementDate: market.endDate ? new Date(market.endDate) : undefined,
       clobTokenId: clobTokenIds[0],
+      outcomeLabel: outcomeTokens?.[0]?.outcomeLabel,
+      outcomeTokens,
       platform: PlatformId.POLYMARKET,
     };
+  }
+
+  private parseOutcomeTokens(
+    outcomesJson: string | undefined,
+    clobTokenIds: string[],
+  ): OutcomeToken[] | undefined {
+    if (!outcomesJson) return undefined;
+
+    let outcomes: string[];
+    try {
+      outcomes = JSON.parse(outcomesJson) as string[];
+    } catch {
+      this.logger.warn({
+        message: 'Failed to parse outcomes JSON',
+        data: { outcomesJson },
+      });
+      return undefined;
+    }
+
+    if (!Array.isArray(outcomes) || outcomes.length === 0) return undefined;
+    if (outcomes.length !== clobTokenIds.length) {
+      this.logger.warn({
+        message: 'Outcomes/clobTokenIds array length mismatch',
+        data: {
+          outcomesLength: outcomes.length,
+          clobTokenIdsLength: clobTokenIds.length,
+        },
+      });
+      return undefined;
+    }
+
+    return outcomes.map((label, i) => ({
+      tokenId: clobTokenIds[i]!,
+      outcomeLabel: label,
+    }));
   }
 }

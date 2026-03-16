@@ -297,6 +297,85 @@ describe('KalshiCatalogProvider', () => {
     );
   });
 
+  describe('outcomeLabel extraction', () => {
+    it('should set outcomeLabel from yes_sub_title', async () => {
+      mockGetEvents.mockResolvedValueOnce({
+        data: {
+          events: [
+            {
+              event_ticker: 'UFC-1',
+              title: 'UFC Fight Night',
+              markets: [
+                {
+                  ticker: 'FIGHTER-A',
+                  event_ticker: 'UFC-1',
+                  title: '',
+                  yes_sub_title: 'Sam Patterson wins',
+                  status: 'open',
+                },
+              ],
+            },
+          ],
+          cursor: '',
+        },
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.outcomeLabel).toBe('Sam Patterson wins');
+    });
+
+    it('should leave outcomeLabel undefined when yes_sub_title is absent', async () => {
+      mockGetEvents.mockResolvedValueOnce({
+        data: {
+          events: [
+            {
+              event_ticker: 'EVT-NO-YST',
+              title: 'Some Event',
+              markets: [
+                {
+                  ticker: 'MKT-1',
+                  event_ticker: 'EVT-NO-YST',
+                  title: '',
+                  status: 'open',
+                },
+              ],
+            },
+          ],
+          cursor: '',
+        },
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.outcomeLabel).toBeUndefined();
+    });
+
+    it('should treat empty string yes_sub_title as absent', async () => {
+      mockGetEvents.mockResolvedValueOnce({
+        data: {
+          events: [
+            {
+              event_ticker: 'EVT-EMPTY',
+              title: 'Empty YST',
+              markets: [
+                {
+                  ticker: 'MKT-EMPTY',
+                  event_ticker: 'EVT-EMPTY',
+                  title: '',
+                  yes_sub_title: '',
+                  status: 'open',
+                },
+              ],
+            },
+          ],
+          cursor: '',
+        },
+      });
+
+      const result = await provider.listActiveContracts();
+      expect(result[0]!.outcomeLabel).toBeUndefined();
+    });
+  });
+
   describe('settlementDate fallback chain', () => {
     let warnSpy: ReturnType<typeof vi.spyOn>;
 

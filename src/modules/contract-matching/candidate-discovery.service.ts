@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CronJob } from 'cron';
 import { CatalogSyncService } from './catalog-sync.service.js';
 import { PreFilterService } from './pre-filter.service.js';
+import { OutcomeDirectionValidator } from './outcome-direction-validator.js';
 import { SCORING_STRATEGY_TOKEN } from '../../common/interfaces/scoring-strategy.interface.js';
 import type { IScoringStrategy } from '../../common/interfaces/scoring-strategy.interface.js';
 import { CLUSTER_CLASSIFIER_TOKEN } from '../../common/interfaces/cluster-classifier.interface.js';
@@ -64,6 +65,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
     private readonly scoringStrategy: IScoringStrategy,
     @Inject(CLUSTER_CLASSIFIER_TOKEN)
     private readonly clusterClassifier: IClusterClassifier,
+    private readonly directionValidator: OutcomeDirectionValidator,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
@@ -309,19 +311,64 @@ export class CandidateDiscoveryService implements OnModuleInit {
         },
       );
 
-      const isAutoApproved = result.score >= this.autoApproveThreshold;
-      const isBelowReviewThreshold = result.score < this.minReviewThreshold;
+      // Direction validation gate — runs before DB create
+      let effectiveScore = result.score;
+      let effectiveClobTokenId = polyContract.clobTokenId ?? null;
+      let effectivePolyLabel = polyContract.outcomeLabel ?? null;
+      let divergenceNotes: string | null = null;
+
+      const directionResult = await this.directionValidator.validateDirection(
+        polyContract,
+        kalshiContract,
+      );
+
+      if (directionResult.aligned === false) {
+        // Direction mismatch — cap score, force manual review
+        effectiveScore = Math.min(effectiveScore, 50);
+        divergenceNotes = `Direction mismatch: ${directionResult.reason}`;
+        this.logger.warn({
+          message: 'Outcome direction mismatch detected',
+          data: {
+            polyContractId: polyContract.contractId,
+            kalshiContractId: kalshiContract.contractId,
+            reason: directionResult.reason,
+            originalScore: result.score,
+            cappedScore: effectiveScore,
+          },
+        });
+      } else if (directionResult.correctedTokenId) {
+        // Self-corrected — swap token
+        effectiveClobTokenId = directionResult.correctedTokenId;
+        effectivePolyLabel =
+          directionResult.correctedLabel ?? effectivePolyLabel;
+        this.logger.log({
+          message: 'Outcome direction self-corrected',
+          data: {
+            polyContractId: polyContract.contractId,
+            kalshiContractId: kalshiContract.contractId,
+            correctedTokenId: directionResult.correctedTokenId,
+            reason: directionResult.reason,
+          },
+        });
+      }
+
+      const isAutoApproved =
+        effectiveScore >= this.autoApproveThreshold &&
+        directionResult.aligned !== false;
+      const isBelowReviewThreshold = effectiveScore < this.minReviewThreshold;
 
       const match = await this.prisma.contractMatch.create({
         data: {
           polymarketContractId: polyContract.contractId,
-          polymarketClobTokenId: polyContract.clobTokenId ?? null,
+          polymarketClobTokenId: effectiveClobTokenId,
           kalshiContractId: kalshiContract.contractId,
           polymarketDescription: polyContract.description,
           kalshiDescription: kalshiContract.description,
           polymarketRawCategory: polyContract.category ?? null,
           kalshiRawCategory: kalshiContract.category ?? null,
-          confidenceScore: result.score,
+          polymarketOutcomeLabel: effectivePolyLabel,
+          kalshiOutcomeLabel: kalshiContract.outcomeLabel ?? null,
+          confidenceScore: effectiveScore,
           resolutionDate:
             polyContract.settlementDate ??
             kalshiContract.settlementDate ??
@@ -330,10 +377,11 @@ export class CandidateDiscoveryService implements OnModuleInit {
           operatorApprovalTimestamp: isAutoApproved ? new Date() : null,
           primaryLeg: 'kalshi',
           operatorRationale: isAutoApproved
-            ? `Auto-approved by discovery pipeline (score: ${result.score}, model: ${result.model}, escalated: ${result.escalated})`
+            ? `Auto-approved by discovery pipeline (score: ${effectiveScore}, model: ${result.model}, escalated: ${result.escalated})`
             : isBelowReviewThreshold
-              ? `Auto-rejected: below review threshold (score: ${result.score}, threshold: ${this.minReviewThreshold})`
+              ? `Auto-rejected: below review threshold (score: ${effectiveScore}, threshold: ${this.minReviewThreshold})`
               : null,
+          divergenceNotes,
         },
       });
 

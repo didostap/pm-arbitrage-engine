@@ -115,6 +115,8 @@ model ContractMatch {
   resolutionTimestamp       DateTime? @map("resolution_timestamp") @db.Timestamptz
   resolutionDiverged        Boolean?  @map("resolution_diverged")
   divergenceNotes           String?   @map("divergence_notes")
+  polymarketOutcomeLabel    String?   @map("polymarket_outcome_label")
+  kalshiOutcomeLabel        String?   @map("kalshi_outcome_label")
   clusterId                 String?   @map("cluster_id")
   lastAnnualizedReturn      Decimal?  @map("last_annualized_return") @db.Decimal(20, 8)
   lastNetEdge               Decimal?  @map("last_net_edge") @db.Decimal(20, 8)

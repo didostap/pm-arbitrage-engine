@@ -160,6 +160,18 @@ export class MatchSummaryDto {
   resolutionDiverged!: boolean | null;
   @ApiProperty({ nullable: true, type: String })
   divergenceNotes!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Polymarket outcome label (e.g. "Fighter A wins")',
+  })
+  polymarketOutcomeLabel!: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Kalshi outcome label (e.g. "Fighter B wins")',
+  })
+  kalshiOutcomeLabel!: string | null;
   @ApiProperty({ nullable: true, type: String })
   polymarketRawCategory!: string | null;
   @ApiProperty({ nullable: true, type: String })

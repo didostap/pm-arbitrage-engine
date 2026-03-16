@@ -182,6 +182,7 @@ export class KalshiCatalogProvider implements IContractCatalogProvider {
       description: parts.join('\n'),
       category: event.category || event.series_ticker,
       settlementDate,
+      outcomeLabel: market.yes_sub_title || undefined,
       platform: PlatformId.KALSHI,
     };
   }

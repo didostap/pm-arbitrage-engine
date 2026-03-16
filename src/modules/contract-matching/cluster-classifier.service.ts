@@ -210,37 +210,43 @@ export class ClusterClassifierService
     polyCategory: string | null,
     kalshiCategory: string | null,
   ): Promise<ClusterAssignment | null> {
-    type MappingResult = {
+    type MappingRow = {
       clusterId: string;
       cluster: { id: string; name: string; slug: string };
-    } | null;
+    };
 
-    let kalshiMapping: MappingResult = null;
-    let polyMapping: MappingResult = null;
+    // Use findMany to detect ambiguous categories (one category → multiple clusters)
+    let kalshiMappings: MappingRow[] = [];
+    let polyMappings: MappingRow[] = [];
 
     if (kalshiCategory) {
-      kalshiMapping = await this.prisma.clusterTagMapping.findFirst({
+      kalshiMappings = await this.prisma.clusterTagMapping.findMany({
         where: { platform: 'kalshi', rawCategory: kalshiCategory },
         include: { cluster: true },
       });
     }
 
     if (polyCategory) {
-      polyMapping = await this.prisma.clusterTagMapping.findFirst({
+      polyMappings = await this.prisma.clusterTagMapping.findMany({
         where: { platform: 'polymarket', rawCategory: polyCategory },
         include: { cluster: true },
       });
     }
 
-    // Both mapped to same cluster → assign immediately
+    // Ambiguous category (maps to multiple clusters) → treat as unmapped
+    const kalshiUnique =
+      kalshiMappings.length === 1 ? kalshiMappings[0]! : null;
+    const polyUnique = polyMappings.length === 1 ? polyMappings[0]! : null;
+
+    // Both unambiguously mapped to same cluster → fast-path assign
     if (
-      kalshiMapping &&
-      polyMapping &&
-      kalshiMapping.clusterId === polyMapping.clusterId
+      kalshiUnique &&
+      polyUnique &&
+      kalshiUnique.clusterId === polyUnique.clusterId
     ) {
       return {
-        clusterId: asClusterId(kalshiMapping.clusterId),
-        clusterName: kalshiMapping.cluster.name,
+        clusterId: asClusterId(kalshiUnique.clusterId),
+        clusterName: kalshiUnique.cluster.name,
         rawCategories: [
           ...(kalshiCategory
             ? [{ platform: 'kalshi', rawCategory: kalshiCategory }]
@@ -253,55 +259,9 @@ export class ClusterClassifierService
       };
     }
 
-    // Both mapped to DIFFERENT clusters → conflict, fall through to LLM
-    if (kalshiMapping && polyMapping) {
-      return null;
-    }
-
-    // Only one side mapped → assign to that cluster, insert mapping for unmapped side
-    if (kalshiMapping && !polyMapping) {
-      if (polyCategory) {
-        await this.safeInsertTagMapping(
-          kalshiMapping.clusterId,
-          'polymarket',
-          polyCategory,
-        );
-      }
-      return {
-        clusterId: asClusterId(kalshiMapping.clusterId),
-        clusterName: kalshiMapping.cluster.name,
-        rawCategories: [
-          { platform: 'kalshi', rawCategory: kalshiCategory! },
-          ...(polyCategory
-            ? [{ platform: 'polymarket', rawCategory: polyCategory }]
-            : []),
-        ],
-        wasLlmClassified: false,
-      };
-    }
-
-    if (polyMapping && !kalshiMapping) {
-      if (kalshiCategory) {
-        await this.safeInsertTagMapping(
-          polyMapping.clusterId,
-          'kalshi',
-          kalshiCategory,
-        );
-      }
-      return {
-        clusterId: asClusterId(polyMapping.clusterId),
-        clusterName: polyMapping.cluster.name,
-        rawCategories: [
-          ...(kalshiCategory
-            ? [{ platform: 'kalshi', rawCategory: kalshiCategory }]
-            : []),
-          { platform: 'polymarket', rawCategory: polyCategory! },
-        ],
-        wasLlmClassified: false,
-      };
-    }
-
-    // Neither mapped → fall through to LLM
+    // All other cases (conflict, one-sided, ambiguous, neither mapped) → fall through to LLM.
+    // One-sided mappings are NOT propagated to avoid snowballing broad categories
+    // (e.g., "Sports" → FIFA should not auto-assign NHL, UFC, boxing to FIFA).
     return null;
   }
 

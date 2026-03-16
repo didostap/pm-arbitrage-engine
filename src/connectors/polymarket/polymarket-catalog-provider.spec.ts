@@ -215,6 +215,165 @@ describe('PolymarketCatalogProvider', () => {
     );
   });
 
+  describe('outcome parsing', () => {
+    it('should parse outcomes into outcomeTokens and set outcomeLabel', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'UFC Fight',
+            markets: [
+              {
+                conditionId: 'cond-fight',
+                question: 'Who will win?',
+                outcomes: '["Fighter A wins","Fighter B wins"]',
+                clobTokenIds: '["token-a","token-b"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      expect(contract.outcomeLabel).toBe('Fighter A wins');
+      expect(contract.outcomeTokens).toEqual([
+        { tokenId: 'token-a', outcomeLabel: 'Fighter A wins' },
+        { tokenId: 'token-b', outcomeLabel: 'Fighter B wins' },
+      ]);
+    });
+
+    it('should handle missing outcomes field gracefully', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'Simple Event',
+            markets: [
+              {
+                conditionId: 'cond-1',
+                question: 'Will X happen?',
+                clobTokenIds: '["token-yes","token-no"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      expect(contract.outcomeLabel).toBeUndefined();
+      expect(contract.outcomeTokens).toBeUndefined();
+    });
+
+    it('should handle malformed JSON in outcomes field', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'Bad Data',
+            markets: [
+              {
+                conditionId: 'cond-bad',
+                question: 'Will Y happen?',
+                outcomes: 'not-valid-json',
+                clobTokenIds: '["token-1"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      expect(contract.outcomeLabel).toBeUndefined();
+      expect(contract.outcomeTokens).toBeUndefined();
+      expect(contract.clobTokenId).toBe('token-1');
+    });
+
+    it('should handle mismatched outcomes/clobTokenIds array lengths', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'Mismatch',
+            markets: [
+              {
+                conditionId: 'cond-mismatch',
+                question: 'Will Z happen?',
+                outcomes: '["A","B","C"]',
+                clobTokenIds: '["token-1","token-2"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      // Should fall back gracefully — no outcomeTokens when lengths mismatch
+      expect(contract.outcomeTokens).toBeUndefined();
+      expect(contract.outcomeLabel).toBeUndefined();
+    });
+
+    it('should handle standard Yes/No outcomes', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'Binary Event',
+            markets: [
+              {
+                conditionId: 'cond-binary',
+                question: 'Will BTC hit $200k?',
+                outcomes: '["Yes","No"]',
+                clobTokenIds: '["token-yes","token-no"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      expect(contract.outcomeLabel).toBe('Yes');
+      expect(contract.outcomeTokens).toEqual([
+        { tokenId: 'token-yes', outcomeLabel: 'Yes' },
+        { tokenId: 'token-no', outcomeLabel: 'No' },
+      ]);
+    });
+
+    it('should handle empty outcomes array', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        okResponse([
+          {
+            id: 'event-1',
+            title: 'Empty',
+            markets: [
+              {
+                conditionId: 'cond-empty',
+                question: 'Will Q happen?',
+                outcomes: '[]',
+                clobTokenIds: '["token-1"]',
+              },
+            ],
+          },
+        ]),
+      );
+      fetchSpy.mockResolvedValueOnce(okResponse([]));
+
+      const result = await provider.listActiveContracts();
+      const contract = result[0]!;
+      expect(contract.outcomeLabel).toBeUndefined();
+      expect(contract.outcomeTokens).toBeUndefined();
+    });
+  });
+
   describe('getContractResolution', () => {
     it('should return yes when YES token has winner=true', async () => {
       fetchSpy.mockResolvedValueOnce(

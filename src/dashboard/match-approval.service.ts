@@ -322,6 +322,8 @@ export class MatchApprovalService {
       resolutionTimestamp: match.resolutionTimestamp?.toISOString() ?? null,
       resolutionDiverged: match.resolutionDiverged ?? null,
       divergenceNotes: match.divergenceNotes ?? null,
+      polymarketOutcomeLabel: match.polymarketOutcomeLabel ?? null,
+      kalshiOutcomeLabel: match.kalshiOutcomeLabel ?? null,
       polymarketRawCategory: match.polymarketRawCategory ?? null,
       kalshiRawCategory: match.kalshiRawCategory ?? null,
       firstTradedTimestamp: match.firstTradedTimestamp?.toISOString() ?? null,

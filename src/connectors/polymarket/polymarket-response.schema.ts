@@ -31,6 +31,7 @@ const polymarketMarketSchema = z
     description: z.string().optional(),
     endDate: z.string().optional(),
     clobTokenIds: z.string().optional(),
+    outcomes: z.string().optional(),
   })
   .passthrough();
 
