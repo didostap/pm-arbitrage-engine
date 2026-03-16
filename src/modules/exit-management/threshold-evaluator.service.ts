@@ -33,6 +33,10 @@ export interface ThresholdEvalInput {
   entryKalshiFeeRate?: Decimal | null;
   /** Fee rate as decimal fraction at entry close price for Polymarket (6.5.5i). Null for legacy positions. */
   entryPolymarketFeeRate?: Decimal | null;
+  /** Data source classification for exit pricing (Story 10.1). */
+  dataSource?: 'websocket' | 'polling' | 'stale_fallback';
+  /** Age of order book data in milliseconds (Story 10.1). */
+  dataFreshnessMs?: number;
 }
 
 export interface ThresholdEvalResult {
@@ -41,6 +45,8 @@ export interface ThresholdEvalResult {
   currentEdge: Decimal;
   currentPnl: Decimal;
   capturedEdgePercent: Decimal;
+  /** Data source classification passed through from input (Story 10.1). */
+  dataSource?: 'websocket' | 'polling' | 'stale_fallback';
 }
 
 @Injectable()
@@ -161,6 +167,7 @@ export class ThresholdEvaluatorService {
         currentEdge,
         currentPnl,
         capturedEdgePercent,
+        dataSource: params.dataSource,
       };
     }
 
@@ -176,6 +183,7 @@ export class ThresholdEvaluatorService {
         currentEdge,
         currentPnl,
         capturedEdgePercent,
+        dataSource: params.dataSource,
       };
     }
 
@@ -190,6 +198,7 @@ export class ThresholdEvaluatorService {
           currentEdge,
           currentPnl,
           capturedEdgePercent,
+          dataSource: params.dataSource,
         };
       }
     }
@@ -199,6 +208,7 @@ export class ThresholdEvaluatorService {
       currentEdge,
       currentPnl,
       capturedEdgePercent,
+      dataSource: params.dataSource,
     };
   }
 

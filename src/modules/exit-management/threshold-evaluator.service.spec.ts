@@ -659,4 +659,30 @@ describe('ThresholdEvaluatorService', () => {
       expect(result.currentPnl.gte(new Decimal('0.904'))).toBe(true);
     });
   });
+
+  describe('dataSource passthrough (Story 10.1)', () => {
+    it('should copy dataSource from input to result when websocket', () => {
+      const input = makeInput({
+        dataSource: 'websocket',
+        dataFreshnessMs: 5000,
+      });
+      const result = service.evaluate(input);
+      expect(result.dataSource).toBe('websocket');
+    });
+
+    it('should copy dataSource from input to result when stale_fallback', () => {
+      const input = makeInput({
+        dataSource: 'stale_fallback',
+        dataFreshnessMs: 90000,
+      });
+      const result = service.evaluate(input);
+      expect(result.dataSource).toBe('stale_fallback');
+    });
+
+    it('should have undefined dataSource when not provided in input', () => {
+      const input = makeInput();
+      const result = service.evaluate(input);
+      expect(result.dataSource).toBeUndefined();
+    });
+  });
 });

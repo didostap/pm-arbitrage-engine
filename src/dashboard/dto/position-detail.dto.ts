@@ -215,4 +215,41 @@ export class PositionFullDetailDto {
     type: CapitalBreakdownDto,
   })
   capitalBreakdown!: CapitalBreakdownDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Recalculated current market edge (decimal string, null if not yet computed)',
+    type: String,
+    nullable: true,
+  })
+  recalculatedEdge!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Edge delta since entry: recalculatedEdge - expectedEdge (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  edgeDelta!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Last recalculation timestamp (ISO 8601)',
+    type: String,
+    nullable: true,
+  })
+  lastRecalculatedAt!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Data source: websocket, polling, or stale_fallback',
+    type: String,
+    nullable: true,
+  })
+  dataSource!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Data freshness in milliseconds (null if unknown)',
+    type: Number,
+    nullable: true,
+  })
+  dataFreshnessMs!: number | null;
 }

@@ -35,6 +35,14 @@ function createMockPosition(overrides: Record<string, unknown> = {}) {
     createdAt: new Date('2026-03-01'),
     updatedAt: new Date('2026-03-04'),
     reconciliationContext: null,
+    entryClosePriceKalshi: null,
+    entryClosePricePolymarket: null,
+    entryKalshiFeeRate: null,
+    entryPolymarketFeeRate: null,
+    recalculatedEdge: null,
+    lastRecalculatedAt: null,
+    recalculationDataSource: null,
+    realizedPnl: null,
     pair: {
       matchId: 'pair-1',
       polymarketContractId: 'pm-contract-1',
@@ -849,6 +857,67 @@ describe('PositionEnrichmentService', () => {
       expect(kalshiCall![3].toString()).toBe('100');
       const polymarketCall = calls.find((c) => c[0] === 'polymarket');
       expect(polymarketCall![3].toString()).toBe('100');
+    });
+  });
+
+  describe('recalculated edge from DB (Story 10.1)', () => {
+    it('should read persisted recalculatedEdge and compute edgeDelta', async () => {
+      const pos = createMockPosition({
+        recalculatedEdge: { toString: () => '0.008' },
+        lastRecalculatedAt: new Date('2026-03-16T12:00:00Z'),
+        recalculationDataSource: 'websocket',
+      });
+
+      mockVwapPrices(priceFeed, '0.56', '0.44');
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const result = await service.enrich(pos as never);
+
+      expect(result.status).toBe('enriched');
+      expect(result.data.recalculatedEdge).toBe('0.00800000');
+      // edgeDelta = 0.008 - 0.012 = -0.004
+      expect(result.data.edgeDelta).toBe('-0.00400000');
+      expect(result.data.lastRecalculatedAt).toBe('2026-03-16T12:00:00.000Z');
+      expect(result.data.dataSource).toBe('websocket');
+    });
+
+    it('should return null recalculatedEdge when not yet computed', async () => {
+      const pos = createMockPosition({
+        recalculatedEdge: null,
+        lastRecalculatedAt: null,
+        recalculationDataSource: null,
+      });
+
+      mockVwapPrices(priceFeed, '0.56', '0.44');
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const result = await service.enrich(pos as never);
+
+      expect(result.status).toBe('enriched');
+      expect(result.data.recalculatedEdge).toBeNull();
+      expect(result.data.edgeDelta).toBeNull();
+      expect(result.data.lastRecalculatedAt).toBeNull();
+      expect(result.data.dataSource).toBeNull();
+      expect(result.data.dataFreshnessMs).toBeNull();
+    });
+
+    it('should compute dataFreshnessMs from lastRecalculatedAt', async () => {
+      const recalcTime = new Date(Date.now() - 15_000); // 15s ago
+      const pos = createMockPosition({
+        recalculatedEdge: { toString: () => '0.008' },
+        lastRecalculatedAt: recalcTime,
+        recalculationDataSource: 'websocket',
+      });
+
+      mockVwapPrices(priceFeed, '0.56', '0.44');
+      vi.mocked(priceFeed.getTakerFeeRate).mockReturnValue(new Decimal('0.02'));
+
+      const result = await service.enrich(pos as never);
+
+      expect(result.status).toBe('enriched');
+      // dataFreshnessMs should be approximately 15000ms (allow 5s tolerance for test execution)
+      expect(result.data.dataFreshnessMs).toBeGreaterThanOrEqual(14_000);
+      expect(result.data.dataFreshnessMs).toBeLessThan(20_000);
     });
   });
 });

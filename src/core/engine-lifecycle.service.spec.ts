@@ -306,6 +306,66 @@ describe('EngineLifecycleService', () => {
       expect(mockRisk.resumeTrading).not.toHaveBeenCalled();
     });
 
+    it('should NOT halt trading when only paper positions exist and reconciliation throws', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockRejectedValue(new Error('Platform timeout')),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+          prisma: {
+            $queryRaw: vi
+              .fn()
+              .mockResolvedValueOnce([{ '?column?': 1 }]) // DB check
+              .mockResolvedValueOnce([{ count: BigInt(0) }]), // Active LIVE positions = 0 (paper filtered out)
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRisk.haltTrading).not.toHaveBeenCalled();
+    });
+
+    it('should halt trading when live positions exist and reconciliation throws', async () => {
+      const mockRecon = {
+        ...createMockReconciliationService(),
+        reconcile: vi.fn().mockRejectedValue(new Error('Platform timeout')),
+      };
+      const mockRisk = {
+        haltTrading: vi.fn(),
+        resumeTrading: vi.fn(),
+        isTradingHalted: vi.fn().mockReturnValue(false),
+      };
+      const module = await Test.createTestingModule({
+        providers: createProviders({
+          reconciliation: mockRecon,
+          riskManager: mockRisk,
+          prisma: {
+            $queryRaw: vi
+              .fn()
+              .mockResolvedValueOnce([{ '?column?': 1 }]) // DB check
+              .mockResolvedValueOnce([{ count: BigInt(3) }]), // Active LIVE positions = 3
+          },
+        }),
+      }).compile();
+
+      const svc = module.get<EngineLifecycleService>(EngineLifecycleService);
+      await svc.onApplicationBootstrap();
+
+      expect(mockRisk.haltTrading).toHaveBeenCalledWith(
+        'reconciliation_discrepancy',
+      );
+    });
+
     it('should log platform modes at startup (both live)', async () => {
       const logSpy = vi.spyOn(service['logger'], 'log');
       await service.onApplicationBootstrap();

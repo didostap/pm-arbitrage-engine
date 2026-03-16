@@ -54,6 +54,7 @@ export class PolymarketConnector
   private wsClient: PolymarketWebSocketClient | null = null;
   private connected = false;
   private lastHeartbeat: Date | null = null;
+  private readonly lastWsUpdateMap = new Map<string, Date>();
 
   private readonly privateKey: string;
   private readonly clobApiUrl: string;
@@ -187,6 +188,12 @@ export class PolymarketConnector
         wsUrl: this.wsUrl,
         eventEmitter: this.eventEmitter,
       });
+
+      // Track WS update timestamps for freshness queries (Story 10.1)
+      this.wsClient.onUpdate((rawBook: PolymarketOrderBookMessage) => {
+        this.lastWsUpdateMap.set(rawBook.asset_id, new Date());
+      });
+
       await this.wsClient.connect();
 
       this.connected = true;
@@ -218,6 +225,7 @@ export class PolymarketConnector
       this.wsClient.disconnect();
       this.wsClient = null;
     }
+    this.lastWsUpdateMap.clear();
     this.clobClient = null;
     this.connected = false;
     return Promise.resolve();
@@ -443,6 +451,7 @@ export class PolymarketConnector
       if (this.wsClient) {
         for (const contractId of contractIds) {
           this.wsClient.unsubscribe(contractId as string);
+          this.lastWsUpdateMap.delete(contractId as string);
         }
       }
     } catch (error) {
@@ -457,6 +466,13 @@ export class PolymarketConnector
         },
       });
     }
+  }
+
+  getOrderBookFreshness(contractId: ContractId): {
+    lastWsUpdateAt: Date | null;
+  } {
+    const lastUpdate = this.lastWsUpdateMap.get(contractId as string);
+    return { lastWsUpdateAt: lastUpdate ?? null };
   }
 
   getHealth(): PlatformHealth {

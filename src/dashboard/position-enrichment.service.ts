@@ -31,6 +31,11 @@ export interface EnrichedPosition {
   timeToResolution: string | null;
   projectedSlPnl?: string | null;
   projectedTpPnl?: string | null;
+  recalculatedEdge?: string | null;
+  edgeDelta?: string | null;
+  lastRecalculatedAt?: string | null;
+  dataSource?: string | null;
+  dataFreshnessMs?: number | null;
 }
 
 export interface EnrichmentResult {
@@ -295,6 +300,14 @@ export class PositionEnrichmentService {
       takeProfitThreshold,
     );
 
+    // Recalculated edge from DB (Story 10.1 — persisted by exit monitor)
+    const recalcEdge = position.recalculatedEdge
+      ? new Decimal(position.recalculatedEdge.toString())
+      : null;
+    const edgeDelta = recalcEdge
+      ? recalcEdge.minus(initialEdge).toFixed(8)
+      : null;
+
     return {
       status: 'enriched',
       data: {
@@ -309,6 +322,13 @@ export class PositionEnrichmentService {
         timeToResolution,
         projectedSlPnl: stopLossThreshold.toFixed(8),
         projectedTpPnl: takeProfitThreshold.toFixed(8),
+        recalculatedEdge: recalcEdge?.toFixed(8) ?? null,
+        edgeDelta,
+        lastRecalculatedAt: position.lastRecalculatedAt?.toISOString() ?? null,
+        dataSource: position.recalculationDataSource ?? null,
+        dataFreshnessMs: position.lastRecalculatedAt
+          ? Date.now() - position.lastRecalculatedAt.getTime()
+          : null,
       },
     };
   }

@@ -231,6 +231,10 @@ model OpenPosition {
   entryKalshiFeeRate         Decimal? @map("entry_kalshi_fee_rate") @db.Decimal(20, 8)
   entryPolymarketFeeRate     Decimal? @map("entry_polymarket_fee_rate") @db.Decimal(20, 8)
 
+  recalculatedEdge         Decimal?   @map("recalculated_edge") @db.Decimal(20, 8)
+  lastRecalculatedAt       DateTime?  @map("last_recalculated_at") @db.Timestamptz
+  recalculationDataSource  String?    @map("recalculation_data_source") @db.VarChar(20)
+
   pair            ContractMatch @relation(fields: [pairId], references: [matchId])
   polymarketOrder Order?        @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
   kalshiOrder     Order?        @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])

@@ -21,6 +21,10 @@ export class OrderFilledEvent extends BaseEvent {
     correlationId?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
+    /** Taker fee rate as decimal string (e.g. "0.0175"). Added in Story 10.1 (CF-4). */
+    public readonly takerFeeRate?: string,
+    /** Gas estimate in USD as decimal string, or null. Added in Story 10.1 (CF-4). */
+    public readonly gasEstimate?: string | null,
   ) {
     super(correlationId);
   }

@@ -132,6 +132,10 @@ export class StartupReconciliationService {
     // Phase 4: Discrepancy handling OR risk budget recalculation
     if (discrepancies.length > 0) {
       await this.handleDiscrepancies(discrepancies);
+    } else {
+      // Clear stale reconciliation halt from a previous boot BEFORE recalculateRiskBudget,
+      // which calls persistState and would re-persist a stale halt loaded by initializeStateFromDb.
+      this.riskManager.resumeTrading('reconciliation_discrepancy');
     }
 
     // Always recalculate risk budget from current DB state
@@ -616,6 +620,8 @@ export class StartupReconciliationService {
         undefined,
         false,
         false,
+        undefined, // takerFeeRate not available during reconciliation
+        null, // gasEstimate not applicable during reconciliation
       ),
     );
 

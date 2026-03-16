@@ -67,6 +67,12 @@ export class PaperTradingConnector implements IPlatformConnector {
     this.realConnector.unsubscribeFromContracts(contractIds);
   }
 
+  getOrderBookFreshness(contractId: ContractId): {
+    lastWsUpdateAt: Date | null;
+  } {
+    return this.realConnector.getOrderBookFreshness(contractId);
+  }
+
   // --- Execution method interception (simulated) ---
 
   submitOrder(params: OrderParams): Promise<OrderResult> {

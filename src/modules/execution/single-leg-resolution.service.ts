@@ -192,6 +192,12 @@ export class SingleLegResolutionService {
         .abs()
         .toNumber();
 
+      // Compute taker fee rate for event enrichment (CF-4, Story 10.1)
+      const retryFeeRate = FinancialMath.calculateTakerFeeRate(
+        new Decimal(orderResult.filledPrice),
+        connector.getFeeSchedule(),
+      );
+
       this.eventEmitter.emit(
         EVENT_NAMES.ORDER_FILLED,
         new OrderFilledEvent(
@@ -206,6 +212,8 @@ export class SingleLegResolutionService {
           undefined,
           isPaper,
           mixedMode,
+          retryFeeRate.toString(),
+          null, // gas not applicable for single-leg resolution
         ),
       );
 

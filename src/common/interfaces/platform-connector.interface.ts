@@ -57,4 +57,9 @@ export interface IPlatformConnector {
 
   /** Unsubscribe from real-time order book updates for the given contracts. Best-effort — does not throw on failure. */
   unsubscribeFromContracts(contractIds: ContractId[]): void;
+
+  /** Query WS freshness for a contract. Returns null lastWsUpdateAt if no WS subscription exists. */
+  getOrderBookFreshness(contractId: ContractId): {
+    lastWsUpdateAt: Date | null;
+  };
 }

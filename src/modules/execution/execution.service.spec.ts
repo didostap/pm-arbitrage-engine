@@ -2179,4 +2179,50 @@ describe('ExecutionService', () => {
       expect(typeof posData.entryPolymarketFeeRate).toBe('number');
     });
   });
+
+  describe('OrderFilledEvent enrichment (Story 10.1 CF-4)', () => {
+    function setupHappyPathForCF4() {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+    }
+
+    it('should include takerFeeRate and gasEstimate in OrderFilledEvent', async () => {
+      setupHappyPathForCF4();
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(true);
+
+      // Find OrderFilledEvent emissions
+      const filledCalls = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.ORDER_FILLED,
+      );
+      expect(filledCalls.length).toBeGreaterThanOrEqual(2);
+
+      // Both events should have takerFeeRate as valid decimal string
+      for (const call of filledCalls) {
+        const event = call[1] as {
+          takerFeeRate?: string;
+          gasEstimate?: string | null;
+        };
+        expect(event.takerFeeRate).toBeDefined();
+        expect(event.takerFeeRate).toMatch(/^\d+(\.\d+)?$/);
+        // gasEstimate can be a valid decimal string or null
+        if (event.gasEstimate !== null && event.gasEstimate !== undefined) {
+          expect(event.gasEstimate).toMatch(/^\d+(\.\d+)?$/);
+        }
+      }
+    });
+  });
 });

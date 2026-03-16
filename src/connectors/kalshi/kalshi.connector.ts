@@ -94,6 +94,7 @@ export class KalshiConnector
   private rateLimiter: RateLimiter;
   private lastHeartbeat: Date | null = null;
   private connected = false;
+  private readonly lastWsUpdateMap = new Map<string, Date>();
 
   constructor(private readonly configService: ConfigService) {
     const apiKeyId = this.configService.get<string>('KALSHI_API_KEY_ID', '');
@@ -144,6 +145,11 @@ export class KalshiConnector
       apiKeyId,
       privateKeyPem,
       wsUrl,
+    });
+
+    // Track WS update timestamps for freshness queries (Story 10.1)
+    this.wsClient.onUpdate((book) => {
+      this.lastWsUpdateMap.set(book.contractId as string, new Date());
     });
 
     // Default rate limiter from tier config; may be upgraded in onModuleInit() via API
@@ -276,6 +282,7 @@ export class KalshiConnector
     });
 
     this.wsClient.disconnect();
+    this.lastWsUpdateMap.clear();
     this.connected = false;
     return Promise.resolve();
   }
@@ -636,6 +643,7 @@ export class KalshiConnector
       // unsubscribe() handles both WS message (via removeMarkets if sid set) and local cleanup
       for (const ticker of contractIds) {
         this.wsClient.unsubscribe(ticker as string);
+        this.lastWsUpdateMap.delete(ticker as string);
       }
     } catch (error) {
       this.logger.error({
@@ -649,6 +657,13 @@ export class KalshiConnector
         },
       });
     }
+  }
+
+  getOrderBookFreshness(contractId: ContractId): {
+    lastWsUpdateAt: Date | null;
+  } {
+    const lastUpdate = this.lastWsUpdateMap.get(contractId as string);
+    return { lastWsUpdateAt: lastUpdate ?? null };
   }
 
   private mapError(error: unknown): PlatformApiError {

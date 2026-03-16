@@ -27,6 +27,7 @@ const WARNING_EVENTS = new Set<string>([
   EVENT_NAMES.DEGRADATION_PROTOCOL_ACTIVATED,
   EVENT_NAMES.ORDERBOOK_STALE,
   EVENT_NAMES.DATA_DIVERGENCE,
+  EVENT_NAMES.DATA_FALLBACK,
 ]);
 
 export function classifyEventSeverity(eventName: string): AlertSeverity {

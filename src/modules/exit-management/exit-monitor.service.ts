@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
 
 import {
@@ -11,6 +12,7 @@ import {
 } from '../../common/utils';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
+import { PrismaService } from '../../common/prisma.service';
 import {
   KALSHI_CONNECTOR_TOKEN,
   POLYMARKET_CONNECTOR_TOKEN,
@@ -28,6 +30,7 @@ import {
   ExitTriggeredEvent,
   SingleLegExposureEvent,
 } from '../../common/events/execution.events';
+import { PlatformDataFallbackEvent } from '../../common/events/platform.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import {
   PlatformId,
@@ -40,11 +43,17 @@ import {
 const EXIT_POLL_INTERVAL_MS = 30_000;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 
+/** Data source classification: stale_fallback > polling > websocket (where > = worse). */
+type DataSource = 'websocket' | 'polling' | 'stale_fallback';
+
 @Injectable()
 export class ExitMonitorService {
   private readonly logger = new Logger(ExitMonitorService.name);
   private consecutiveFullFailures = 0;
   private skipNextCycle = false;
+  /** Tracks positions with stale WS data for event deduplication. */
+  private readonly stalePositions = new Map<string, boolean>();
+  private readonly wsStalenessThresholdMs: number;
 
   constructor(
     private readonly positionRepository: PositionRepository,
@@ -57,7 +66,14 @@ export class ExitMonitorService {
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
     private readonly thresholdEvaluator: ThresholdEvaluatorService,
-  ) {}
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {
+    this.wsStalenessThresholdMs = this.configService.get<number>(
+      'WS_STALENESS_THRESHOLD_MS',
+      60_000,
+    );
+  }
 
   @Interval(EXIT_POLL_INTERVAL_MS)
   async evaluatePositions(): Promise<void> {
@@ -93,6 +109,14 @@ export class ExitMonitorService {
         },
       });
       return;
+    }
+
+    // Clean up stale tracking map: remove entries for positions no longer active (Task 5.4)
+    const activePositionIds = new Set(positions.map((p) => p.positionId));
+    for (const posId of this.stalePositions.keys()) {
+      if (!activePositionIds.has(posId)) {
+        this.stalePositions.delete(posId);
+      }
     }
 
     if (positions.length === 0) {
@@ -288,9 +312,91 @@ export class ExitMonitorService {
       return;
     }
 
+    // Determine data source per platform (Task 2)
+    const now = new Date();
+    const kalshiFreshness = this.kalshiConnector.getOrderBookFreshness(
+      asContractId(position.pair.kalshiContractId),
+    );
+    const polymarketFreshness = this.polymarketConnector.getOrderBookFreshness(
+      asContractId(position.pair.polymarketClobTokenId!),
+    );
+
+    const kalshiDataSource = this.classifyDataSource(
+      kalshiFreshness.lastWsUpdateAt,
+      now,
+    );
+    const polymarketDataSource = this.classifyDataSource(
+      polymarketFreshness.lastWsUpdateAt,
+      now,
+    );
+
+    // Combine using worst-of-two precedence: stale_fallback > polling > websocket
+    const dataSource = this.combineDataSources(
+      kalshiDataSource,
+      polymarketDataSource,
+    );
+
+    // Compute data freshness (age of freshest WS update across both platforms)
+    const freshnessDates = [
+      kalshiFreshness.lastWsUpdateAt,
+      polymarketFreshness.lastWsUpdateAt,
+    ].filter((d): d is Date => d !== null);
+    const dataFreshnessMs =
+      freshnessDates.length > 0
+        ? now.getTime() - Math.max(...freshnessDates.map((d) => d.getTime()))
+        : 0;
+
+    // Stale fallback event deduplication (Task 5)
+    const posId = position.positionId;
+    if (dataSource === 'stale_fallback') {
+      const wasStale = this.stalePositions.get(posId) ?? false;
+      if (!wasStale) {
+        // Determine which platform is worst-stale for the event
+        // When both are stale, report the one with the oldest WS data
+        const kalshiAge = kalshiFreshness.lastWsUpdateAt
+          ? now.getTime() - kalshiFreshness.lastWsUpdateAt.getTime()
+          : 0;
+        const polyAge = polymarketFreshness.lastWsUpdateAt
+          ? now.getTime() - polymarketFreshness.lastWsUpdateAt.getTime()
+          : 0;
+        const stalePlatform =
+          kalshiDataSource === 'stale_fallback' &&
+          polymarketDataSource === 'stale_fallback'
+            ? kalshiAge >= polyAge
+              ? PlatformId.KALSHI
+              : PlatformId.POLYMARKET
+            : kalshiDataSource === 'stale_fallback'
+              ? PlatformId.KALSHI
+              : PlatformId.POLYMARKET;
+        const staleDuration = Math.max(kalshiAge, polyAge);
+        this.eventEmitter.emit(
+          EVENT_NAMES.DATA_FALLBACK,
+          new PlatformDataFallbackEvent(
+            asPositionId(posId),
+            asPairId(position.pairId),
+            stalePlatform,
+            staleDuration,
+            'polling',
+          ),
+        );
+      }
+      this.stalePositions.set(posId, true);
+    } else {
+      this.stalePositions.set(posId, false);
+    }
+
     // Build threshold input
     const kalshiFeeSchedule = this.kalshiConnector.getFeeSchedule();
     const polymarketFeeSchedule = this.polymarketConnector.getFeeSchedule();
+
+    const kalshiFeeDecimal = FinancialMath.calculateTakerFeeRate(
+      kalshiClosePrice,
+      kalshiFeeSchedule,
+    );
+    const polymarketFeeDecimal = FinancialMath.calculateTakerFeeRate(
+      polymarketClosePrice,
+      polymarketFeeSchedule,
+    );
 
     const evalInput: ThresholdEvalInput = {
       initialEdge: new Decimal(position.expectedEdge.toString()),
@@ -302,16 +408,10 @@ export class ExitMonitorService {
       polymarketSide: position.polymarketSide,
       kalshiSize: kalshiEffectiveSize,
       polymarketSize: polymarketEffectiveSize,
-      kalshiFeeDecimal: FinancialMath.calculateTakerFeeRate(
-        kalshiClosePrice,
-        kalshiFeeSchedule,
-      ),
-      polymarketFeeDecimal: FinancialMath.calculateTakerFeeRate(
-        polymarketClosePrice,
-        polymarketFeeSchedule,
-      ),
+      kalshiFeeDecimal,
+      polymarketFeeDecimal,
       resolutionDate: position.pair.resolutionDate,
-      now: new Date(),
+      now,
       entryClosePriceKalshi: position.entryClosePriceKalshi
         ? new Decimal(position.entryClosePriceKalshi.toString())
         : null,
@@ -324,9 +424,53 @@ export class ExitMonitorService {
       entryPolymarketFeeRate: position.entryPolymarketFeeRate
         ? new Decimal(position.entryPolymarketFeeRate.toString())
         : null,
+      dataSource,
+      dataFreshnessMs,
     };
 
     const evalResult = this.thresholdEvaluator.evaluate(evalInput);
+
+    // Compute recalculated edge: current market spread net of fees and gas (Task 3)
+    const grossEdge = FinancialMath.calculateGrossEdge(
+      kalshiClosePrice,
+      polymarketClosePrice,
+    );
+    const kalshiFee = kalshiClosePrice.mul(kalshiFeeDecimal);
+    const polymarketFee = polymarketClosePrice.mul(polymarketFeeDecimal);
+    // Gas cost per contract: gasEstimateUsd / positionValueUsd (same as detection pipeline)
+    const gasEstimateUsd = new Decimal(
+      this.configService.get<string>('DETECTION_GAS_ESTIMATE_USD', '0'),
+    );
+    const positionValueUsd = kalshiClosePrice
+      .mul(kalshiEffectiveSize)
+      .plus(polymarketClosePrice.mul(polymarketEffectiveSize));
+    const gasFraction = positionValueUsd.isZero()
+      ? new Decimal(0)
+      : gasEstimateUsd.div(positionValueUsd);
+    const recalculatedEdge = grossEdge
+      .minus(kalshiFee)
+      .minus(polymarketFee)
+      .minus(gasFraction);
+
+    // Persist recalculated edge unconditionally after every evaluation (Task 4.3-4.4)
+    try {
+      await this.prisma.openPosition.update({
+        where: { positionId: position.positionId },
+        data: {
+          recalculatedEdge: recalculatedEdge.toFixed(8),
+          lastRecalculatedAt: now,
+          recalculationDataSource: dataSource,
+        },
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to persist recalculated edge',
+        data: {
+          positionId: position.positionId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
 
     if (evalResult.triggered) {
       this.logger.log({
@@ -337,6 +481,7 @@ export class ExitMonitorService {
           exitType: evalResult.type,
           currentPnl: evalResult.currentPnl.toFixed(8),
           currentEdge: evalResult.currentEdge.toFixed(8),
+          dataSource,
         },
       });
       await this.executeExit(
@@ -986,5 +1131,25 @@ export class ExitMonitorService {
       originalSide as 'buy' | 'sell',
       positionSize,
     );
+  }
+
+  /** Classify a single platform's data source based on WS freshness. */
+  private classifyDataSource(
+    lastWsUpdateAt: Date | null,
+    now: Date,
+  ): DataSource {
+    if (lastWsUpdateAt === null) return 'polling';
+    const age = now.getTime() - lastWsUpdateAt.getTime();
+    return age >= this.wsStalenessThresholdMs ? 'stale_fallback' : 'websocket';
+  }
+
+  /** Combine two platform data sources using worst-of-two precedence. */
+  private combineDataSources(a: DataSource, b: DataSource): DataSource {
+    const precedence: Record<DataSource, number> = {
+      websocket: 0,
+      polling: 1,
+      stale_fallback: 2,
+    };
+    return precedence[a] >= precedence[b] ? a : b;
   }
 }

@@ -193,6 +193,9 @@ export const envSchema = z.object({
     .positive()
     .default(90_000),
 
+  // WS Staleness (Story 10.1) — per-position WS freshness threshold for exit monitor data source classification
+  WS_STALENESS_THRESHOLD_MS: z.coerce.number().int().positive().default(60_000),
+
   // Polling Concurrency (Story 9.15) — max concurrent getOrderBook() calls per platform
   KALSHI_POLLING_CONCURRENCY: z.coerce.number().int().positive().default(10),
   POLYMARKET_POLLING_CONCURRENCY: z.coerce.number().int().positive().default(5),

@@ -40,6 +40,7 @@ export const createMockPlatformConnector = (
   onOrderBookUpdate: vi.fn(),
   subscribeToContracts: vi.fn(),
   unsubscribeFromContracts: vi.fn(),
+  getOrderBookFreshness: vi.fn().mockReturnValue({ lastWsUpdateAt: null }),
   ...overrides,
 });
 

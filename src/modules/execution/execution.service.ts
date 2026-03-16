@@ -803,6 +803,24 @@ export class ExecutionService implements IExecutionEngine {
       entryPolymarketFeeRate: entryPolymarketFeeRate.toNumber(),
     });
 
+    // Compute taker fee rates for event enrichment (CF-4, Story 10.1)
+    const primaryFeeRate = FinancialMath.calculateTakerFeeRate(
+      new Decimal(primaryOrder.filledPrice),
+      primaryConnector.getFeeSchedule(),
+    );
+    const secondaryFeeRate = FinancialMath.calculateTakerFeeRate(
+      new Decimal(secondaryOrder.filledPrice),
+      secondaryConnector.getFeeSchedule(),
+    );
+    // Gas estimate: recover from fee breakdown if available
+    const gasFraction = enriched.feeBreakdown?.gasFraction;
+    const gasEstimateStr =
+      gasFraction && !gasFraction.isZero()
+        ? gasFraction
+            .mul(new Decimal(reservation.reservedCapitalUsd))
+            .toString()
+        : null;
+
     // Emit OrderFilledEvent for both legs
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
@@ -818,6 +836,8 @@ export class ExecutionService implements IExecutionEngine {
         undefined,
         isPaper,
         mixedMode,
+        primaryFeeRate.toString(),
+        gasEstimateStr,
       ),
     );
     this.eventEmitter.emit(
@@ -834,6 +854,8 @@ export class ExecutionService implements IExecutionEngine {
         undefined,
         isPaper,
         mixedMode,
+        secondaryFeeRate.toString(),
+        gasEstimateStr,
       ),
     );
 
@@ -982,6 +1004,12 @@ export class ExecutionService implements IExecutionEngine {
     // Emit OrderFilledEvent for the filled primary leg only
     const primaryPlatform =
       primaryLeg === 'kalshi' ? PlatformId.KALSHI : PlatformId.POLYMARKET;
+    const primaryLegConnector =
+      primaryLeg === 'kalshi' ? this.kalshiConnector : this.polymarketConnector;
+    const singleLegFeeRate = FinancialMath.calculateTakerFeeRate(
+      new Decimal(primaryOrder.filledPrice),
+      primaryLegConnector.getFeeSchedule(),
+    );
     this.eventEmitter.emit(
       EVENT_NAMES.ORDER_FILLED,
       new OrderFilledEvent(
@@ -996,6 +1024,8 @@ export class ExecutionService implements IExecutionEngine {
         undefined,
         isPaper,
         mixedMode,
+        singleLegFeeRate.toString(),
+        null,
       ),
     );
 

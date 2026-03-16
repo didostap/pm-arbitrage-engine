@@ -1,5 +1,5 @@
 import { PlatformId, PlatformHealth } from '../types/platform.type';
-import type { ContractId } from '../types/branded.type';
+import type { ContractId, PairId, PositionId } from '../types/branded.type';
 import { BaseEvent } from './base.event';
 
 /**
@@ -158,6 +158,24 @@ export class DataDivergenceEvent extends BaseEvent {
     public readonly wsTimestamp: string,
     public readonly priceDelta: string,
     public readonly stalenessDeltaMs: number,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
+ * Event emitted when exit monitor falls back to polling data due to stale WS.
+ * Deduplicated: emitted once per position per stale period (not every cycle).
+ * [Story 10.1] Data source tracking
+ */
+export class PlatformDataFallbackEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
+    public readonly platformId: string,
+    public readonly staleDurationMs: number,
+    public readonly fallbackSource: 'polling',
     correlationId?: string,
   ) {
     super(correlationId);

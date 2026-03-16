@@ -143,6 +143,10 @@ export const EVENT_NAMES = {
   /** Emitted when poll and WebSocket data diverge beyond threshold */
   DATA_DIVERGENCE: 'platform.data.divergence',
 
+  // [Story 10.1] Data Fallback Events
+  /** Emitted when exit monitor falls back to polling due to stale WS data */
+  DATA_FALLBACK: 'platform.data.fallback',
+
   // [Story 6.4] Compliance Events
   /** Emitted when trade is blocked by compliance validation */
   COMPLIANCE_BLOCKED: 'execution.compliance.blocked',

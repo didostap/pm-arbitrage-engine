@@ -221,6 +221,21 @@ describe('StartupReconciliationService', () => {
       );
     });
 
+    it('should clear stale reconciliation halt before recalculateRiskBudget when no discrepancies', async () => {
+      await service.reconcile();
+
+      // resumeTrading should be called BEFORE recalculateFromPositions
+      const resumeCall = riskManager.resumeTrading.mock.invocationCallOrder[0];
+      const recalcCall =
+        riskManager.recalculateFromPositions.mock.invocationCallOrder[0];
+      expect(resumeCall).toBeDefined();
+      expect(recalcCall).toBeDefined();
+      expect(resumeCall).toBeLessThan(recalcCall!);
+      expect(riskManager.resumeTrading).toHaveBeenCalledWith(
+        'reconciliation_discrepancy',
+      );
+    });
+
     it('should store lastRunResult', async () => {
       expect(service.getLastRunResult()).toBeNull();
 

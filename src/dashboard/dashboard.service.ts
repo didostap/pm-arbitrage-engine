@@ -437,6 +437,10 @@ export class DashboardService {
               exitType,
               projectedSlPnl: enrichment.data.projectedSlPnl ?? null,
               projectedTpPnl: enrichment.data.projectedTpPnl ?? null,
+              recalculatedEdge: enrichment.data.recalculatedEdge ?? null,
+              edgeDelta: enrichment.data.edgeDelta ?? null,
+              lastRecalculatedAt: enrichment.data.lastRecalculatedAt ?? null,
+              dataSource: enrichment.data.dataSource ?? null,
             };
           }),
         );
@@ -509,6 +513,10 @@ export class DashboardService {
         exitType: null,
         projectedSlPnl: enrichment.data.projectedSlPnl ?? null,
         projectedTpPnl: enrichment.data.projectedTpPnl ?? null,
+        recalculatedEdge: enrichment.data.recalculatedEdge ?? null,
+        edgeDelta: enrichment.data.edgeDelta ?? null,
+        lastRecalculatedAt: enrichment.data.lastRecalculatedAt ?? null,
+        dataSource: enrichment.data.dataSource ?? null,
       };
     } catch (error) {
       this.logger.error({
@@ -697,6 +705,11 @@ export class DashboardService {
         orders,
         auditEvents: auditEventDtos,
         capitalBreakdown,
+        recalculatedEdge: enrichment.data.recalculatedEdge ?? null,
+        edgeDelta: enrichment.data.edgeDelta ?? null,
+        lastRecalculatedAt: enrichment.data.lastRecalculatedAt ?? null,
+        dataSource: enrichment.data.dataSource ?? null,
+        dataFreshnessMs: enrichment.data.dataFreshnessMs ?? null,
       };
     } catch (error) {
       this.logger.error({
