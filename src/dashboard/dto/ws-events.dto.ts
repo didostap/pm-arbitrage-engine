@@ -70,6 +70,23 @@ export interface WsTradingHaltPayload {
   reasons: string[];
 }
 
+export interface WsShadowComparisonPayload {
+  positionId: string;
+  pairId: string;
+  modelTriggered: boolean;
+  fixedTriggered: boolean;
+  modelPnl: string;
+  fixedPnl: string;
+}
+
+export interface WsShadowDailySummaryPayload {
+  date: string;
+  totalComparisons: number;
+  fixedTriggerCount: number;
+  modelTriggerCount: number;
+  cumulativePnlDelta: string;
+}
+
 export const WS_EVENTS = {
   HEALTH_CHANGE: 'health.change',
   EXECUTION_COMPLETE: 'execution.complete',
@@ -80,4 +97,6 @@ export const WS_EVENTS = {
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
   DIVERGENCE_ALERT: 'divergence.alert',
   TRADING_HALT: 'trading.halt',
+  SHADOW_COMPARISON: 'shadow.comparison',
+  SHADOW_DAILY_SUMMARY: 'shadow.daily_summary',
 } as const;

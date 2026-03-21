@@ -36,6 +36,7 @@ const TELEGRAM_ELIGIBLE_INFO_EVENTS = new Set<string>([
   EVENT_NAMES.CALIBRATION_COMPLETED,
   EVENT_NAMES.ORDERBOOK_RECOVERED,
   EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
+  EVENT_NAMES.SHADOW_DAILY_SUMMARY,
 ]);
 
 export interface EventConsumerMetrics {
@@ -357,6 +358,49 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
         positionId: this.str(e['positionId']),
         pairId: this.str(e['pairId']),
         isPaper: Boolean(e['isPaper']),
+        correlationId: event.correlationId ?? '',
+      };
+    }
+
+    if (eventName === EVENT_NAMES.SHADOW_COMPARISON) {
+      const modelResult = e['modelResult'] as
+        | Record<string, unknown>
+        | undefined;
+      return {
+        timestamp: event.timestamp.toISOString(),
+        platform: 'N/A',
+        contractId: 'N/A',
+        side: 'shadow_comparison',
+        price: '0',
+        size: '0',
+        fillPrice: '0',
+        fees: 'N/A',
+        gas: 'N/A',
+        edge: 'N/A',
+        pnl: this.str(modelResult?.['currentPnl'], '0'),
+        positionId: this.str(e['positionId']),
+        pairId: this.str(e['pairId']),
+        isPaper: false,
+        correlationId: event.correlationId ?? '',
+      };
+    }
+
+    if (eventName === EVENT_NAMES.SHADOW_DAILY_SUMMARY) {
+      return {
+        timestamp: event.timestamp.toISOString(),
+        platform: 'N/A',
+        contractId: 'N/A',
+        side: 'shadow_daily_summary',
+        price: '0',
+        size: '0',
+        fillPrice: '0',
+        fees: 'N/A',
+        gas: 'N/A',
+        edge: 'N/A',
+        pnl: this.str(e['cumulativePnlDelta'], '0'),
+        positionId: 'N/A',
+        pairId: 'N/A',
+        isPaper: false,
         correlationId: event.correlationId ?? '',
       };
     }

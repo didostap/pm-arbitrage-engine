@@ -40,6 +40,7 @@ import { DataDivergenceService } from '../modules/data-ingestion/data-divergence
 import { PlatformHealthService } from '../modules/data-ingestion/platform-health.service';
 import { PlatformId } from '../common/types/platform.type';
 import type { BankrollConfigDto } from './dto/bankroll-config.dto';
+import { ShadowComparisonService } from '../modules/exit-management/shadow-comparison.service';
 
 @Injectable()
 export class DashboardService {
@@ -57,6 +58,7 @@ export class DashboardService {
     private readonly dataIngestionService: DataIngestionService,
     private readonly divergenceService: DataDivergenceService,
     private readonly healthService: PlatformHealthService,
+    private readonly shadowComparisonService: ShadowComparisonService,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -1103,5 +1105,41 @@ export class DashboardService {
     if (logs.some((l) => l.status === 'disconnected')) return 'critical';
     if (logs.some((l) => l.status === 'degraded')) return 'degraded';
     return 'healthy';
+  }
+
+  /** Get shadow comparison entries from in-memory accumulator (Story 10.2). */
+  getShadowComparisons(): unknown[] {
+    const entries = this.shadowComparisonService.getClosedPositionEntries();
+    return entries.map((e) => ({
+      positionId: e.positionId,
+      pairId: e.pairId,
+      pnlDelta: e.pnlDelta.toFixed(8),
+      modelExitTimestamp: e.modelExitTimestamp.toISOString(),
+      fixedWouldHaveExitedAt: e.fixedWouldHaveExitedAt.toISOString(),
+      triggerCriterion: e.triggerCriterion ?? null,
+    }));
+  }
+
+  /** Get shadow mode aggregate summary (Story 10.2). */
+  getShadowSummary(): unknown {
+    const summary = this.shadowComparisonService.generateDailySummary();
+    const closedEntries =
+      this.shadowComparisonService.getClosedPositionEntries();
+
+    // Compute meaningful P&L delta from actual closed positions
+    let closedPnlDelta = new Decimal(0);
+    for (const entry of closedEntries) {
+      closedPnlDelta = closedPnlDelta.plus(entry.pnlDelta);
+    }
+
+    return {
+      totalEvaluations: summary.totalComparisons,
+      fixedTriggerCycles: summary.fixedTriggerCount,
+      modelTriggerCycles: summary.modelTriggerCount,
+      perCyclePnlDelta: summary.cumulativePnlDelta.toFixed(8),
+      closedPositionPnlDelta: closedPnlDelta.toFixed(8),
+      closedPositionCount: closedEntries.length,
+      byCriterion: summary.triggerCountByCriterion,
+    };
   }
 }

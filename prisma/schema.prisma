@@ -235,6 +235,11 @@ model OpenPosition {
   lastRecalculatedAt       DateTime?  @map("last_recalculated_at") @db.Timestamptz
   recalculationDataSource  String?    @map("recalculation_data_source") @db.VarChar(20)
 
+  // Five-criteria model fields (Story 10.2)
+  entryConfidenceScore     Float?     @map("entry_confidence_score")
+  lastEvalCriteria         Json?      @map("last_eval_criteria")
+  exitMode                 String?    @map("exit_mode") @db.VarChar(10)
+
   pair            ContractMatch @relation(fields: [pairId], references: [matchId])
   polymarketOrder Order?        @relation("PolymarketOrder", fields: [polymarketOrderId], references: [orderId])
   kalshiOrder     Order?        @relation("KalshiOrder", fields: [kalshiOrderId], references: [orderId])

@@ -40,6 +40,7 @@ import {
   formatAggregateClusterLimitBreached,
   formatBankrollUpdated,
   formatDataDivergence,
+  formatShadowDailySummary,
 } from './formatters/telegram-message.formatter.js';
 import { type AlertSeverity, classifyEventSeverity } from './event-severity.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -50,6 +51,7 @@ import type {
   SingleLegExposureEvent,
   SingleLegResolvedEvent,
   ExitTriggeredEvent,
+  ShadowDailySummaryEvent,
 } from '../../common/events/execution.events.js';
 import type {
   LimitApproachedEvent,
@@ -120,6 +122,7 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
   EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
   EVENT_NAMES.DATA_DIVERGENCE,
+  EVENT_NAMES.SHADOW_DAILY_SUMMARY,
 ]);
 
 /**
@@ -218,6 +221,10 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
   [
     EVENT_NAMES.DATA_DIVERGENCE,
     (e) => formatDataDivergence(e as DataDivergenceEvent),
+  ],
+  [
+    EVENT_NAMES.SHADOW_DAILY_SUMMARY,
+    (e) => formatShadowDailySummary(e as ShadowDailySummaryEvent),
   ],
 ]);
 

@@ -212,6 +212,12 @@ export const EVENT_NAMES = {
   // [Story 9.14] Config Events
   /** Emitted when bankroll value is updated via dashboard */
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
+
+  // [Story 10.2] Shadow Mode Events
+  /** Emitted per-position in shadow mode with fixed vs model comparison */
+  SHADOW_COMPARISON: 'execution.exit.shadow_comparison',
+  /** Emitted once daily in shadow mode with aggregate comparison summary */
+  SHADOW_DAILY_SUMMARY: 'execution.exit.shadow_daily_summary',
 } as const;
 
 /**

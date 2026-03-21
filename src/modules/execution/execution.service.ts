@@ -780,6 +780,12 @@ export class ExecutionService implements IExecutionEngine {
       entryPolymarketFeeRate = new Decimal('0.02');
     }
 
+    // Capture confidence score at entry + exit mode (Story 10.2)
+    // The enriched opportunity carries the pair config which was loaded from ContractMatch;
+    // confidenceScore is available on the dislocation's pair config if it was populated.
+    const entryConfidenceScore = dislocation.pairConfig.confidenceScore ?? null;
+    const exitMode = this.configService.get<string>('EXIT_MODE', 'fixed');
+
     const position = await this.positionRepository.create({
       pair: { connect: { matchId: pairId } },
       kalshiOrder: { connect: { orderId: kalshiOrderId } },
@@ -801,6 +807,8 @@ export class ExecutionService implements IExecutionEngine {
       entryClosePricePolymarket: polymarketEntryClosePrice.toNumber(),
       entryKalshiFeeRate: entryKalshiFeeRate.toNumber(),
       entryPolymarketFeeRate: entryPolymarketFeeRate.toNumber(),
+      entryConfidenceScore,
+      exitMode,
     });
 
     // Compute taker fee rates for event enrichment (CF-4, Story 10.1)

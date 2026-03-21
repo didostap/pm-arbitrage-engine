@@ -92,7 +92,13 @@ export class ExitTriggeredEvent extends BaseEvent {
       | 'take_profit'
       | 'stop_loss'
       | 'time_based'
-      | 'manual',
+      | 'manual'
+      | 'edge_evaporation'
+      | 'model_confidence'
+      | 'time_decay'
+      | 'risk_budget'
+      | 'liquidity_deterioration'
+      | 'profit_capture',
     public readonly initialEdge: string,
     public readonly finalEdge: string,
     public readonly realizedPnl: string,
@@ -101,6 +107,49 @@ export class ExitTriggeredEvent extends BaseEvent {
     correlationId?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
+  ) {
+    super(correlationId);
+  }
+}
+
+/** Emitted per-position in shadow mode with both fixed and model evaluation results (Story 10.2). */
+export class ShadowComparisonEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
+    public readonly fixedResult: {
+      triggered: boolean;
+      type?: string;
+      currentPnl: string;
+    },
+    public readonly modelResult: {
+      triggered: boolean;
+      type?: string;
+      currentPnl: string;
+      criteria: Array<{
+        criterion: string;
+        proximity: string;
+        triggered: boolean;
+        detail?: string;
+      }>;
+    },
+    public readonly timestamp: Date,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/** Emitted once daily in shadow mode with aggregate comparison summary (Story 10.2). */
+export class ShadowDailySummaryEvent extends BaseEvent {
+  constructor(
+    public readonly date: string,
+    public readonly totalComparisons: number,
+    public readonly fixedTriggerCount: number,
+    public readonly modelTriggerCount: number,
+    public readonly criterionTriggerCounts: Record<string, number>,
+    public readonly cumulativePnlDelta: string,
+    correlationId?: string,
   ) {
     super(correlationId);
   }

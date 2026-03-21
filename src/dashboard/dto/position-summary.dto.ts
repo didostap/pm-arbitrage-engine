@@ -173,7 +173,18 @@ export class PositionSummaryDto {
 
   @ApiPropertyOptional({
     description: 'Exit type for closed positions (null for open)',
-    enum: ['stop_loss', 'take_profit', 'time_based', 'manual'],
+    enum: [
+      'stop_loss',
+      'take_profit',
+      'time_based',
+      'manual',
+      'edge_evaporation',
+      'model_confidence',
+      'time_decay',
+      'risk_budget',
+      'liquidity_deterioration',
+      'profit_capture',
+    ],
     nullable: true,
   })
   exitType!: string | null;
@@ -225,4 +236,39 @@ export class PositionSummaryDto {
     nullable: true,
   })
   dataSource!: string | null;
+
+  // ─── Six-Criteria Model Fields (Story 10.2) ──────────────────────────────
+
+  @ApiPropertyOptional({
+    description: 'Exit mode: fixed, model, or shadow',
+    type: String,
+    nullable: true,
+  })
+  exitMode?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'All 6 criterion evaluation results (model/shadow mode only)',
+    type: 'array',
+    nullable: true,
+  })
+  exitCriteria?: Array<{
+    criterion: string;
+    proximity: string;
+    triggered: boolean;
+    detail?: string;
+  }> | null;
+
+  @ApiPropertyOptional({
+    description: 'Highest proximity criterion name (model/shadow mode only)',
+    type: String,
+    nullable: true,
+  })
+  closestCriterion?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Highest proximity value 0-1 (model/shadow mode only)',
+    type: Number,
+    nullable: true,
+  })
+  closestProximity?: number | null;
 }

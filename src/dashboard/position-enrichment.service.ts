@@ -36,6 +36,16 @@ export interface EnrichedPosition {
   lastRecalculatedAt?: string | null;
   dataSource?: string | null;
   dataFreshnessMs?: number | null;
+  // Six-criteria model fields (Story 10.2)
+  exitMode?: string | null;
+  exitCriteria?: Array<{
+    criterion: string;
+    proximity: string;
+    triggered: boolean;
+    detail?: string;
+  }> | null;
+  closestCriterion?: string | null;
+  closestProximity?: number | null;
 }
 
 export interface EnrichmentResult {
@@ -308,6 +318,38 @@ export class PositionEnrichmentService {
       ? recalcEdge.minus(initialEdge).toFixed(8)
       : null;
 
+    // Six-criteria model fields (Story 10.2) — read from persisted lastEvalCriteria
+    const exitMode = position.exitMode ?? null;
+    let exitCriteria: Array<{
+      criterion: string;
+      proximity: string;
+      triggered: boolean;
+      detail?: string;
+    }> | null = null;
+    let closestCriterion: string | null = null;
+    let closestProximity: number | null = null;
+
+    if (position.lastEvalCriteria && Array.isArray(position.lastEvalCriteria)) {
+      const rawCriteria = position.lastEvalCriteria as Array<{
+        criterion: string;
+        proximity: string;
+        triggered: boolean;
+        detail?: string;
+      }>;
+      exitCriteria = rawCriteria;
+
+      // Compute closest criterion (highest proximity)
+      let maxProximity = -1;
+      for (const c of rawCriteria) {
+        const prox = parseFloat(c.proximity);
+        if (!isNaN(prox) && prox > maxProximity) {
+          maxProximity = prox;
+          closestCriterion = c.criterion;
+          closestProximity = prox;
+        }
+      }
+    }
+
     return {
       status: 'enriched',
       data: {
@@ -329,6 +371,10 @@ export class PositionEnrichmentService {
         dataFreshnessMs: position.lastRecalculatedAt
           ? Date.now() - position.lastRecalculatedAt.getTime()
           : null,
+        exitMode,
+        exitCriteria,
+        closestCriterion,
+        closestProximity,
       },
     };
   }

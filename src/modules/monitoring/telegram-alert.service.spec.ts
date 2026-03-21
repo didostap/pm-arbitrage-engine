@@ -812,8 +812,8 @@ describe('TelegramAlertService', () => {
   });
 
   describe('TELEGRAM_ELIGIBLE_EVENTS constant', () => {
-    it('should contain exactly 23 events', () => {
-      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(23);
+    it('should contain exactly 24 events', () => {
+      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(24);
     });
 
     it('should contain all expected events', () => {

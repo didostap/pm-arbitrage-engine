@@ -11,12 +11,18 @@ import { PerformanceService } from './performance.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
 import { DataIngestionModule } from '../modules/data-ingestion/data-ingestion.module';
 import { ExecutionModule } from '../modules/execution/execution.module';
+import { ExitManagementModule } from '../modules/exit-management/exit-management.module';
 import { RiskManagementModule } from '../modules/risk-management/risk-management.module';
 import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
 import { PositionManagementController } from './position-management.controller';
 
 @Module({
-  imports: [DataIngestionModule, ExecutionModule, RiskManagementModule],
+  imports: [
+    DataIngestionModule,
+    ExecutionModule,
+    ExitManagementModule,
+    RiskManagementModule,
+  ],
   controllers: [
     DashboardController,
     MatchApprovalController,

@@ -14,6 +14,8 @@ import type {
   ExecutionFailedEvent,
   SingleLegExposureEvent,
   ExitTriggeredEvent,
+  ShadowComparisonEvent,
+  ShadowDailySummaryEvent,
 } from '../common/events/execution.events';
 import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
@@ -203,6 +205,37 @@ export class DashboardGateway
         reasons: event.remainingReasons,
       },
       timestamp: event.resumeTimestamp.toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.SHADOW_COMPARISON)
+  handleShadowComparison(event: ShadowComparisonEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.SHADOW_COMPARISON,
+      data: {
+        positionId: event.positionId,
+        pairId: event.pairId,
+        modelTriggered: event.modelResult.triggered,
+        fixedTriggered: event.fixedResult.triggered,
+        modelPnl: event.modelResult.currentPnl,
+        fixedPnl: event.fixedResult.currentPnl,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.SHADOW_DAILY_SUMMARY)
+  handleShadowDailySummary(event: ShadowDailySummaryEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.SHADOW_DAILY_SUMMARY,
+      data: {
+        date: event.date,
+        totalComparisons: event.totalComparisons,
+        fixedTriggerCount: event.fixedTriggerCount,
+        modelTriggerCount: event.modelTriggerCount,
+        cumulativePnlDelta: event.cumulativePnlDelta,
+      },
+      timestamp: new Date().toISOString(),
     });
   }
 

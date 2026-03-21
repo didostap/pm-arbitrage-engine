@@ -214,4 +214,16 @@ export const envSchema = z.object({
   STRESS_TEST_SCENARIOS: z.coerce.number().int().positive().default(1000),
   STRESS_TEST_DEFAULT_DAILY_VOL: decimalString('0.03'),
   STRESS_TEST_MIN_SNAPSHOTS: z.coerce.number().int().positive().default(30),
+
+  // Exit Mode (Story 10.2) — six-criteria model-driven exit logic
+  EXIT_MODE: z.enum(['fixed', 'model', 'shadow']).default('fixed'),
+  EXIT_EDGE_EVAP_MULTIPLIER: z.coerce.number().max(0).default(-1.0),
+  EXIT_CONFIDENCE_DROP_PCT: z.coerce.number().int().min(1).max(100).default(20),
+  EXIT_TIME_DECAY_HORIZON_H: z.coerce.number().int().positive().default(168),
+  EXIT_TIME_DECAY_STEEPNESS: z.coerce.number().positive().default(2.0),
+  EXIT_TIME_DECAY_TRIGGER: z.coerce.number().min(0).max(1).default(0.8),
+  EXIT_RISK_BUDGET_PCT: z.coerce.number().int().min(1).max(100).default(85),
+  EXIT_RISK_RANK_CUTOFF: z.coerce.number().int().positive().default(1),
+  EXIT_MIN_DEPTH: z.coerce.number().int().positive().default(5),
+  EXIT_PROFIT_CAPTURE_RATIO: z.coerce.number().min(0.01).max(5).default(0.5),
 });

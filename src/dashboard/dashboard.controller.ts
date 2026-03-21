@@ -163,4 +163,25 @@ export class DashboardController {
     const data = await this.dashboardService.updateBankroll(dto.bankrollUsd);
     return { data, timestamp: new Date().toISOString() };
   }
+
+  @Get('shadow-comparisons')
+  @ApiOperation({ summary: 'Get shadow mode comparison entries (Story 10.2)' })
+  getShadowComparisons(): {
+    data: unknown[];
+    count: number;
+    timestamp: string;
+  } {
+    const data = this.dashboardService.getShadowComparisons();
+    return { data, count: data.length, timestamp: new Date().toISOString() };
+  }
+
+  @Get('shadow-summary')
+  @ApiOperation({ summary: 'Get shadow mode aggregate summary (Story 10.2)' })
+  async getShadowSummary(): Promise<{
+    data: unknown;
+    timestamp: string;
+  }> {
+    const data = await this.dashboardService.getShadowSummary();
+    return { data, timestamp: new Date().toISOString() };
+  }
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
@@ -29,6 +29,7 @@ import { EVENT_NAMES } from '../../common/events/event-catalog';
 import {
   ExitTriggeredEvent,
   SingleLegExposureEvent,
+  ShadowComparisonEvent,
 } from '../../common/events/execution.events';
 import { PlatformDataFallbackEvent } from '../../common/events/platform.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
@@ -39,6 +40,7 @@ import {
   asPairId,
   asPositionId,
 } from '../../common/types';
+import type { ExitMode } from '../../common/types/exit-criteria.types';
 
 const EXIT_POLL_INTERVAL_MS = 30_000;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -47,7 +49,7 @@ const CIRCUIT_BREAKER_THRESHOLD = 3;
 type DataSource = 'websocket' | 'polling' | 'stale_fallback';
 
 @Injectable()
-export class ExitMonitorService {
+export class ExitMonitorService implements OnModuleInit {
   private readonly logger = new Logger(ExitMonitorService.name);
   private consecutiveFullFailures = 0;
   private skipNextCycle = false;
@@ -73,6 +75,30 @@ export class ExitMonitorService {
       'WS_STALENESS_THRESHOLD_MS',
       60_000,
     );
+  }
+
+  onModuleInit(): void {
+    const exitMode = this.configService.get<string>('EXIT_MODE', 'fixed');
+    if (exitMode === 'model' || exitMode === 'shadow') {
+      const configDefaults: Array<[string, number]> = [
+        ['EXIT_EDGE_EVAP_MULTIPLIER', -1.0],
+        ['EXIT_CONFIDENCE_DROP_PCT', 20],
+        ['EXIT_TIME_DECAY_HORIZON_H', 168],
+        ['EXIT_PROFIT_CAPTURE_RATIO', 0.5],
+        ['EXIT_MIN_DEPTH', 5],
+      ];
+      const atDefault = configDefaults
+        .filter(
+          ([key, def]) => this.configService.get<number>(key, def) === def,
+        )
+        .map(([key]) => key);
+      if (atDefault.length > 0) {
+        this.logger.warn({
+          message: `EXIT_MODE=${exitMode} with ${atDefault.length} config keys at defaults — verify intentional`,
+          data: { atDefault },
+        });
+      }
+    }
   }
 
   @Interval(EXIT_POLL_INTERVAL_MS)
@@ -123,9 +149,58 @@ export class ExitMonitorService {
       return;
     }
 
+    // ─── Six-criteria pre-loop computation (Story 10.2) ────────────────
+    const exitMode = this.configService.get<string>(
+      'EXIT_MODE',
+      'fixed',
+    ) as ExitMode;
+    let portfolioRiskApproaching = false;
+    const edgeRanking: Map<string, { rank: number; total: number }> = new Map();
+
+    if (exitMode === 'model' || exitMode === 'shadow') {
+      // Check portfolio risk budget
+      const budgetPct = this.configService.get<number>(
+        'EXIT_RISK_BUDGET_PCT',
+        85,
+      );
+      try {
+        const exposure = this.riskManager.getCurrentExposure(isPaper);
+        if (!exposure.bankrollUsd.isZero()) {
+          portfolioRiskApproaching = exposure.totalCapitalDeployed
+            .div(exposure.bankrollUsd)
+            .gte(new Decimal(budgetPct).div(100));
+        }
+      } catch {
+        this.logger.warn({
+          message: 'Failed to check portfolio risk budget — skipping C4',
+        });
+      }
+
+      // Dense edge ranking: sort by recalculatedEdge ascending, ties get same rank
+      const positionsWithEdge = positions
+        .filter((p) => p.recalculatedEdge != null)
+        .map((p) => ({
+          positionId: p.positionId,
+          edge: new Decimal(p.recalculatedEdge!.toString()),
+        }))
+        .sort((a, b) => a.edge.minus(b.edge).toNumber());
+
+      let currentRank = 1;
+      for (let i = 0; i < positionsWithEdge.length; i++) {
+        const current = positionsWithEdge[i]!;
+        if (i > 0 && !current.edge.eq(positionsWithEdge[i - 1]!.edge)) {
+          currentRank++;
+        }
+        edgeRanking.set(current.positionId, {
+          rank: currentRank,
+          total: positionsWithEdge.length,
+        });
+      }
+    }
+
     this.logger.log({
       message: `Evaluating ${positions.length} OPEN/EXIT_PARTIAL positions for exit`,
-      data: { count: positions.length, isPaper, mixedMode },
+      data: { count: positions.length, isPaper, mixedMode, exitMode },
     });
 
     let anySucceeded = false;
@@ -138,6 +213,9 @@ export class ExitMonitorService {
           mixedMode,
           kalshiHealth,
           polymarketHealth,
+          exitMode,
+          portfolioRiskApproaching,
+          edgeRanking,
         );
         anySucceeded = true;
       } catch (error) {
@@ -173,6 +251,9 @@ export class ExitMonitorService {
     mixedMode: boolean,
     kalshiHealth: ReturnType<IPlatformConnector['getHealth']>,
     polymarketHealth: ReturnType<IPlatformConnector['getHealth']>,
+    exitMode: ExitMode = 'fixed',
+    portfolioRiskApproaching: boolean = false,
+    edgeRanking: Map<string, { rank: number; total: number }> = new Map(),
   ): Promise<void> {
     // Check connector health — skip if either platform disconnected since cycle start
 
@@ -398,6 +479,59 @@ export class ExitMonitorService {
       polymarketFeeSchedule,
     );
 
+    // ─── Six-criteria input gathering (Story 10.2) ───────────────────
+    let entryConfidenceScore: number | null = null;
+    let currentConfidenceScore: number | null = null;
+    let kalshiExitDepth: Decimal | null = null;
+    let polymarketExitDepth: Decimal | null = null;
+
+    if (exitMode === 'model' || exitMode === 'shadow') {
+      // Entry confidence from DB field (captured at execution time)
+      entryConfidenceScore = position.entryConfidenceScore ?? null;
+
+      // Current confidence from ContractMatch lookup
+      try {
+        const match = await this.prisma.contractMatch.findUnique({
+          where: { matchId: position.pairId },
+          select: { confidenceScore: true },
+        });
+        currentConfidenceScore = match?.confidenceScore ?? null;
+      } catch {
+        this.logger.warn({
+          message: 'Failed to lookup current confidence score',
+          data: { positionId: position.positionId },
+        });
+      }
+
+      // Exit depth from existing getAvailableExitDepth() calls
+      const kalshiCloseSide = position.kalshiSide === 'buy' ? 'sell' : 'buy';
+      const polymarketCloseSide =
+        position.polymarketSide === 'buy' ? 'sell' : 'buy';
+      try {
+        [kalshiExitDepth, polymarketExitDepth] = await Promise.all([
+          this.getAvailableExitDepth(
+            this.kalshiConnector,
+            position.pair.kalshiContractId,
+            kalshiCloseSide,
+            kalshiClosePrice,
+          ),
+          this.getAvailableExitDepth(
+            this.polymarketConnector,
+            position.pair.polymarketClobTokenId!,
+            polymarketCloseSide,
+            polymarketClosePrice,
+          ),
+        ]);
+      } catch {
+        this.logger.warn({
+          message: 'Failed to fetch exit depth for criteria evaluation',
+          data: { positionId: position.positionId },
+        });
+      }
+    }
+
+    const ranking = edgeRanking.get(position.positionId);
+
     const evalInput: ThresholdEvalInput = {
       initialEdge: new Decimal(position.expectedEdge.toString()),
       kalshiEntryPrice: new Decimal(kalshiOrder.fillPrice.toString()),
@@ -426,6 +560,45 @@ export class ExitMonitorService {
         : null,
       dataSource,
       dataFreshnessMs,
+      // Six-criteria fields
+      exitMode,
+      entryConfidenceScore,
+      currentConfidenceScore,
+      kalshiExitDepth,
+      polymarketExitDepth,
+      portfolioRiskApproaching,
+      edgeRankAmongOpen: ranking?.rank,
+      totalOpenPositions: ranking?.total,
+      // Config values
+      edgeEvapMultiplier: this.configService.get<number>(
+        'EXIT_EDGE_EVAP_MULTIPLIER',
+        -1.0,
+      ),
+      confidenceDropPct: this.configService.get<number>(
+        'EXIT_CONFIDENCE_DROP_PCT',
+        20,
+      ),
+      timeDecayHorizonH: this.configService.get<number>(
+        'EXIT_TIME_DECAY_HORIZON_H',
+        168,
+      ),
+      timeDecaySteepness: this.configService.get<number>(
+        'EXIT_TIME_DECAY_STEEPNESS',
+        2.0,
+      ),
+      timeDecayTrigger: this.configService.get<number>(
+        'EXIT_TIME_DECAY_TRIGGER',
+        0.8,
+      ),
+      riskRankCutoff: this.configService.get<number>(
+        'EXIT_RISK_RANK_CUTOFF',
+        1,
+      ),
+      minDepth: this.configService.get<number>('EXIT_MIN_DEPTH', 5),
+      profitCaptureRatio: this.configService.get<number>(
+        'EXIT_PROFIT_CAPTURE_RATIO',
+        0.5,
+      ),
     };
 
     const evalResult = this.thresholdEvaluator.evaluate(evalInput);
@@ -452,15 +625,30 @@ export class ExitMonitorService {
       .minus(polymarketFee)
       .minus(gasFraction);
 
-    // Persist recalculated edge unconditionally after every evaluation (Task 4.3-4.4)
+    // Persist recalculated edge + criteria unconditionally after every evaluation (Task 4.3-4.4, Story 10.2)
+    const updateData: Record<string, unknown> = {
+      recalculatedEdge: recalculatedEdge.toFixed(8),
+      lastRecalculatedAt: now,
+      recalculationDataSource: dataSource,
+    };
+
+    // Persist criteria in model/shadow mode (Story 10.2 Task 4)
+    if (
+      (exitMode === 'model' || exitMode === 'shadow') &&
+      evalResult.criteria
+    ) {
+      updateData.lastEvalCriteria = evalResult.criteria.map((c) => ({
+        criterion: c.criterion,
+        proximity: c.proximity.toString(),
+        triggered: c.triggered,
+        detail: c.detail,
+      }));
+    }
+
     try {
       await this.prisma.openPosition.update({
         where: { positionId: position.positionId },
-        data: {
-          recalculatedEdge: recalculatedEdge.toFixed(8),
-          lastRecalculatedAt: now,
-          recalculationDataSource: dataSource,
-        },
+        data: updateData,
       });
     } catch (error) {
       this.logger.error({
@@ -470,6 +658,39 @@ export class ExitMonitorService {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+    }
+
+    // Shadow comparison event emission (Story 10.2 Task 5)
+    // In shadow mode: fixed is primary (evalResult), model is shadow (shadowModelResult)
+    if (
+      exitMode === 'shadow' &&
+      evalResult.shadowModelResult &&
+      evalResult.criteria
+    ) {
+      this.eventEmitter.emit(
+        EVENT_NAMES.SHADOW_COMPARISON,
+        new ShadowComparisonEvent(
+          asPositionId(position.positionId),
+          asPairId(position.pairId),
+          {
+            triggered: evalResult.triggered,
+            type: evalResult.type,
+            currentPnl: evalResult.currentPnl.toFixed(8),
+          },
+          {
+            triggered: evalResult.shadowModelResult.triggered,
+            type: evalResult.shadowModelResult.type,
+            currentPnl: evalResult.shadowModelResult.currentPnl.toFixed(8),
+            criteria: evalResult.criteria.map((c) => ({
+              criterion: c.criterion,
+              proximity: c.proximity.toFixed(8),
+              triggered: c.triggered,
+              detail: c.detail,
+            })),
+          },
+          now,
+        ),
+      );
     }
 
     if (evalResult.triggered) {

@@ -717,3 +717,33 @@ export function formatDataDivergence(event: {
   const footer = formatCorrelationFooter(event as BaseEvent);
   return smartTruncate(`${header}\n\n${body}${footer}`);
 }
+
+// ─── Story 10.2: Shadow Mode Formatters ──────────────────────────────────────
+
+export function formatShadowDailySummary(event: {
+  date: string;
+  totalComparisons: number;
+  fixedTriggerCount: number;
+  modelTriggerCount: number;
+  criterionTriggerCounts: Record<string, number>;
+  cumulativePnlDelta: string;
+  timestamp: Date;
+  correlationId?: string;
+}): string {
+  const header = `${SEVERITY_EMOJI.info} <b>Shadow Mode Daily Summary</b>`;
+  const body = [
+    `Date: <code>${escapeHtml(event.date)}</code>`,
+    `Total Comparisons: <code>${event.totalComparisons}</code>`,
+    `Fixed Triggers: <code>${event.fixedTriggerCount}</code>`,
+    `Model Triggers: <code>${event.modelTriggerCount}</code>`,
+    `Cumulative P&amp;L Delta: <code>${escapeHtml(event.cumulativePnlDelta)}</code>`,
+    '',
+    '<b>Criterion Triggers:</b>',
+    ...Object.entries(event.criterionTriggerCounts).map(
+      ([criterion, count]) =>
+        `  ${escapeHtml(criterion)}: <code>${count}</code>`,
+    ),
+  ].join('\n');
+  const footer = formatCorrelationFooter(event as BaseEvent);
+  return smartTruncate(`${header}\n\n${body}${footer}`);
+}
