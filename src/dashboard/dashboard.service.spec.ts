@@ -1297,4 +1297,142 @@ describe('DashboardService', () => {
       expect(result[0]!.severity).toBe('critical');
     });
   });
+
+  describe('execution metadata in position detail (Story 10.4)', () => {
+    const mockDetailPositionWithMetadata = {
+      positionId: 'pos-meta-1',
+      pairId: 'pair-1',
+      status: 'OPEN',
+      expectedEdge: new Decimal('0.02'),
+      entryPrices: { kalshi: '0.45', polymarket: '0.55' },
+      sizes: { kalshi: '50', polymarket: '50' },
+      isPaper: false,
+      kalshiSide: 'buy',
+      polymarketSide: 'sell',
+      kalshiOrderId: 'order-k-1',
+      polymarketOrderId: 'order-p-1',
+      entryKalshiFeeRate: new Decimal('0.07'),
+      entryPolymarketFeeRate: new Decimal('0.02'),
+      entryClosePriceKalshi: new Decimal('0.44'),
+      entryClosePricePolymarket: new Decimal('0.56'),
+      createdAt: new Date('2026-03-01T10:00:00Z'),
+      updatedAt: new Date('2026-03-01T12:00:00Z'),
+      executionMetadata: {
+        primaryLeg: 'kalshi',
+        sequencingReason: 'latency_override',
+        kalshiLatencyMs: 100,
+        polymarketLatencyMs: 500,
+        kalshiDataSource: 'websocket',
+        polymarketDataSource: 'polling',
+        idealCount: 111,
+        matchedCount: 80,
+        divergenceDetected: false,
+      },
+      pair: {
+        kalshiContractId: 'k-contract',
+        polymarketContractId: 'p-contract',
+        kalshiDescription: 'Test Pair',
+        polymarketDescription: null,
+        resolutionDate: null,
+      },
+      kalshiOrder: {
+        orderId: 'order-k-1',
+        fillPrice: new Decimal('0.45'),
+        fillSize: new Decimal('50'),
+        side: 'buy',
+        platform: 'KALSHI',
+        price: new Decimal('0.45'),
+        size: new Decimal('50'),
+        status: 'FILLED',
+        createdAt: new Date('2026-03-01T10:00:00Z'),
+        updatedAt: new Date('2026-03-01T10:01:00Z'),
+      },
+      polymarketOrder: {
+        orderId: 'order-p-1',
+        fillPrice: new Decimal('0.55'),
+        fillSize: new Decimal('50'),
+        side: 'sell',
+        platform: 'POLYMARKET',
+        price: new Decimal('0.55'),
+        size: new Decimal('50'),
+        status: 'FILLED',
+        createdAt: new Date('2026-03-01T10:00:00Z'),
+        updatedAt: new Date('2026-03-01T10:01:00Z'),
+      },
+    };
+
+    it('[P0] should include execution metadata fields in PositionFullDetailDto', async () => {
+      // AC#5: dashboard DTO must surface execution metadata
+      (
+        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(mockDetailPositionWithMetadata);
+      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        mockDetailPositionWithMetadata.kalshiOrder,
+        mockDetailPositionWithMetadata.polymarketOrder,
+      ]);
+      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [],
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+
+      const result = await service.getPositionDetails('pos-meta-1');
+
+      expect(result).not.toBeNull();
+      expect(result!.executionSequencingReason).toBe('latency_override');
+      expect(result!.executionPrimaryLeg).toBe('kalshi');
+      expect(result!.executionKalshiDataSource).toBe('websocket');
+      expect(result!.executionPolymarketDataSource).toBe('polling');
+    });
+
+    it('[P0] should map JSON executionMetadata to flat DTO fields', async () => {
+      (
+        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(mockDetailPositionWithMetadata);
+      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [],
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+
+      const result = await service.getPositionDetails('pos-meta-1');
+
+      expect(result).not.toBeNull();
+      expect(result!.executionIdealCount).toBe(111);
+      expect(result!.executionMatchedCount).toBe(80);
+      expect(result!.executionKalshiLatencyMs).toBe(100);
+      expect(result!.executionPolymarketLatencyMs).toBe(500);
+    });
+
+    it('[P1] should handle null executionMetadata gracefully (pre-Story 10.4 positions)', async () => {
+      const positionWithoutMetadata = {
+        ...mockDetailPositionWithMetadata,
+        positionId: 'pos-legacy-1',
+        executionMetadata: null,
+      };
+      (
+        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(positionWithoutMetadata);
+      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [],
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+
+      const result = await service.getPositionDetails('pos-legacy-1');
+
+      expect(result).not.toBeNull();
+      expect(result!.executionSequencingReason).toBeNull();
+      expect(result!.executionPrimaryLeg).toBeNull();
+      expect(result!.executionKalshiDataSource).toBeNull();
+      expect(result!.executionPolymarketDataSource).toBeNull();
+      expect(result!.executionIdealCount).toBeNull();
+      expect(result!.executionMatchedCount).toBeNull();
+    });
+  });
 });

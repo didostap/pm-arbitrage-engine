@@ -224,6 +224,7 @@ model OpenPosition {
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
   reconciliationContext Json? @map("reconciliation_context")
+  executionMetadata    Json? @map("execution_metadata")
   isPaper           Boolean        @default(false) @map("is_paper")
 
   entryClosePriceKalshi      Decimal? @map("entry_close_price_kalshi") @db.Decimal(20, 8)

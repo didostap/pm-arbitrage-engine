@@ -295,4 +295,70 @@ export class PositionFullDetailDto {
     nullable: true,
   })
   closestProximity?: number | null;
+
+  // ─── Execution Metadata (Story 10.4) ──────────────────────────────────
+
+  @ApiPropertyOptional({
+    description: 'Which platform leg was executed first',
+    type: String,
+    nullable: true,
+  })
+  executionPrimaryLeg?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Sequencing reason: static_config or latency_override',
+    type: String,
+    nullable: true,
+  })
+  executionSequencingReason?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Kalshi P95 latency at execution time (ms)',
+    type: Number,
+    nullable: true,
+  })
+  executionKalshiLatencyMs?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Polymarket P95 latency at execution time (ms)',
+    type: Number,
+    nullable: true,
+  })
+  executionPolymarketLatencyMs?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Ideal contract count from unified sizing formula',
+    type: Number,
+    nullable: true,
+  })
+  executionIdealCount?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Matched contract count after depth capping',
+    type: Number,
+    nullable: true,
+  })
+  executionMatchedCount?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Kalshi data source: websocket, polling, or stale_fallback',
+    type: String,
+    nullable: true,
+  })
+  executionKalshiDataSource?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Polymarket data source: websocket, polling, or stale_fallback',
+    type: String,
+    nullable: true,
+  })
+  executionPolymarketDataSource?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Whether data divergence was detected during execution',
+    type: Boolean,
+    nullable: true,
+  })
+  executionDivergenceDetected?: boolean | null;
 }

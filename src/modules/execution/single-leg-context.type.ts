@@ -24,4 +24,5 @@ export interface SingleLegContext {
   errorMessage: string;
   isPaper: boolean;
   mixedMode: boolean;
+  executionMetadata?: Record<string, unknown>;
 }

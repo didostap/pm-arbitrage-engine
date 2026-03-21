@@ -570,15 +570,23 @@ export class PolymarketConnector
         };
       }
 
-      // Poll for fill with 5-second timeout
-      const ORDER_POLL_TIMEOUT_MS = 5000;
-      const ORDER_POLL_INTERVAL_MS = 500;
+      // Poll for fill with configurable timeout and jitter (Story 10.4)
+      const pollTimeoutMs = this.configService.get<number>(
+        'POLYMARKET_ORDER_POLL_TIMEOUT_MS',
+        5000,
+      );
+      const basePollIntervalMs = this.configService.get<number>(
+        'POLYMARKET_ORDER_POLL_INTERVAL_MS',
+        500,
+      );
       const startTime = Date.now();
 
-      while (Date.now() - startTime < ORDER_POLL_TIMEOUT_MS) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, ORDER_POLL_INTERVAL_MS),
-        );
+      while (Date.now() - startTime < pollTimeoutMs) {
+        // 0-20% random jitter prevents thundering herd
+        const jitteredInterval =
+          basePollIntervalMs +
+          Math.floor(Math.random() * (basePollIntervalMs * 0.2));
+        await new Promise((resolve) => setTimeout(resolve, jitteredInterval));
 
         try {
           const rawStatus = await this.clobClient.getOrder(orderId);
@@ -627,7 +635,7 @@ export class PolymarketConnector
 
       // Timeout — return pending status
       this.logger.warn({
-        message: 'Polymarket order pending after 5s timeout',
+        message: `Polymarket order pending after ${pollTimeoutMs}ms timeout`,
         module: 'connector',
         timestamp: new Date().toISOString(),
         platformId: PlatformId.POLYMARKET,

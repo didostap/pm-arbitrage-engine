@@ -721,6 +721,7 @@ export class DashboardService {
         exitCriteria: enrichment.data.exitCriteria ?? null,
         closestCriterion: enrichment.data.closestCriterion ?? null,
         closestProximity: enrichment.data.closestProximity ?? null,
+        ...this.mapExecutionMetadata(pos.executionMetadata),
       };
     } catch (error) {
       this.logger.error({
@@ -737,6 +738,36 @@ export class DashboardService {
         'DashboardService',
       );
     }
+  }
+
+  /** Map executionMetadata JSON column to flat DTO fields (Story 10.4).
+   *  Returns empty object for pre-10.4 positions (null metadata). */
+  private mapExecutionMetadata(metadata: unknown): Record<string, unknown> {
+    if (!metadata || typeof metadata !== 'object') {
+      return {
+        executionPrimaryLeg: null,
+        executionSequencingReason: null,
+        executionKalshiLatencyMs: null,
+        executionPolymarketLatencyMs: null,
+        executionIdealCount: null,
+        executionMatchedCount: null,
+        executionKalshiDataSource: null,
+        executionPolymarketDataSource: null,
+        executionDivergenceDetected: null,
+      };
+    }
+    const m = metadata as Record<string, unknown>;
+    return {
+      executionPrimaryLeg: (m.primaryLeg as string) ?? null,
+      executionSequencingReason: (m.sequencingReason as string) ?? null,
+      executionKalshiLatencyMs: (m.kalshiLatencyMs as number) ?? null,
+      executionPolymarketLatencyMs: (m.polymarketLatencyMs as number) ?? null,
+      executionIdealCount: (m.idealCount as number) ?? null,
+      executionMatchedCount: (m.matchedCount as number) ?? null,
+      executionKalshiDataSource: (m.kalshiDataSource as string) ?? null,
+      executionPolymarketDataSource: (m.polymarketDataSource as string) ?? null,
+      executionDivergenceDetected: (m.divergenceDetected as boolean) ?? null,
+    };
   }
 
   /** Parse AuditLog.details JSON field with Zod validation.

@@ -8,6 +8,7 @@ import {
 } from './execution.constants';
 import { RiskManagementModule } from '../risk-management/risk-management.module';
 import { ConnectorModule } from '../../connectors/connector.module';
+import { DataIngestionModule } from '../data-ingestion/data-ingestion.module';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { PrismaService } from '../../common/prisma.service';
@@ -22,7 +23,7 @@ import { POSITION_CLOSE_SERVICE_TOKEN } from '../../common/interfaces/position-c
 import { AutoUnwindService } from './auto-unwind.service';
 
 @Module({
-  imports: [RiskManagementModule, ConnectorModule],
+  imports: [RiskManagementModule, ConnectorModule, DataIngestionModule],
   controllers: [SingleLegResolutionController],
   providers: [
     ExecutionLockService,

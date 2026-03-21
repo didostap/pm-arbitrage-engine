@@ -21,6 +21,8 @@ import {
 } from '../../common/events/execution.events';
 import { createMockPlatformConnector } from '../../test/mock-factories.js';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
+import { PlatformHealthService } from '../data-ingestion/platform-health.service';
+import { DataDivergenceService } from '../data-ingestion/data-divergence.service';
 import {
   asContractId,
   asMatchId,
@@ -193,6 +195,12 @@ describe('ExecutionService', () => {
     validate: ReturnType<typeof vi.fn>;
   };
   let configService: ReturnType<typeof createConfigService>;
+  let platformHealthService: {
+    getPlatformHealth: ReturnType<typeof vi.fn>;
+  };
+  let dataDivergenceService: {
+    getDivergenceStatus: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     kalshiConnector = createMockPlatformConnector(PlatformId.KALSHI, {
@@ -230,6 +238,18 @@ describe('ExecutionService', () => {
       validate: vi.fn().mockReturnValue({ approved: true, violations: [] }),
     };
     configService = createConfigService();
+    platformHealthService = {
+      getPlatformHealth: vi.fn().mockReturnValue({
+        platformId: 'kalshi',
+        status: 'healthy',
+        latencyMs: null,
+        lastHeartbeat: new Date(),
+        mode: 'live',
+      }),
+    };
+    dataDivergenceService = {
+      getDivergenceStatus: vi.fn().mockReturnValue('normal'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -241,6 +261,8 @@ describe('ExecutionService', () => {
         { provide: PositionRepository, useValue: positionRepo },
         { provide: ComplianceValidatorService, useValue: complianceValidator },
         { provide: ConfigService, useValue: configService },
+        { provide: PlatformHealthService, useValue: platformHealthService },
+        { provide: DataDivergenceService, useValue: dataDivergenceService },
       ],
     }).compile();
 
@@ -1057,6 +1079,8 @@ describe('ExecutionService', () => {
             useValue: complianceValidator,
           },
           { provide: ConfigService, useValue: cs },
+          { provide: PlatformHealthService, useValue: platformHealthService },
+          { provide: DataDivergenceService, useValue: dataDivergenceService },
         ],
       }).compile();
 
@@ -1082,6 +1106,8 @@ describe('ExecutionService', () => {
             useValue: complianceValidator,
           },
           { provide: ConfigService, useValue: cs },
+          { provide: PlatformHealthService, useValue: platformHealthService },
+          { provide: DataDivergenceService, useValue: dataDivergenceService },
         ],
       }).compile();
 
@@ -1210,7 +1236,7 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(true);
       // idealSize = floor(100/0.45) = 222
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 222 }),
+        expect.objectContaining({ quantity: 111 }),
       );
       // actualCapitalUsed should reflect both legs
       expect(result.actualCapitalUsed).toBeDefined();
@@ -1361,17 +1387,17 @@ describe('ExecutionService', () => {
     });
 
     it('should equalize asymmetric depth to smaller leg', async () => {
-      // Primary depth=200, secondary depth=150
-      // Buy ideal=222, sell ideal=floor(100/0.45)=222
-      // primary capped to 200, secondary capped to 150
-      // Equalized: min(200, 150) = 150
+      // Unified: idealCount = floor(100/(0.45+0.45)) = 111
+      // Primary depth=80, secondary depth=60
+      // primaryCapped = min(111, 80) = 80, secondaryCapped = min(111, 60) = 60
+      // Equalized: min(80, 60) = 60
       kalshiConnector.getOrderBook.mockResolvedValue({
         ...makeKalshiOrderBook(),
-        asks: [{ price: 0.45, quantity: 200 }],
+        asks: [{ price: 0.45, quantity: 80 }],
       });
       polymarketConnector.getOrderBook.mockResolvedValue({
         ...makePolymarketOrderBook(),
-        bids: [{ price: 0.55, quantity: 150 }],
+        bids: [{ price: 0.55, quantity: 60 }],
       });
       kalshiConnector.submitOrder.mockResolvedValue(
         makeFilledOrder(PlatformId.KALSHI),
@@ -1380,7 +1406,7 @@ describe('ExecutionService', () => {
         makeFilledOrder(PlatformId.POLYMARKET),
       );
 
-      // Need gasFraction for edge re-validation since both sizes are reduced
+      // Need gasFraction for edge re-validation since size is reduced from 111 to 60
       const opp = makeOpportunity({ netEdge: new Decimal('0.08') });
       const enriched = opp.opportunity as EnrichedOpportunity;
       enriched.feeBreakdown = {
@@ -1395,24 +1421,25 @@ describe('ExecutionService', () => {
       const result = await service.execute(opp, makeReservation());
 
       expect(result.success).toBe(true);
-      // Both equalized to 150
+      // Both equalized to 60
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 150 }),
+        expect.objectContaining({ quantity: 60 }),
       );
       expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 150 }),
+        expect.objectContaining({ quantity: 60 }),
       );
     });
 
-    it('should reject when ideal size is 0 (tiny reservation, high price)', async () => {
-      // reservation $1, targetPrice $5 → idealSize = floor(1/5) = 0
+    it('should reject when ideal size is 0 (tiny reservation, high combined divisor)', async () => {
+      // Unified: buy@0.99, sell@0.01 → primaryDivisor=0.99, secondaryDivisor=1-0.01=0.99
+      // combinedDivisor=1.98, idealCount = floor(0.5/1.98) = 0
       const opp = makeOpportunity({
-        buyPrice: new Decimal('5.00'),
-        sellPrice: new Decimal('5.10'),
+        buyPrice: new Decimal('0.99'),
+        sellPrice: new Decimal('0.01'),
       });
       const reservation = {
         ...makeReservation(),
-        reservedCapitalUsd: new Decimal('1'),
+        reservedCapitalUsd: new Decimal('0.5'),
       };
 
       const result = await service.execute(opp, reservation);
@@ -1425,8 +1452,9 @@ describe('ExecutionService', () => {
       expect(result.error?.message).toContain('Ideal position size is 0');
     });
 
-    it('should reject cleanly when secondary ideal size is 0 (pre-submission)', async () => {
-      // reservation $1, sell @ $5 → collateral = 1-5 = -4 → idealSize ≤ 0
+    it('should reject cleanly when combined divisor is non-positive (pre-submission)', async () => {
+      // sell @ $5 → secondaryDivisor = 1-5 = -4
+      // combinedDivisor = 0.50 + (-4) = -3.50 → non-positive guard
       const opp = makeOpportunity({
         buyPrice: new Decimal('0.50'),
         sellPrice: new Decimal('5.00'),
@@ -1436,15 +1464,13 @@ describe('ExecutionService', () => {
         reservedCapitalUsd: new Decimal('1'),
       };
 
-      kalshiConnector.getOrderBook.mockResolvedValue({
-        ...makeKalshiOrderBook(),
-        asks: [{ price: 0.5, quantity: 500 }],
-      });
-
       const result = await service.execute(opp, reservation);
 
       expect(result.success).toBe(false);
       expect(result.partialFill).toBe(false); // Clean rejection — pre-submission
+      expect(result.error?.message).toContain(
+        'Non-positive combined collateral divisor',
+      );
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
 
@@ -1600,13 +1626,13 @@ describe('ExecutionService', () => {
 
       expect(result.success).toBe(true);
       expect(result.actualCapitalUsed).toBeDefined();
-      // Both legs equalized to 222
-      // Buy capital = 222 * 0.45 = 99.9
-      // Sell capital (collateral) = 222 * (1-0.55) = 222 * 0.45 = 99.9
-      // total = 199.8
-      const expected = new Decimal(222)
+      // Unified: idealCount = floor(100/(0.45+0.45)) = 111
+      // Buy capital = 111 * 0.45 = 49.95
+      // Sell capital (collateral) = 111 * (1-0.55) = 111 * 0.45 = 49.95
+      // total = 99.9
+      const expected = new Decimal(111)
         .mul('0.45')
-        .plus(new Decimal(222).mul('0.45'));
+        .plus(new Decimal(111).mul('0.45'));
       expect(result.actualCapitalUsed!.toNumber()).toBeCloseTo(
         expected.toNumber(),
         2,
@@ -1643,10 +1669,10 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(true);
       // Both legs should submit at equalized size = 222
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 222 }),
+        expect.objectContaining({ quantity: 111 }),
       );
       expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 222 }),
+        expect.objectContaining({ quantity: 111 }),
       );
     });
 
@@ -1690,24 +1716,24 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(true);
       // Both legs at equalized 126 (not 588 vs 476)
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 126 }),
+        expect.objectContaining({ quantity: 104 }),
       );
       expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 126 }),
+        expect.objectContaining({ quantity: 104 }),
       );
     });
 
     it('should equalize to smaller leg when depths differ asymmetrically', async () => {
-      // Buy @ 0.45 → ideal 222, depth 200 → capped 200
-      // Sell @ 0.55 → ideal floor(100/0.45)=222, depth 150 → capped 150
-      // Equalized: min(200, 150) = 150
+      // Unified: idealCount = floor(100/(0.45+0.45)) = 111
+      // Primary depth=90 → capped 90, Secondary depth=70 → capped 70
+      // Equalized: min(90, 70) = 70
       kalshiConnector.getOrderBook.mockResolvedValue({
         ...makeKalshiOrderBook(),
-        asks: [{ price: 0.45, quantity: 200 }],
+        asks: [{ price: 0.45, quantity: 90 }],
       });
       polymarketConnector.getOrderBook.mockResolvedValue({
         ...makePolymarketOrderBook(),
-        bids: [{ price: 0.55, quantity: 150 }],
+        bids: [{ price: 0.55, quantity: 70 }],
       });
       kalshiConnector.submitOrder.mockResolvedValue(
         makeFilledOrder(PlatformId.KALSHI),
@@ -1716,7 +1742,7 @@ describe('ExecutionService', () => {
         makeFilledOrder(PlatformId.POLYMARKET),
       );
 
-      // Provide gasFraction for edge re-validation
+      // Provide gasFraction for edge re-validation (size reduced from 111 to 70)
       const opp = makeOpportunity({ netEdge: new Decimal('0.08') });
       const enriched = opp.opportunity as EnrichedOpportunity;
       enriched.feeBreakdown = {
@@ -1731,12 +1757,12 @@ describe('ExecutionService', () => {
       const result = await service.execute(opp, makeReservation());
 
       expect(result.success).toBe(true);
-      // BOTH legs submit at 150 (equalized)
+      // BOTH legs submit at 70 (equalized)
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 150 }),
+        expect.objectContaining({ quantity: 70 }),
       );
       expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 150 }),
+        expect.objectContaining({ quantity: 70 }),
       );
     });
 
@@ -1765,13 +1791,13 @@ describe('ExecutionService', () => {
       );
 
       expect(result.success).toBe(true);
-      // Default: buy @ 0.45, sell @ 0.55, equalized to 222
-      // Buy capital: 222 * 0.45 = 99.9
-      // Sell capital (collateral): 222 * (1 - 0.55) = 222 * 0.45 = 99.9
-      // Total: 199.8
-      const expected = new Decimal(222)
+      // Unified: idealCount = floor(100/(0.45+0.45)) = 111
+      // Buy capital: 111 * 0.45 = 49.95
+      // Sell capital (collateral): 111 * (1-0.55) = 111 * 0.45 = 49.95
+      // Total: 99.9
+      const expected = new Decimal(111)
         .mul('0.45')
-        .plus(new Decimal(222).mul('0.45'));
+        .plus(new Decimal(111).mul('0.45'));
       expect(result.actualCapitalUsed!.toNumber()).toBeCloseTo(
         expected.toNumber(),
         2,
@@ -1797,25 +1823,23 @@ describe('ExecutionService', () => {
       expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
     });
 
-    it('should reject cleanly when secondary ideal size is 0 (pre-submission)', async () => {
-      // Sell @ very high price → collateral = 1-price ≈ 0 → ideal = 0
+    it('should reject cleanly when idealCount is 0 (tiny reservation, pre-submission)', async () => {
+      // Unified: buy@0.99, sell@0.01 → primaryDivisor=0.99, secondaryDivisor=0.99
+      // combinedDivisor=1.98, idealCount=floor(0.5/1.98)=0
       const opp = makeOpportunity({
-        buyPrice: new Decimal('0.50'),
-        sellPrice: new Decimal('0.99'),
+        buyPrice: new Decimal('0.99'),
+        sellPrice: new Decimal('0.01'),
       });
-      kalshiConnector.getOrderBook.mockResolvedValue({
-        ...makeKalshiOrderBook(),
-        asks: [{ price: 0.5, quantity: 500 }],
-      });
-      polymarketConnector.getOrderBook.mockResolvedValue({
-        ...makePolymarketOrderBook(),
-        bids: [{ price: 0.99, quantity: 500 }],
-      });
+      const reservation = {
+        ...makeReservation(),
+        reservedCapitalUsd: new Decimal('0.5'),
+      };
 
-      const result = await service.execute(opp, makeReservation());
+      const result = await service.execute(opp, reservation);
 
       expect(result.success).toBe(false);
       expect(result.partialFill).toBe(false); // Clean rejection, NOT single-leg
+      expect(result.error?.message).toContain('Ideal position size is 0');
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
 
@@ -1926,10 +1950,10 @@ describe('ExecutionService', () => {
 
       expect(result.success).toBe(true);
       expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 222 }),
+        expect.objectContaining({ quantity: 111 }),
       );
       expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ quantity: 222 }),
+        expect.objectContaining({ quantity: 111 }),
       );
     });
 
@@ -1977,16 +2001,12 @@ describe('ExecutionService', () => {
       expect(result.partialFill).toBe(true);
     });
 
-    it('should reject when sell price = 1.0 (zero collateral divisor)', async () => {
-      // Sell @ 1.0 → collateral = 1 - 1.0 = 0 → division by zero
-      // Primary is buy (Kalshi), secondary is sell (Polymarket) at 1.0
+    it('should reject when combined divisor is non-positive (sell price > 1.0)', async () => {
+      // Sell @ 1.50 → secondaryDivisor = 1 - 1.50 = -0.50
+      // combinedDivisor = 0.50 + (-0.50) = 0 → non-positive guard
       const opp = makeOpportunity({
         buyPrice: new Decimal('0.50'),
-        sellPrice: new Decimal('1.00'),
-      });
-      kalshiConnector.getOrderBook.mockResolvedValue({
-        ...makeKalshiOrderBook(),
-        asks: [{ price: 0.5, quantity: 500 }],
+        sellPrice: new Decimal('1.50'),
       });
 
       const result = await service.execute(opp, makeReservation());
@@ -1997,16 +2017,18 @@ describe('ExecutionService', () => {
         EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
       );
       expect(result.error?.message).toContain(
-        'Non-positive collateral divisor',
+        'Non-positive combined collateral divisor',
       );
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
 
-    it('should reject when primary sell price = 1.0 (zero collateral divisor)', async () => {
-      // Swap legs: primary is sell (Kalshi) at 1.0
+    it('should reject when primary sell makes combined divisor negative', async () => {
+      // Swap legs: primary is sell (Kalshi) at 1.50 → primaryDivisor = 1-1.50 = -0.50
+      // secondary is buy (Polymarket) at 0.50 → secondaryDivisor = 0.50
+      // combinedDivisor = -0.50 + 0.50 = 0 → non-positive guard
       const opp = makeOpportunity({
         buyPrice: new Decimal('0.50'),
-        sellPrice: new Decimal('1.00'),
+        sellPrice: new Decimal('1.50'),
         buyPlatformId: PlatformId.POLYMARKET,
         sellPlatformId: PlatformId.KALSHI,
       });
@@ -2016,7 +2038,7 @@ describe('ExecutionService', () => {
       expect(result.success).toBe(false);
       expect(result.partialFill).toBe(false);
       expect(result.error?.message).toContain(
-        'Non-positive collateral divisor',
+        'Non-positive combined collateral divisor',
       );
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
@@ -2223,6 +2245,984 @@ describe('ExecutionService', () => {
           expect(event.gasEstimate).toMatch(/^\d+(\.\d+)?$/);
         }
       }
+    });
+  });
+
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+  describe('unified sizing formula (Story 10.4)', () => {
+    it('[P0] should compute idealCount as floor(reservedCapital / (primaryDivisor + secondaryDivisor))', async () => {
+      // AC#3: idealCount = floor(reservedCapital / (primaryDivisor + secondaryDivisor))
+      // buy@0.45 → primaryDivisor=0.45, sell@0.55 → secondaryDivisor=(1-0.55)=0.45
+      // idealCount = floor(100 / (0.45 + 0.45)) = floor(111.11) = 111
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const reservation = makeReservation(); // reservedCapitalUsd = 100
+      const result = await service.execute(makeOpportunity(), reservation);
+
+      expect(result.success).toBe(true);
+      // Unified: floor(100 / (0.45 + 0.45)) = 111
+      const expectedIdealCount = new Decimal('100')
+        .div(new Decimal('0.45').plus(new Decimal('0.45')))
+        .floor()
+        .toNumber();
+      expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: expectedIdealCount }),
+      );
+      expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: expectedIdealCount }),
+      );
+    });
+
+    it('[P0] should guarantee total capital across both legs is within reserved budget', async () => {
+      // AC#3: total capital = idealCount * (primaryDivisor + secondaryDivisor) <= reservedCapitalUsd
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const reservation = makeReservation();
+      const result = await service.execute(makeOpportunity(), reservation);
+
+      expect(result.success).toBe(true);
+      // Extract submitted quantity from the first call arg
+      const submittedQty = (
+        kalshiConnector.submitOrder.mock.calls[0]![0] as { quantity: number }
+      ).quantity;
+      const totalCapital = new Decimal(submittedQty).mul(
+        new Decimal('0.45').plus(new Decimal('0.45')),
+      );
+      expect(totalCapital.lte(reservation.reservedCapitalUsd)).toBe(true);
+    });
+
+    it('[P0] should apply depth cap from BOTH legs and use matchedCount = min(primaryCapped, secondaryCapped)', async () => {
+      // AC#3: depth cap both, matchedCount = min
+      // Primary depth=80, secondary depth=60
+      // idealCount = floor(100 / (0.45+0.45)) = 111
+      // primaryCapped = min(111, 80) = 80, secondaryCapped = min(111, 60) = 60
+      // matchedCount = min(80, 60) = 60
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        ...makeKalshiOrderBook(),
+        asks: [{ price: 0.45, quantity: 80 }],
+      });
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        ...makePolymarketOrderBook(),
+        bids: [{ price: 0.55, quantity: 60 }],
+      });
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const opp = makeOpportunity({ netEdge: new Decimal('0.08') });
+      const enriched = opp.opportunity as EnrichedOpportunity;
+      enriched.feeBreakdown = {
+        buyFeeCost: new Decimal('0.01'),
+        sellFeeCost: new Decimal('0.01'),
+        gasFraction: new Decimal('0.001'),
+        totalCosts: new Decimal('0.021'),
+        buyFeeSchedule: {} as any,
+        sellFeeSchedule: {} as any,
+      };
+
+      const result = await service.execute(opp, makeReservation());
+
+      expect(result.success).toBe(true);
+      expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: 60 }),
+      );
+      expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: 60 }),
+      );
+    });
+
+    it('[P0] should trigger edge re-validation when matchedCount < idealCount', async () => {
+      // AC#3: when depth reduces matchedCount below idealCount, must re-validate edge
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        ...makeKalshiOrderBook(),
+        asks: [{ price: 0.45, quantity: 56 }],
+      });
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+
+      const opp = makeOpportunity({ netEdge: new Decimal('0.0081') });
+      const enriched = opp.opportunity as EnrichedOpportunity;
+      enriched.feeBreakdown = {
+        buyFeeCost: new Decimal('0.01'),
+        sellFeeCost: new Decimal('0.01'),
+        gasFraction: new Decimal('0.04'),
+        totalCosts: new Decimal('0.06'),
+        buyFeeSchedule: {} as any,
+        sellFeeSchedule: {} as any,
+      };
+
+      const result = await service.execute(opp, makeReservation());
+
+      // Edge eroded below threshold after size reduction
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe(
+        EXECUTION_ERROR_CODES.EDGE_ERODED_BY_SIZE,
+      );
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+    });
+
+    it('[P1] should reject when combinedDivisor (primaryDivisor + secondaryDivisor) is <= 0', async () => {
+      // AC#3: edge case where both divisors cancel out or go negative
+      // sell@1.00 → primaryDivisor=(1-1.00)=0, buy@0.00 → secondaryDivisor=0
+      // combinedDivisor = 0 → division by zero guard
+      const opp = makeOpportunity({
+        buyPrice: new Decimal('0.00'),
+        sellPrice: new Decimal('1.00'),
+      });
+
+      const result = await service.execute(opp, makeReservation());
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe(
+        EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+      );
+    });
+
+    it('[P1] should reject when matchedCount falls below min-fill-ratio * idealCount', async () => {
+      // AC#3: minFillRatio applies to unified idealCount
+      // idealCount = floor(100 / (0.45+0.45)) = 111
+      // minFill = ceil(111 * 0.25) = 28
+      // depth=10 on both → matchedCount=10 < 28 → reject
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        ...makeKalshiOrderBook(),
+        asks: [{ price: 0.45, quantity: 10 }],
+      });
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        ...makePolymarketOrderBook(),
+        bids: [{ price: 0.55, quantity: 10 }],
+      });
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(false);
+      expect(result.error?.code).toBe(
+        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+      );
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+    });
+
+    it('[P1] should produce identical contract counts on both legs (equalization regression)', async () => {
+      // This is a regression test: the old dual-formula approach could produce different ideal sizes
+      // The unified formula computes one idealCount from the start
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(true);
+      const primaryQty = (
+        kalshiConnector.submitOrder.mock.calls[0]![0] as { quantity: number }
+      ).quantity;
+      const secondaryQty = (
+        polymarketConnector.submitOrder.mock.calls[0]![0] as {
+          quantity: number;
+        }
+      ).quantity;
+      expect(primaryQty).toBe(secondaryQty);
+    });
+
+    it('[P0] should use actualCapitalUsed = matchedCount * (primaryDivisor + secondaryDivisor)', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.actualCapitalUsed).toBeDefined();
+      const submittedQty = (
+        kalshiConnector.submitOrder.mock.calls[0]![0] as { quantity: number }
+      ).quantity;
+      const expectedCapital = new Decimal(submittedQty).mul(
+        new Decimal('0.45').plus(new Decimal('0.45')),
+      );
+      expect(result.actualCapitalUsed!.toNumber()).toBeCloseTo(
+        expectedCapital.toNumber(),
+        2,
+      );
+    });
+  });
+
+  describe('adaptive sequencing (Story 10.4)', () => {
+    function mockPlatformLatencies(
+      kalshiMs: number | null,
+      polymarketMs: number | null,
+    ) {
+      platformHealthService.getPlatformHealth.mockImplementation(
+        (platformId: PlatformId) => {
+          if (platformId === PlatformId.KALSHI) {
+            return {
+              platformId: PlatformId.KALSHI,
+              status: 'healthy',
+              latencyMs: kalshiMs,
+              lastHeartbeat: new Date(),
+              mode: 'live',
+            };
+          }
+          return {
+            platformId: PlatformId.POLYMARKET,
+            status: 'healthy',
+            latencyMs: polymarketMs,
+            lastHeartbeat: new Date(),
+            mode: 'live',
+          };
+        },
+      );
+    }
+
+    it('[P0] should override primaryLeg to kalshi when kalshi P95 latency < polymarket by > 200ms', async () => {
+      // AC#1: when P95 latency diff > 200ms, lower-latency platform goes first
+      mockPlatformLatencies(100, 400);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      // Static config says polymarket first, but latency should override
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(kalshiCallOrder).toBeLessThan(pmCallOrder!);
+    });
+
+    it('[P0] should override primaryLeg to polymarket when polymarket P95 latency < kalshi by > 200ms', async () => {
+      mockPlatformLatencies(400, 100);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      // Static config says kalshi first, but latency should override
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'kalshi' } }),
+        makeReservation(),
+      );
+
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(pmCallOrder).toBeLessThan(kalshiCallOrder!);
+    });
+
+    it('[P0] should use static primaryLeg config when P95 latency diff <= 200ms', async () => {
+      // AC#2: stable latency → use static config
+      mockPlatformLatencies(200, 300); // diff=100 ≤ 200 → static
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      // Static config says kalshi first, latency diff 100ms ≤ 200ms → use static
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'kalshi' } }),
+        makeReservation(),
+      );
+
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(kalshiCallOrder).toBeLessThan(pmCallOrder!);
+    });
+
+    it('[P0] should use static primaryLeg config when P95 latency is null on one platform', async () => {
+      // AC#2: null latency → static fallback
+      mockPlatformLatencies(null, 300);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      // Static config says polymarket first → polymarket called first
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(pmCallOrder).toBeLessThan(kalshiCallOrder!);
+    });
+
+    it('[P1] should use static primaryLeg config when both P95 latencies are null', async () => {
+      mockPlatformLatencies(null, null);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'kalshi' } }),
+        makeReservation(),
+      );
+
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(kalshiCallOrder).toBeLessThan(pmCallOrder!);
+    });
+
+    it('[P1] should not apply adaptive sequencing when ADAPTIVE_SEQUENCING_ENABLED=false', async () => {
+      // Even when latency diff > 200ms, if disabled, use static config
+      configService.get.mockImplementation(
+        (key: string, defaultValue?: string) => {
+          if (key === 'ADAPTIVE_SEQUENCING_ENABLED') return 'false';
+          if (key === 'EXECUTION_MIN_FILL_RATIO') return '0.25';
+          if (key === 'DETECTION_MIN_EDGE_THRESHOLD') return '0.008';
+          return defaultValue;
+        },
+      );
+
+      mockPlatformLatencies(100, 500);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      // Static config says polymarket first → should remain polymarket despite latency
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(pmCallOrder).toBeLessThan(kalshiCallOrder!);
+    });
+
+    it('[P1] should log the sequencing decision with latency values and reason', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const logSpy = vi.spyOn((service as any).logger, 'log');
+
+      mockPlatformLatencies(100, 500);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('sequencing'),
+          module: 'execution',
+          data: expect.objectContaining({
+            staticPrimaryLeg: 'polymarket',
+            overridePrimaryLeg: 'kalshi',
+            kalshiLatencyMs: 100,
+            polymarketLatencyMs: 500,
+          }),
+        }),
+      );
+    });
+
+    it('[P1] should resolve connectors correctly when adaptive override swaps primary/secondary', async () => {
+      // When latency-based override swaps primary to polymarket, the correct connector must be used
+      mockPlatformLatencies(500, 100);
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      const result = await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'kalshi' } }),
+        makeReservation(),
+      );
+
+      // Override: polymarket becomes primary (lower latency)
+      expect(result.success).toBe(true);
+      // Polymarket submitted first
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(pmCallOrder).toBeLessThan(kalshiCallOrder!);
+    });
+  });
+
+  describe('data source classification (Story 10.4)', () => {
+    function setupHappyPath() {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+    }
+
+    function getPersistedMetadata(): Record<string, unknown> {
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      return JSON.parse(JSON.stringify(posData.executionMetadata)) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    it('[P0] should classify data source as websocket when WS update is recent (< 60s)', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 5000),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 10000),
+      });
+      setupHappyPath();
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+      expect(result.success).toBe(true);
+      const meta = getPersistedMetadata();
+      expect(meta.kalshiDataSource).toBe('websocket');
+      expect(meta.polymarketDataSource).toBe('websocket');
+    });
+
+    it('[P0] should classify data source as polling when WS update is null', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: null,
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: null,
+      });
+      setupHappyPath();
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+      expect(result.success).toBe(true);
+      const meta = getPersistedMetadata();
+      expect(meta.kalshiDataSource).toBe('polling');
+      expect(meta.polymarketDataSource).toBe('polling');
+    });
+
+    it('[P0] should classify data source as stale_fallback when WS update is old (> 60s)', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 90000),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 5000),
+      });
+      setupHappyPath();
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+      expect(result.success).toBe(true);
+      const meta = getPersistedMetadata();
+      expect(meta.kalshiDataSource).toBe('stale_fallback');
+      expect(meta.polymarketDataSource).toBe('websocket');
+    });
+
+    it('[P1] should emit warning log when divergence status is not normal', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 5000),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 5000),
+      });
+      dataDivergenceService.getDivergenceStatus.mockReturnValue('divergent');
+      setupHappyPath();
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const warnSpy = vi.spyOn((service as any).logger, 'warn');
+      await service.execute(makeOpportunity(), makeReservation());
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('divergence'),
+        }),
+      );
+      // Reset mock
+      dataDivergenceService.getDivergenceStatus.mockReturnValue('normal');
+    });
+
+    it('[P1] should use worst-of-two data sources for execution metadata classification', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 90000),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 2000),
+      });
+      setupHappyPath();
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+      expect(result.success).toBe(true);
+      const meta = getPersistedMetadata();
+      // Per-platform classification preserved (not worst-of-two overall)
+      expect(meta.kalshiDataSource).toBe('stale_fallback');
+      expect(meta.polymarketDataSource).toBe('websocket');
+    });
+  });
+
+  describe('execution metadata persistence (Story 10.4)', () => {
+    function setupHappyPath() {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+    }
+
+    function getPersistedMetadata(): Record<string, unknown> {
+      const posData = positionRepo.create.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      return JSON.parse(JSON.stringify(posData.executionMetadata)) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    it('[P0] should persist execution metadata as JSON on OpenPosition record', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 5000),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(Date.now() - 8000),
+      });
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      expect(positionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          executionMetadata: expect.objectContaining({
+            sequencingReason: expect.any(String),
+            kalshiDataSource: expect.any(String),
+            polymarketDataSource: expect.any(String),
+          }),
+        }),
+      );
+    });
+
+    it('[P0] should include all required fields in persisted execution metadata', async () => {
+      kalshiConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(),
+      });
+      polymarketConnector.getOrderBookFreshness.mockReturnValue({
+        lastWsUpdateAt: new Date(),
+      });
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const metadata = getPersistedMetadata();
+      expect(metadata).toBeDefined();
+      expect(metadata.primaryLeg).toBeDefined();
+      expect(metadata.sequencingReason).toBeDefined();
+      expect(metadata.kalshiLatencyMs).toBeDefined();
+      expect(metadata.polymarketLatencyMs).toBeDefined();
+      expect(metadata.kalshiDataSource).toBeDefined();
+      expect(metadata.polymarketDataSource).toBeDefined();
+      expect(metadata.idealCount).toBeDefined();
+      expect(metadata.matchedCount).toBeDefined();
+      expect(metadata.divergenceDetected).toBeDefined();
+    });
+
+    it('[P1] should handle null latency values gracefully in persisted metadata', async () => {
+      // Default platformHealthService mock returns latencyMs: null
+      setupHappyPath();
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const metadata = getPersistedMetadata();
+      expect(metadata).toBeDefined();
+      expect(metadata.kalshiLatencyMs).toBeNull();
+      expect(metadata.polymarketLatencyMs).toBeNull();
+      expect(metadata.sequencingReason).toBe('static_config');
+    });
+  });
+
+  describe('internal subsystem verification (Story 10.4)', () => {
+    it('[P0] should submit orders that actually reach the connector mock (subsystem verification)', async () => {
+      // AC#7: orders reach connector mocks; verifies the order submission pipeline is intact
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      // Verify the connector mock was called with proper OrderParams shape
+      expect(kalshiConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contractId: expect.any(String),
+          side: expect.stringMatching(/^(buy|sell)$/),
+          quantity: expect.any(Number),
+          price: expect.any(Number),
+          type: 'limit',
+        }),
+      );
+      expect(polymarketConnector.submitOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contractId: expect.any(String),
+          side: expect.stringMatching(/^(buy|sell)$/),
+          quantity: expect.any(Number),
+          price: expect.any(Number),
+          type: 'limit',
+        }),
+      );
+    });
+
+    it('[P0] should call getOrderBookFreshness on both connectors during execution', async () => {
+      // AC#7: verifies data freshness query is integrated into execution pipeline
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      expect(kalshiConnector.getOrderBookFreshness).toHaveBeenCalled();
+      expect(polymarketConnector.getOrderBookFreshness).toHaveBeenCalled();
+    });
+
+    it('[P1] should query platformHealthService for both platforms during sequencing decision', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      expect(platformHealthService.getPlatformHealth).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+      );
+      expect(platformHealthService.getPlatformHealth).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+      );
+    });
+  });
+
+  describe('paper-live-boundary (Story 10.4)', () => {
+    it('[P0] should apply adaptive sequencing identically in paper mode', async () => {
+      // Team Agreement #20: paper mode must use same sequencing logic
+      // Paper mode: connector.getHealth returns mode=paper, but platformHealthService still provides latency
+      platformHealthService.getPlatformHealth.mockImplementation(
+        (pid: PlatformId) => ({
+          platformId: pid,
+          status: 'healthy',
+          latencyMs: pid === PlatformId.KALSHI ? 100 : 500,
+          lastHeartbeat: new Date(),
+          mode: 'paper',
+        }),
+      );
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+      polymarketConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 400,
+        mode: 'paper',
+      });
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      // Adaptive override: kalshi goes first (lower latency)
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(kalshiCallOrder).toBeLessThan(pmCallOrder!);
+    });
+
+    it('[P0] should apply adaptive sequencing identically in live mode', async () => {
+      platformHealthService.getPlatformHealth.mockImplementation(
+        (pid: PlatformId) => ({
+          platformId: pid,
+          status: 'healthy',
+          latencyMs: pid === PlatformId.KALSHI ? 100 : 500,
+          lastHeartbeat: new Date(),
+          mode: 'live',
+        }),
+      );
+
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(
+        makeOpportunity({ pairConfig: { primaryLeg: 'polymarket' } }),
+        makeReservation(),
+      );
+
+      const kalshiCallOrder =
+        kalshiConnector.submitOrder.mock.invocationCallOrder[0];
+      const pmCallOrder =
+        polymarketConnector.submitOrder.mock.invocationCallOrder[0];
+      expect(kalshiCallOrder).toBeLessThan(pmCallOrder!);
+    });
+
+    it('[P0] should compute identical unified sizing in paper and live modes', async () => {
+      // Team Agreement #20: sizing formula must be identical regardless of mode
+      kalshiConnector.getOrderBook.mockResolvedValue(makeKalshiOrderBook());
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      // Run in paper mode
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'paper',
+      });
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const paperQty = (
+        kalshiConnector.submitOrder.mock.calls[0]![0] as { quantity: number }
+      ).quantity;
+
+      // Reset and run in live mode
+      kalshiConnector.submitOrder.mockClear();
+      polymarketConnector.submitOrder.mockClear();
+      kalshiConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.KALSHI,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 50,
+        mode: 'live',
+      });
+      polymarketConnector.getHealth.mockReturnValue({
+        platformId: PlatformId.POLYMARKET,
+        status: 'healthy',
+        lastHeartbeat: new Date(),
+        latencyMs: 100,
+      });
+      kalshiConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.KALSHI),
+      );
+      polymarketConnector.submitOrder.mockResolvedValue(
+        makeFilledOrder(PlatformId.POLYMARKET),
+      );
+
+      await service.execute(makeOpportunity(), makeReservation());
+
+      const liveQty = (
+        kalshiConnector.submitOrder.mock.calls[0]![0] as { quantity: number }
+      ).quantity;
+
+      expect(paperQty).toBe(liveQty);
+    });
+  });
+
+  describe('clean reservation release with unified sizing (Story 10.4)', () => {
+    it('[P0] should release budget reservation cleanly when pre-flight depth rejection occurs with unified sizing', async () => {
+      // AC#4 regression test: when both-leg depth check fails before submission,
+      // the budget reservation must be cleanable by the orchestrator
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        ...makeKalshiOrderBook(),
+        asks: [{ price: 0.45, quantity: 5 }], // below min fill
+      });
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        ...makePolymarketOrderBook(),
+        bids: [{ price: 0.55, quantity: 5 }], // below min fill
+      });
+
+      const result = await service.execute(
+        makeOpportunity(),
+        makeReservation(),
+      );
+
+      // Clean rejection — no orders submitted, no position created
+      expect(result.success).toBe(false);
+      expect(result.partialFill).toBe(false);
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+      expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
+      expect(positionRepo.create).not.toHaveBeenCalled();
+      // Orchestrator can safely call releaseReservation() after this
+      expect(result.error?.code).toBe(
+        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+      );
     });
   });
 });

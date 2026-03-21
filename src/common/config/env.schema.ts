@@ -223,6 +223,31 @@ export const envSchema = z.object({
   AUTO_UNWIND_DELAY_MS: z.coerce.number().int().min(0).max(30000).default(2000),
   AUTO_UNWIND_MAX_LOSS_PCT: z.coerce.number().min(0).max(100).default(5),
 
+  // Adaptive Sequencing (Story 10.4) — latency-based leg ordering
+  ADAPTIVE_SEQUENCING_ENABLED: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('true'),
+  ADAPTIVE_SEQUENCING_LATENCY_THRESHOLD_MS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(200),
+
+  // Polymarket Order Polling (Story 10.4) — configurable poll timeout and interval
+  POLYMARKET_ORDER_POLL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(30000)
+    .default(5000),
+  POLYMARKET_ORDER_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(100)
+    .max(5000)
+    .default(500),
+
   // Exit Mode (Story 10.2) — six-criteria model-driven exit logic
   EXIT_MODE: z.enum(['fixed', 'model', 'shadow']).default('fixed'),
   EXIT_EDGE_EVAP_MULTIPLIER: z.coerce.number().max(0).default(-1.0),

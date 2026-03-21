@@ -49,6 +49,27 @@ import {
   asPairId,
   asPositionId,
 } from '../../common/types/branded.type';
+import { PlatformHealthService } from '../data-ingestion/platform-health.service';
+import { DataDivergenceService } from '../data-ingestion/data-divergence.service';
+
+interface SequencingDecision {
+  primaryLeg: string; // 'kalshi' | 'polymarket'
+  reason: 'static_config' | 'latency_override';
+  kalshiLatencyMs: number | null;
+  polymarketLatencyMs: number | null;
+}
+
+interface ExecutionMetadata {
+  primaryLeg: string;
+  sequencingReason: string;
+  kalshiLatencyMs: number | null;
+  polymarketLatencyMs: number | null;
+  idealCount: number;
+  matchedCount: number;
+  kalshiDataSource: string;
+  polymarketDataSource: string;
+  divergenceDetected: boolean;
+}
 
 @Injectable()
 export class ExecutionService implements IExecutionEngine {
@@ -66,6 +87,8 @@ export class ExecutionService implements IExecutionEngine {
     private readonly positionRepository: PositionRepository,
     private readonly complianceValidator: ComplianceValidatorService,
     private readonly configService: ConfigService,
+    private readonly platformHealthService: PlatformHealthService,
+    private readonly dataDivergenceService: DataDivergenceService,
   ) {
     this.minFillRatio = Number(
       this.configService.get<string>('EXECUTION_MIN_FILL_RATIO', '0.25'),
@@ -126,8 +149,10 @@ export class ExecutionService implements IExecutionEngine {
     const dislocation = enriched.dislocation;
     const pairId = opportunity.reservationRequest.pairId;
 
-    // Determine primary/secondary based on pair config
-    const primaryLeg = dislocation.pairConfig.primaryLeg ?? 'kalshi';
+    // Determine primary/secondary based on adaptive sequencing
+    const staticPrimaryLeg = dislocation.pairConfig.primaryLeg ?? 'kalshi';
+    const sequencingDecision = this.determineSequencing(staticPrimaryLeg);
+    const primaryLeg = sequencingDecision.primaryLeg;
     const {
       primaryConnector,
       secondaryConnector,
@@ -207,42 +232,61 @@ export class ExecutionService implements IExecutionEngine {
     const secondaryTargetPrice =
       secondarySide === 'buy' ? dislocation.buyPrice : dislocation.sellPrice;
 
-    // === COLLATERAL-AWARE SIZING — PRIMARY LEG ===
+    // === COLLATERAL-AWARE SIZING — UNIFIED FORMULA (Story 10.4) ===
     // Buy: cost = price per contract. Sell: collateral = (1 - price) per contract.
     const primaryDivisor =
       primarySide === 'sell' ? new Decimal(1).minus(targetPrice) : targetPrice;
+    const secondaryDivisor =
+      secondarySide === 'sell'
+        ? new Decimal(1).minus(secondaryTargetPrice)
+        : secondaryTargetPrice;
 
-    // Guard: divisor must be positive (sell price >= 1.0 makes collateral non-positive)
-    if (primaryDivisor.lte(0)) {
-      return {
-        success: false,
-        partialFill: false,
-        error: new ExecutionError(
+    // Guard: combined divisor must be positive
+    const combinedDivisor = primaryDivisor.plus(secondaryDivisor);
+    if (combinedDivisor.lte(0)) {
+      const error = new ExecutionError(
+        EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
+        'Non-positive combined collateral divisor',
+        'warning',
+      );
+      this.eventEmitter.emit(
+        EVENT_NAMES.EXECUTION_FAILED,
+        new ExecutionFailedEvent(
           EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
-          `Non-positive collateral divisor for primary leg (price=${targetPrice.toString()}, side=${primarySide})`,
-          'warning',
+          error.message,
+          opportunity.reservationRequest.opportunityId,
+          {
+            primaryDivisor: primaryDivisor.toString(),
+            secondaryDivisor: secondaryDivisor.toString(),
+          },
+          undefined,
+          isPaper,
+          mixedMode,
         ),
-      };
+      );
+      return { success: false, partialFill: false, error };
     }
 
-    const idealSize = new Decimal(reservation.reservedCapitalUsd)
-      .div(primaryDivisor)
+    // Unified formula: both legs fit within budget
+    const idealCount = new Decimal(reservation.reservedCapitalUsd)
+      .div(combinedDivisor)
       .floor()
       .toNumber();
 
-    // Guard: reject if ideal size rounds to zero (extreme price or tiny reservation)
-    if (idealSize <= 0) {
+    // Guard: reject if ideal count rounds to zero (extreme price or tiny reservation)
+    if (idealCount <= 0) {
       return {
         success: false,
         partialFill: false,
         error: new ExecutionError(
           EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
-          `Ideal position size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, targetPrice=${targetPrice.toString()})`,
+          `Ideal position size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, combinedDivisor=${combinedDivisor.toString()})`,
           'warning',
         ),
       };
     }
 
+    // Depth check — both legs BEFORE any order submission
     const primaryAvailableDepth = await this.getAvailableDepth(
       primaryConnector,
       primaryContractId,
@@ -251,16 +295,16 @@ export class ExecutionService implements IExecutionEngine {
       primaryPlatform,
     );
 
-    const primaryMinFillSize = Math.ceil(idealSize * this.minFillRatio);
-    let targetSize = Math.min(idealSize, primaryAvailableDepth);
+    const primaryMinFillSize = Math.ceil(idealCount * this.minFillRatio);
+    const primaryCapped = Math.min(idealCount, primaryAvailableDepth);
 
-    if (targetSize < primaryMinFillSize) {
+    if (primaryCapped < primaryMinFillSize) {
       this.logger.warn({
         message: 'Depth below minimum fill threshold',
         module: 'execution',
         data: {
           pairId,
-          idealSize,
+          idealCount,
           availableDepth: primaryAvailableDepth,
           minFillSize: primaryMinFillSize,
           platform: primaryPlatform,
@@ -286,55 +330,17 @@ export class ExecutionService implements IExecutionEngine {
       return { success: false, partialFill: false, error };
     }
 
-    if (targetSize < idealSize) {
+    if (primaryCapped < idealCount) {
       this.logger.log({
         message: 'Depth-aware size cap applied',
         module: 'execution',
         data: {
-          idealSize,
-          cappedSize: targetSize,
+          idealCount,
+          cappedSize: primaryCapped,
           availableDepth: primaryAvailableDepth,
           platform: primaryPlatform,
         },
       });
-    }
-
-    // === COLLATERAL-AWARE SIZING — SECONDARY LEG ===
-    // Both depth checks happen BEFORE any order submission (6.5.5h flow restructure)
-    const secondaryDivisor =
-      secondarySide === 'sell'
-        ? new Decimal(1).minus(secondaryTargetPrice)
-        : secondaryTargetPrice;
-
-    // Guard: divisor must be positive (sell price >= 1.0 makes collateral non-positive)
-    if (secondaryDivisor.lte(0)) {
-      return {
-        success: false,
-        partialFill: false,
-        error: new ExecutionError(
-          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
-          `Non-positive collateral divisor for secondary leg (price=${secondaryTargetPrice.toString()}, side=${secondarySide})`,
-          'warning',
-        ),
-      };
-    }
-
-    const secondaryIdealSize = new Decimal(reservation.reservedCapitalUsd)
-      .div(secondaryDivisor)
-      .floor()
-      .toNumber();
-
-    // Guard: reject if secondary ideal size rounds to zero
-    if (secondaryIdealSize <= 0) {
-      return {
-        success: false,
-        partialFill: false,
-        error: new ExecutionError(
-          EXECUTION_ERROR_CODES.GENERIC_EXECUTION_FAILURE,
-          `Secondary ideal size is 0 (reservedCapitalUsd=${reservation.reservedCapitalUsd.toString()}, secondaryTargetPrice=${secondaryTargetPrice.toString()})`,
-          'warning',
-        ),
-      };
     }
 
     const secondaryAvailableDepth = await this.getAvailableDepth(
@@ -345,18 +351,16 @@ export class ExecutionService implements IExecutionEngine {
       secondaryPlatform,
     );
 
-    const secondaryMinFillSize = Math.ceil(
-      secondaryIdealSize * this.minFillRatio,
-    );
-    let secondarySize = Math.min(secondaryIdealSize, secondaryAvailableDepth);
+    const secondaryMinFillSize = Math.ceil(idealCount * this.minFillRatio);
+    const secondaryCapped = Math.min(idealCount, secondaryAvailableDepth);
 
-    if (secondarySize < secondaryMinFillSize) {
+    if (secondaryCapped < secondaryMinFillSize) {
       this.logger.warn({
         message: 'Depth below minimum fill threshold (secondary)',
         module: 'execution',
         data: {
           pairId,
-          idealSize: secondaryIdealSize,
+          idealCount,
           availableDepth: secondaryAvailableDepth,
           minFillSize: secondaryMinFillSize,
           platform: secondaryPlatform,
@@ -382,13 +386,13 @@ export class ExecutionService implements IExecutionEngine {
       return { success: false, partialFill: false, error };
     }
 
-    if (secondarySize < secondaryIdealSize) {
+    if (secondaryCapped < idealCount) {
       this.logger.log({
         message: 'Depth-aware size cap applied (secondary)',
         module: 'execution',
         data: {
-          idealSize: secondaryIdealSize,
-          cappedSize: secondarySize,
+          idealCount,
+          cappedSize: secondaryCapped,
           availableDepth: secondaryAvailableDepth,
           platform: secondaryPlatform,
         },
@@ -396,14 +400,12 @@ export class ExecutionService implements IExecutionEngine {
     }
 
     // === CROSS-LEG EQUALIZATION ===
-    // Both legs must have equal contract counts for proper hedging
-    const equalizedSize = Math.min(targetSize, secondarySize);
-    targetSize = equalizedSize;
-    secondarySize = equalizedSize;
+    const equalizedSize = Math.min(primaryCapped, secondaryCapped);
+    const targetSize = equalizedSize;
+    const secondarySize = equalizedSize;
 
     // === EDGE RE-VALIDATION AFTER EQUALIZATION ===
-    const sizeWasReduced =
-      equalizedSize < idealSize || equalizedSize < secondaryIdealSize;
+    const sizeWasReduced = equalizedSize < idealCount;
 
     if (sizeWasReduced) {
       // Null guard: fee breakdown must be populated by detection pipeline
@@ -425,9 +427,9 @@ export class ExecutionService implements IExecutionEngine {
         };
       }
 
-      // Collateral-aware: primaryDivisor accounts for buy cost or sell collateral
+      // Collateral-aware: combinedDivisor already computed
       const conservativePositionSizeUsd = new Decimal(equalizedSize).mul(
-        primaryDivisor.plus(secondaryDivisor),
+        combinedDivisor,
       );
 
       // Recover absolute gas estimate: gasFraction = gasEstimateUsd / detectionPositionSizeUsd
@@ -449,8 +451,7 @@ export class ExecutionService implements IExecutionEngine {
             originalNetEdge: enriched.netEdge.toString(),
             adjustedNetEdge: adjustedNetEdge.toString(),
             threshold: this.minEdgeThreshold.toString(),
-            idealSize,
-            secondaryIdealSize,
+            idealCount,
             equalizedSize,
             originalGasFraction: enriched.feeBreakdown.gasFraction.toString(),
             newGasFraction: newGasFraction.toString(),
@@ -492,6 +493,82 @@ export class ExecutionService implements IExecutionEngine {
         ),
       };
     }
+
+    // === DATA SOURCE CLASSIFICATION (Story 10.4, AC#6) ===
+    // NOTE: Classification reflects WS freshness for audit trail, NOT the data source used in depth checks.
+    // Depth checks use getOrderBook() which always fetches fresh REST data (the authoritative conservative source).
+    const now = new Date();
+    const wsThreshold = this.configService.get<number>(
+      'WS_STALENESS_THRESHOLD_MS',
+      60000,
+    );
+
+    const primaryFreshness = primaryConnector.getOrderBookFreshness(
+      asContractId(primaryContractId),
+    );
+    const secondaryFreshness = secondaryConnector.getOrderBookFreshness(
+      asContractId(secondaryContractId),
+    );
+
+    const primaryDataSource = this.classifyDataSource(
+      primaryFreshness.lastWsUpdateAt,
+      now,
+      wsThreshold,
+    );
+    const secondaryDataSource = this.classifyDataSource(
+      secondaryFreshness.lastWsUpdateAt,
+      now,
+      wsThreshold,
+    );
+
+    // Map to platform-specific names (NOT primary/secondary)
+    const kalshiDataSource =
+      primaryPlatform === PlatformId.KALSHI
+        ? primaryDataSource
+        : secondaryDataSource;
+    const polymarketDataSource =
+      primaryPlatform === PlatformId.KALSHI
+        ? secondaryDataSource
+        : primaryDataSource;
+
+    // Check divergence status per platform
+    let divergenceDetected = false;
+    const kalshiDivergence = this.dataDivergenceService.getDivergenceStatus(
+      PlatformId.KALSHI,
+    );
+    const polymarketDivergence = this.dataDivergenceService.getDivergenceStatus(
+      PlatformId.POLYMARKET,
+    );
+    if (
+      kalshiDivergence === 'divergent' ||
+      polymarketDivergence === 'divergent'
+    ) {
+      divergenceDetected = true;
+      this.logger.warn({
+        message: 'Data divergence detected during execution',
+        module: 'execution',
+        data: {
+          pairId,
+          kalshiDivergence,
+          polymarketDivergence,
+          primaryContractId,
+          secondaryContractId,
+        },
+      });
+    }
+
+    // Build execution metadata
+    const executionMetadata: ExecutionMetadata = {
+      primaryLeg: sequencingDecision.primaryLeg,
+      sequencingReason: sequencingDecision.reason,
+      kalshiLatencyMs: sequencingDecision.kalshiLatencyMs,
+      polymarketLatencyMs: sequencingDecision.polymarketLatencyMs,
+      idealCount,
+      matchedCount: equalizedSize,
+      kalshiDataSource,
+      polymarketDataSource,
+      divergenceDetected,
+    };
 
     // === SUBMIT PRIMARY LEG ===
     let primaryOrder: OrderResult;
@@ -570,6 +647,9 @@ export class ExecutionService implements IExecutionEngine {
         errorMessage: `Secondary leg submission failed: ${err instanceof Error ? err.message : String(err)}`,
         isPaper,
         mixedMode,
+        executionMetadata: JSON.parse(
+          JSON.stringify(executionMetadata),
+        ) as Record<string, unknown>,
       });
     }
 
@@ -621,6 +701,9 @@ export class ExecutionService implements IExecutionEngine {
         errorMessage: `Secondary leg ${secondaryOrder.status} on ${secondaryPlatform}`,
         isPaper,
         mixedMode,
+        executionMetadata: JSON.parse(
+          JSON.stringify(executionMetadata),
+        ) as Record<string, unknown>,
       });
     }
 
@@ -809,6 +892,8 @@ export class ExecutionService implements IExecutionEngine {
       entryPolymarketFeeRate: entryPolymarketFeeRate.toNumber(),
       entryConfidenceScore,
       exitMode,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      executionMetadata: JSON.parse(JSON.stringify(executionMetadata)),
     });
 
     // Compute taker fee rates for event enrichment (CF-4, Story 10.1)
@@ -846,6 +931,7 @@ export class ExecutionService implements IExecutionEngine {
         mixedMode,
         primaryFeeRate.toString(),
         gasEstimateStr,
+        sequencingDecision,
       ),
     );
     this.eventEmitter.emit(
@@ -1007,6 +1093,11 @@ export class ExecutionService implements IExecutionEngine {
       expectedEdge: enriched.netEdge.toNumber(),
       status: 'SINGLE_LEG_EXPOSED',
       isPaper,
+
+      ...(context.executionMetadata
+        ? // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          { executionMetadata: context.executionMetadata as any }
+        : {}),
     });
 
     // Emit OrderFilledEvent for the filled primary leg only
@@ -1183,6 +1274,87 @@ export class ExecutionService implements IExecutionEngine {
       primaryOrder,
       error,
     };
+  }
+
+  private determineSequencing(staticPrimaryLeg: string): SequencingDecision {
+    const enabledRaw = this.configService.get<boolean | string>(
+      'ADAPTIVE_SEQUENCING_ENABLED',
+      true,
+    );
+    const enabled = enabledRaw === true || enabledRaw === 'true';
+    if (!enabled) {
+      return {
+        primaryLeg: staticPrimaryLeg,
+        reason: 'static_config',
+        kalshiLatencyMs: null,
+        polymarketLatencyMs: null,
+      };
+    }
+
+    const kalshiHealth = this.platformHealthService.getPlatformHealth(
+      PlatformId.KALSHI,
+    );
+    const polymarketHealth = this.platformHealthService.getPlatformHealth(
+      PlatformId.POLYMARKET,
+    );
+    const kalshiLatencyMs = kalshiHealth.latencyMs ?? null;
+    const polymarketLatencyMs = polymarketHealth.latencyMs ?? null;
+
+    // Null fallback: if either platform has no latency data, use static config
+    if (kalshiLatencyMs === null || polymarketLatencyMs === null) {
+      return {
+        primaryLeg: staticPrimaryLeg,
+        reason: 'static_config',
+        kalshiLatencyMs,
+        polymarketLatencyMs,
+      };
+    }
+
+    const threshold = this.configService.get<number>(
+      'ADAPTIVE_SEQUENCING_LATENCY_THRESHOLD_MS',
+      200,
+    );
+    const delta = Math.abs(kalshiLatencyMs - polymarketLatencyMs);
+
+    if (delta > threshold) {
+      const overridePrimaryLeg =
+        kalshiLatencyMs < polymarketLatencyMs ? 'kalshi' : 'polymarket';
+      this.logger.log({
+        message: 'Adaptive sequencing override',
+        module: 'execution',
+        data: {
+          staticPrimaryLeg,
+          overridePrimaryLeg,
+          kalshiLatencyMs,
+          polymarketLatencyMs,
+          delta,
+          threshold,
+        },
+      });
+      return {
+        primaryLeg: overridePrimaryLeg,
+        reason: 'latency_override',
+        kalshiLatencyMs,
+        polymarketLatencyMs,
+      };
+    }
+
+    return {
+      primaryLeg: staticPrimaryLeg,
+      reason: 'static_config',
+      kalshiLatencyMs,
+      polymarketLatencyMs,
+    };
+  }
+
+  private classifyDataSource(
+    lastWsUpdateAt: Date | null,
+    now: Date,
+    stalenessThresholdMs: number,
+  ): string {
+    if (lastWsUpdateAt === null) return 'polling';
+    const age = now.getTime() - lastWsUpdateAt.getTime();
+    return age >= stalenessThresholdMs ? 'stale_fallback' : 'websocket';
   }
 
   private resolveConnectors(primaryLeg: string): {

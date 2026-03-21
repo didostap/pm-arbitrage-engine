@@ -25,6 +25,13 @@ export class OrderFilledEvent extends BaseEvent {
     public readonly takerFeeRate?: string,
     /** Gas estimate in USD as decimal string, or null. Added in Story 10.1 (CF-4). */
     public readonly gasEstimate?: string | null,
+    /** Sequencing decision context (Story 10.4). Only populated on primary leg event. */
+    public readonly sequencingDecision?: {
+      primaryLeg: string;
+      reason: string;
+      kalshiLatencyMs: number | null;
+      polymarketLatencyMs: number | null;
+    },
   ) {
     super(correlationId);
   }

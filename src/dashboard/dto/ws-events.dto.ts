@@ -20,6 +20,8 @@ export interface WsExecutionCompletePayload {
   status: 'filled' | 'failed';
   positionId: string | null;
   isPaper: boolean;
+  sequencingReason?: string;
+  primaryLeg?: string;
 }
 
 export interface WsAlertNewPayload {

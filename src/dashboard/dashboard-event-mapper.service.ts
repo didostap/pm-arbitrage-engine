@@ -64,6 +64,12 @@ export class DashboardEventMapperService {
         status,
         positionId: event.positionId,
         isPaper: event.isPaper,
+        ...(event.sequencingDecision
+          ? {
+              sequencingReason: event.sequencingDecision.reason,
+              primaryLeg: event.sequencingDecision.primaryLeg,
+            }
+          : {}),
       },
       timestamp: new Date().toISOString(),
     };

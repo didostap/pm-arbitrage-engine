@@ -1072,4 +1072,162 @@ describe('PolymarketConnector', () => {
       connector['wsClient'] = null as never;
     });
   });
+
+  describe('order poll configurability (Story 10.4)', () => {
+    it('[P0] should use custom ORDER_POLL_TIMEOUT_MS from config when set', async () => {
+      // Config read at call time via configService.get() inside submitOrder
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrderBook: mockGetOrderBook,
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ id: 'mock-order-payload' });
+      mockPostOrder.mockResolvedValue({ orderID: 'order-1', status: 'live' });
+      mockGetOrder.mockResolvedValue({
+        status: 'live',
+        filledSize: null,
+        filledPrice: null,
+      });
+
+      // Verify configService.get is called with the timeout key during submitOrder
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const configSpy = vi.spyOn((connector as any).configService, 'get');
+
+      // submitOrder will poll until timeout
+      await connector.submitOrder({
+        contractId: asContractId('token-1'),
+        side: 'buy',
+        quantity: 100,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      expect(configSpy).toHaveBeenCalledWith(
+        'POLYMARKET_ORDER_POLL_TIMEOUT_MS',
+        5000,
+      );
+    });
+
+    it('[P0] should use custom ORDER_POLL_INTERVAL_MS from config when set', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrderBook: mockGetOrderBook,
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ id: 'mock-order-payload' });
+      mockPostOrder.mockResolvedValue({ orderID: 'order-1', status: 'live' });
+      mockGetOrder.mockResolvedValue({
+        status: 'matched',
+        filledSize: 100,
+        filledPrice: 0.45,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const configSpy = vi.spyOn((connector as any).configService, 'get');
+
+      await connector.submitOrder({
+        contractId: asContractId('token-1'),
+        side: 'buy',
+        quantity: 100,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      expect(configSpy).toHaveBeenCalledWith(
+        'POLYMARKET_ORDER_POLL_INTERVAL_MS',
+        500,
+      );
+    });
+
+    it('[P1] should apply jitter to poll interval within [base, base * 1.2] range', async () => {
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrderBook: mockGetOrderBook,
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ id: 'mock-order-payload' });
+      mockPostOrder.mockResolvedValue({ orderID: 'order-1', status: 'live' });
+
+      // Return pending multiple times then filled — track timing
+      const callTimes: number[] = [];
+      mockGetOrder.mockImplementation(() => {
+        callTimes.push(Date.now());
+        if (callTimes.length < 3) {
+          return { status: 'live', filledSize: null, filledPrice: null };
+        }
+        return { status: 'matched', filledSize: 100, filledPrice: 0.45 };
+      });
+
+      await connector.submitOrder({
+        contractId: asContractId('token-1'),
+        side: 'buy',
+        quantity: 100,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      // Verify poll intervals fall within the jitter-bounded range [base, base * 1.2]
+      // Default base interval = 500ms, so jittered range = [500, 600]
+      const baseInterval = 500;
+      const maxJitteredInterval = baseInterval * 1.2;
+      expect(callTimes.length).toBeGreaterThanOrEqual(3);
+      for (let i = 1; i < callTimes.length; i++) {
+        const interval = callTimes[i]! - callTimes[i - 1]!;
+        // Allow 50ms tolerance for timer imprecision
+        expect(interval).toBeGreaterThanOrEqual(baseInterval - 50);
+        expect(interval).toBeLessThanOrEqual(maxJitteredInterval + 50);
+      }
+    });
+
+    it('[P1] should use default timeout=5000 and interval=500 when config not set', async () => {
+      // configService.get returns defaultValue when key not in config
+      // The defaults are specified as the second arg to configService.get
+      (connector as unknown as { connected: boolean }).connected = true;
+      (connector as unknown as { clobClient: unknown }).clobClient = {
+        getOrderBook: mockGetOrderBook,
+        createOrder: mockCreateOrder,
+        postOrder: mockPostOrder,
+        getOrder: mockGetOrder,
+      };
+
+      mockCreateOrder.mockResolvedValue({ id: 'mock-order-payload' });
+      // Return 'live' so polling loop is entered, then fill on first poll
+      mockPostOrder.mockResolvedValue({ orderID: 'order-1', status: 'live' });
+      mockGetOrder.mockResolvedValue({
+        status: 'matched',
+        filledSize: 100,
+        filledPrice: 0.45,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const configSpy = vi.spyOn((connector as any).configService, 'get');
+
+      await connector.submitOrder({
+        contractId: asContractId('token-1'),
+        side: 'buy',
+        quantity: 100,
+        price: 0.45,
+        type: 'limit',
+      });
+
+      // Verify defaults are passed
+      expect(configSpy).toHaveBeenCalledWith(
+        'POLYMARKET_ORDER_POLL_TIMEOUT_MS',
+        5000,
+      );
+      expect(configSpy).toHaveBeenCalledWith(
+        'POLYMARKET_ORDER_POLL_INTERVAL_MS',
+        500,
+      );
+    });
+  });
 });

@@ -345,4 +345,67 @@ describe('DashboardEventMapperService', () => {
       expect(result.timestamp).toBeDefined();
     });
   });
+
+  describe('execution sequencing in WS events (Story 10.4)', () => {
+    it('[P0] should include sequencing metadata in execution.complete WS payload', () => {
+      // AC#5: WS events must surface sequencing info
+      const event = new OrderFilledEvent(
+        'order-1' as any,
+        PlatformId.KALSHI,
+        'buy',
+        0.45,
+        100,
+        0.45,
+        100,
+        'pos-1' as any,
+        'corr-1',
+        false,
+        false,
+        '0.0175',
+        '0.003',
+        {
+          primaryLeg: 'kalshi',
+          reason: 'latency_override',
+          kalshiLatencyMs: 100,
+          polymarketLatencyMs: 400,
+        },
+      );
+
+      const result = mapper.mapExecutionCompleteEvent(event, 'filled');
+
+      expect(result.event).toBe(WS_EVENTS.EXECUTION_COMPLETE);
+      expect(result.data.orderId).toBe('order-1');
+      expect(result.data.sequencingReason).toBe('latency_override');
+      expect(result.data.primaryLeg).toBe('kalshi');
+    });
+
+    it('[P1] should map OrderFilledEvent with full metadata to WS payload without throwing', () => {
+      // Verifies backward compatibility when sequencingDecision is absent
+      const event = new OrderFilledEvent(
+        'order-2' as any,
+        PlatformId.POLYMARKET,
+        'sell',
+        0.55,
+        200,
+        0.54,
+        200,
+        'pos-2' as any,
+        'corr-2',
+        true,
+        false,
+        '0.02',
+        null,
+      );
+
+      const result = mapper.mapExecutionCompleteEvent(event, 'filled');
+
+      expect(result.event).toBe(WS_EVENTS.EXECUTION_COMPLETE);
+      expect(result.data.platform).toBe('polymarket');
+      expect(result.data.isPaper).toBe(true);
+      expect(result.data.status).toBe('filled');
+      // No sequencingDecision → fields absent
+      expect(result.data.sequencingReason).toBeUndefined();
+      expect(result.data.primaryLeg).toBeUndefined();
+    });
+  });
 });
