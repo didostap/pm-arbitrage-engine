@@ -146,6 +146,10 @@ export class DashboardService {
         tradingHalted,
         haltReasons,
         capitalOverview,
+        totalBankroll: capitalOverview?.live?.bankroll ?? null,
+        deployedCapital: capitalOverview?.live?.deployed ?? null,
+        availableCapital: capitalOverview?.live?.available ?? null,
+        reservedCapital: capitalOverview?.live?.reserved ?? null,
       };
     } catch (error) {
       this.logger.error({
@@ -631,6 +635,7 @@ export class DashboardService {
           eventType: e.eventType,
           timestamp: e.createdAt.toISOString(),
           summary: this.summarizeAuditEvent(e.eventType, details),
+          details: details ?? null,
         };
       });
 
@@ -712,6 +717,10 @@ export class DashboardService {
         lastRecalculatedAt: enrichment.data.lastRecalculatedAt ?? null,
         dataSource: enrichment.data.dataSource ?? null,
         dataFreshnessMs: enrichment.data.dataFreshnessMs ?? null,
+        exitMode: enrichment.data.exitMode ?? null,
+        exitCriteria: enrichment.data.exitCriteria ?? null,
+        closestCriterion: enrichment.data.closestCriterion ?? null,
+        closestProximity: enrichment.data.closestProximity ?? null,
       };
     } catch (error) {
       this.logger.error({

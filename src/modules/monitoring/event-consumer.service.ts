@@ -405,6 +405,26 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    if (eventName === EVENT_NAMES.AUTO_UNWIND) {
+      return {
+        timestamp: event.timestamp.toISOString(),
+        platform: 'N/A',
+        contractId: 'N/A',
+        side: `auto_unwind_${this.str(e['action'], 'unknown')}`,
+        price: '0',
+        size: '0',
+        fillPrice: '0',
+        fees: 'N/A',
+        gas: 'N/A',
+        edge: 'N/A',
+        pnl: this.str(e['realizedPnl'], '0'),
+        positionId: this.str(e['positionId']),
+        pairId: this.str(e['pairId']),
+        isPaper: Boolean(e['isPaper']),
+        correlationId: event.correlationId ?? '',
+      };
+    }
+
     return null;
   }
 

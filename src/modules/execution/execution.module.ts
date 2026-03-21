@@ -19,6 +19,7 @@ import { ComplianceConfigLoaderService } from './compliance/compliance-config-lo
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 import { PositionCloseService } from './position-close.service';
 import { POSITION_CLOSE_SERVICE_TOKEN } from '../../common/interfaces/position-close-service.interface';
+import { AutoUnwindService } from './auto-unwind.service';
 
 @Module({
   imports: [RiskManagementModule, ConnectorModule],
@@ -33,6 +34,7 @@ import { POSITION_CLOSE_SERVICE_TOKEN } from '../../common/interfaces/position-c
     ExposureAlertScheduler,
     ComplianceConfigLoaderService,
     ComplianceValidatorService,
+    AutoUnwindService,
     {
       provide: EXECUTION_ENGINE_TOKEN,
       useClass: ExecutionService,

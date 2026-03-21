@@ -215,6 +215,14 @@ export const envSchema = z.object({
   STRESS_TEST_DEFAULT_DAILY_VOL: decimalString('0.03'),
   STRESS_TEST_MIN_SNAPSHOTS: z.coerce.number().int().positive().default(30),
 
+  // Auto-Unwind (Story 10.3) — automatic single-leg management
+  AUTO_UNWIND_ENABLED: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('false'),
+  AUTO_UNWIND_DELAY_MS: z.coerce.number().int().min(0).max(30000).default(2000),
+  AUTO_UNWIND_MAX_LOSS_PCT: z.coerce.number().min(0).max(100).default(5),
+
   // Exit Mode (Story 10.2) — six-criteria model-driven exit logic
   EXIT_MODE: z.enum(['fixed', 'model', 'shadow']).default('fixed'),
   EXIT_EDGE_EVAP_MULTIPLIER: z.coerce.number().max(0).default(-1.0),

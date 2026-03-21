@@ -45,7 +45,7 @@ describe('DashboardGateway', () => {
       }),
     } as unknown as ConfigService;
 
-    mapper = new DashboardEventMapperService();
+    mapper = new DashboardEventMapperService(configService);
     gateway = new DashboardGateway(configService, mapper);
   });
 

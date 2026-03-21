@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { PlatformHealth } from '../common/types/platform.type';
 import type { OrderFilledEvent } from '../common/events/execution.events';
 import type { ExecutionFailedEvent } from '../common/events/execution.events';
 import type { SingleLegExposureEvent } from '../common/events/execution.events';
 import type { ExitTriggeredEvent } from '../common/events/execution.events';
+import type { AutoUnwindEvent } from '../common/events/execution.events';
 import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
   LimitBreachedEvent,
@@ -27,6 +29,7 @@ import { WS_EVENTS } from './dto';
 
 @Injectable()
 export class DashboardEventMapperService {
+  constructor(private readonly configService: ConfigService) {}
   mapHealthEvent(
     health: PlatformHealth,
   ): WsEventEnvelope<WsHealthChangePayload> {
@@ -94,6 +97,8 @@ export class DashboardEventMapperService {
         severity: 'critical',
         message: `Single-leg exposure on position ${event.positionId}: ${event.failedLeg.platform} leg failed (${event.failedLeg.reason})`,
         timestamp: new Date().toISOString(),
+        autoUnwindAttempted:
+          this.configService.get<boolean>('AUTO_UNWIND_ENABLED') === true,
       },
       timestamp: new Date().toISOString(),
     };
@@ -237,6 +242,34 @@ export class DashboardEventMapperService {
         contractId: event.contractId as string,
         priceDelta: event.priceDelta,
         stalenessDeltaMs: event.stalenessDeltaMs,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  mapAutoUnwindAlert(
+    event: AutoUnwindEvent,
+  ): WsEventEnvelope<WsAlertNewPayload> {
+    const lossDisplay =
+      event.realizedPnl !== null
+        ? event.realizedPnl
+        : event.estimatedLossPct !== null
+          ? `~${event.estimatedLossPct.toFixed(2)}%`
+          : 'N/A';
+    return {
+      event: WS_EVENTS.ALERT_NEW,
+      data: {
+        id: `alert-auto-unwind-${event.positionId}-${event.correlationId ?? Date.now()}`,
+        type: 'auto_unwind',
+        severity: event.result === 'failed' ? 'critical' : 'warning',
+        message: `Auto-unwind ${event.result}: position ${event.positionId} — action: ${event.action}, loss: ${lossDisplay}`,
+        timestamp: new Date().toISOString(),
+        autoUnwindAttempted: true,
+        autoUnwindAction: event.action,
+        autoUnwindResult: event.result,
+        autoUnwindLossAmount: lossDisplay,
+        autoUnwindTimeElapsedMs: event.timeElapsedMs,
+        autoUnwindSimulated: event.simulated,
       },
       timestamp: new Date().toISOString(),
     };

@@ -41,6 +41,7 @@ import {
   formatBankrollUpdated,
   formatDataDivergence,
   formatShadowDailySummary,
+  formatAutoUnwind,
 } from './formatters/telegram-message.formatter.js';
 import { type AlertSeverity, classifyEventSeverity } from './event-severity.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
@@ -52,6 +53,7 @@ import type {
   SingleLegResolvedEvent,
   ExitTriggeredEvent,
   ShadowDailySummaryEvent,
+  AutoUnwindEvent,
 } from '../../common/events/execution.events.js';
 import type {
   LimitApproachedEvent,
@@ -123,6 +125,7 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
   EVENT_NAMES.DATA_DIVERGENCE,
   EVENT_NAMES.SHADOW_DAILY_SUMMARY,
+  EVENT_NAMES.AUTO_UNWIND,
 ]);
 
 /**
@@ -226,6 +229,7 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
     EVENT_NAMES.SHADOW_DAILY_SUMMARY,
     (e) => formatShadowDailySummary(e as ShadowDailySummaryEvent),
   ],
+  [EVENT_NAMES.AUTO_UNWIND, (e) => formatAutoUnwind(e as AutoUnwindEvent)],
 ]);
 
 @Injectable()

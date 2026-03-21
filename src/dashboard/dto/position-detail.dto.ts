@@ -64,6 +64,14 @@ export class AuditEventDto {
     description: 'Human-readable summary extracted from event details',
   })
   summary!: string;
+
+  @ApiPropertyOptional({
+    description: 'Raw event details (JSON object)',
+    nullable: true,
+    type: 'object',
+    additionalProperties: {},
+  })
+  details?: Record<string, unknown> | null;
 }
 
 export class CapitalBreakdownDto {
@@ -252,4 +260,39 @@ export class PositionFullDetailDto {
     nullable: true,
   })
   dataFreshnessMs!: number | null;
+
+  // ─── Six-Criteria Model Fields (Story 10.2) ──────────────────────────────
+
+  @ApiPropertyOptional({
+    description: 'Exit mode: fixed, model, or shadow',
+    type: String,
+    nullable: true,
+  })
+  exitMode?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'All 6 criterion evaluation results (model/shadow mode only)',
+    type: 'array',
+    nullable: true,
+  })
+  exitCriteria?: Array<{
+    criterion: string;
+    proximity: string;
+    triggered: boolean;
+    detail?: string;
+  }> | null;
+
+  @ApiPropertyOptional({
+    description: 'Highest proximity criterion name (model/shadow mode only)',
+    type: String,
+    nullable: true,
+  })
+  closestCriterion?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Highest proximity value 0-1 (model/shadow mode only)',
+    type: Number,
+    nullable: true,
+  })
+  closestProximity?: number | null;
 }

@@ -66,4 +66,33 @@ export class DashboardOverviewDto {
     nullable: true,
   })
   capitalOverview!: CapitalOverviewDto | null;
+
+  // Flat convenience fields — resolve to live-mode values for dashboard display
+  @ApiPropertyOptional({
+    description: 'Live-mode total bankroll (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  totalBankroll!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Live-mode deployed capital (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  deployedCapital!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Live-mode available capital (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  availableCapital!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Live-mode reserved capital (decimal string)',
+    type: String,
+    nullable: true,
+  })
+  reservedCapital!: string | null;
 }

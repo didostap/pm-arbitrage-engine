@@ -213,6 +213,10 @@ export const EVENT_NAMES = {
   /** Emitted when bankroll value is updated via dashboard */
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
 
+  // [Story 10.3] Auto-Unwind Events
+  /** Emitted when auto-unwind policy is activated on a single-leg exposure */
+  AUTO_UNWIND: 'execution.auto_unwind.attempted',
+
   // [Story 10.2] Shadow Mode Events
   /** Emitted per-position in shadow mode with fixed vs model comparison */
   SHADOW_COMPARISON: 'execution.exit.shadow_comparison',

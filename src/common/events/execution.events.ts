@@ -155,6 +155,54 @@ export class ShadowDailySummaryEvent extends BaseEvent {
   }
 }
 
+/**
+ * Partial SingleLegContext reconstructed from SingleLegExposureEvent for audit trail.
+ * Fields `primaryOrder`, `enriched`, `opportunity` are always null — not available from event data.
+ */
+export interface PartialSingleLegContext {
+  pairId: string;
+  primaryLeg: string;
+  primaryOrderId: string;
+  primaryOrder: null;
+  primarySide: string;
+  secondarySide: string;
+  primaryPrice: string;
+  secondaryPrice: string;
+  primarySize: number;
+  secondarySize: number;
+  enriched: null;
+  opportunity: null;
+  errorCode: number;
+  errorMessage: string;
+  isPaper: boolean;
+  mixedMode: boolean;
+}
+
+/** [Story 10.3] Emitted when auto-unwind is attempted on a single-leg exposure. */
+export class AutoUnwindEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
+    public readonly action:
+      | 'close'
+      | 'skip_loss_limit'
+      | 'skip_already_resolved'
+      | 'failed',
+    public readonly result: 'success' | 'failed' | 'skipped',
+    public readonly singleLegContext: PartialSingleLegContext,
+    public readonly estimatedLossPct: number | null,
+    public readonly realizedPnl: string | null,
+    public readonly closeOrderId: string | null,
+    public readonly timeElapsedMs: number,
+    public readonly simulated: boolean,
+    correlationId?: string,
+    public readonly isPaper: boolean = false,
+    public readonly mixedMode: boolean = false,
+  ) {
+    super(correlationId);
+  }
+}
+
 export class ComplianceBlockedEvent extends BaseEvent {
   constructor(
     public readonly opportunityId: OpportunityId,

@@ -29,10 +29,18 @@ export interface WsAlertNewPayload {
     | 'risk_limit_breached'
     | 'risk_limit_approached'
     | 'cluster_limit_breached'
-    | 'aggregate_cluster_limit_breached';
+    | 'aggregate_cluster_limit_breached'
+    | 'auto_unwind';
   severity: 'critical' | 'warning' | 'info';
   message: string;
   timestamp: string;
+  /** Auto-unwind fields — present only on auto_unwind alerts (backward-compatible) */
+  autoUnwindAttempted?: boolean;
+  autoUnwindAction?: string | null;
+  autoUnwindResult?: string | null;
+  autoUnwindLossAmount?: string | null;
+  autoUnwindTimeElapsedMs?: number | null;
+  autoUnwindSimulated?: boolean;
 }
 
 /** Lightweight payload — frontend refetches enriched data via REST on receiving this */
@@ -99,4 +107,5 @@ export const WS_EVENTS = {
   TRADING_HALT: 'trading.halt',
   SHADOW_COMPARISON: 'shadow.comparison',
   SHADOW_DAILY_SUMMARY: 'shadow.daily_summary',
+  AUTO_UNWIND: 'auto_unwind.result',
 } as const;

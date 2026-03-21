@@ -24,8 +24,15 @@ vi.mock('../common/services/correlation-context', () => ({
 describe('DashboardEventMapperService', () => {
   let mapper: DashboardEventMapperService;
 
+  const mockConfigService = {
+    get: vi.fn((key: string) => {
+      if (key === 'AUTO_UNWIND_ENABLED') return false;
+      return undefined;
+    }),
+  };
+
   beforeEach(() => {
-    mapper = new DashboardEventMapperService();
+    mapper = new DashboardEventMapperService(mockConfigService as never);
   });
 
   describe('mapHealthEvent', () => {

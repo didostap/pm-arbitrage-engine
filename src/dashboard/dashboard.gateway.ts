@@ -16,6 +16,7 @@ import type {
   ExitTriggeredEvent,
   ShadowComparisonEvent,
   ShadowDailySummaryEvent,
+  AutoUnwindEvent,
 } from '../common/events/execution.events';
 import type { BatchCompleteEvent } from '../common/events/batch.events';
 import type {
@@ -237,6 +238,12 @@ export class DashboardGateway
       },
       timestamp: new Date().toISOString(),
     });
+  }
+
+  @OnEvent(EVENT_NAMES.AUTO_UNWIND)
+  handleAutoUnwind(event: AutoUnwindEvent): void {
+    const envelope = this.mapper.mapAutoUnwindAlert(event);
+    this.broadcast(envelope);
   }
 
   // --- Private helpers ---
