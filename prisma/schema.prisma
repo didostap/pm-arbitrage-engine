@@ -17,13 +17,126 @@ enum Platform {
 }
 
 // Engine configuration singleton — typed config persisted in DB (replaces SystemMetadata placeholder)
+// Story 10-5.1: Expanded with 71 Category B operator-tunable columns (all nullable for migration safety)
 model EngineConfig {
-  id              String   @id @default(uuid()) @map("id")
-  singletonKey    String   @unique @default("default") @map("singleton_key")
-  bankrollUsd     Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
+  id               String   @id @default(uuid()) @map("id")
+  singletonKey     String   @unique @default("default") @map("singleton_key")
+  bankrollUsd      Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
   paperBankrollUsd Decimal? @map("paper_bankroll_usd") @db.Decimal(20, 8)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // --- Trading Engine (1) ---
+  pollingIntervalMs Int? @map("polling_interval_ms")
+
+  // --- Edge Detection (4) ---
+  detectionMinEdgeThreshold Decimal? @map("detection_min_edge_threshold") @db.Decimal(20, 8)
+  detectionGasEstimateUsd   Decimal? @map("detection_gas_estimate_usd") @db.Decimal(20, 8)
+  detectionPositionSizeUsd  Decimal? @map("detection_position_size_usd") @db.Decimal(20, 8)
+  minAnnualizedReturn       Decimal? @map("min_annualized_return") @db.Decimal(20, 8)
+
+  // --- Gas Estimation (4) ---
+  gasBufferPercent             Int?     @map("gas_buffer_percent")
+  gasPollIntervalMs            Int?     @map("gas_poll_interval_ms")
+  gasPolPriceFallbackUsd       Decimal? @map("gas_pol_price_fallback_usd") @db.Decimal(20, 8)
+  polymarketSettlementGasUnits Int?     @map("polymarket_settlement_gas_units")
+
+  // --- Execution (1) ---
+  executionMinFillRatio Decimal? @map("execution_min_fill_ratio") @db.Decimal(20, 8)
+
+  // --- Risk Management (3, bankroll already exists) ---
+  riskMaxPositionPct Decimal? @map("risk_max_position_pct") @db.Decimal(20, 8)
+  riskMaxOpenPairs   Int?     @map("risk_max_open_pairs")
+  riskDailyLossPct   Decimal? @map("risk_daily_loss_pct") @db.Decimal(20, 8)
+
+  // --- Correlation Clusters (4) ---
+  clusterLlmTimeoutMs          Int?     @map("cluster_llm_timeout_ms")
+  riskClusterHardLimitPct      Decimal? @map("risk_cluster_hard_limit_pct") @db.Decimal(20, 8)
+  riskClusterSoftLimitPct      Decimal? @map("risk_cluster_soft_limit_pct") @db.Decimal(20, 8)
+  riskAggregateClusterLimitPct Decimal? @map("risk_aggregate_cluster_limit_pct") @db.Decimal(20, 8)
+
+  // --- Telegram (6, tokens/chatId stay as env secrets) ---
+  telegramTestAlertCron     String? @map("telegram_test_alert_cron")
+  telegramTestAlertTimezone String? @map("telegram_test_alert_timezone")
+  telegramSendTimeoutMs     Int?    @map("telegram_send_timeout_ms")
+  telegramMaxRetries        Int?    @map("telegram_max_retries")
+  telegramBufferMaxSize     Int?    @map("telegram_buffer_max_size")
+  telegramCircuitBreakMs    Int?    @map("telegram_circuit_break_ms")
+
+  // --- CSV Logging (1) ---
+  csvEnabled Boolean? @map("csv_enabled")
+
+  // --- LLM Scoring (10, API keys stay as env secrets) ---
+  llmPrimaryProvider     String? @map("llm_primary_provider")
+  llmPrimaryModel        String? @map("llm_primary_model")
+  llmEscalationProvider  String? @map("llm_escalation_provider")
+  llmEscalationModel     String? @map("llm_escalation_model")
+  llmEscalationMin       Int?    @map("llm_escalation_min")
+  llmEscalationMax       Int?    @map("llm_escalation_max")
+  llmAutoApproveThreshold Int?   @map("llm_auto_approve_threshold")
+  llmMinReviewThreshold  Int?    @map("llm_min_review_threshold")
+  llmMaxTokens           Int?    @map("llm_max_tokens")
+  llmTimeoutMs           Int?    @map("llm_timeout_ms")
+
+  // --- Discovery (7) ---
+  discoveryEnabled                 Boolean? @map("discovery_enabled")
+  discoveryRunOnStartup            Boolean? @map("discovery_run_on_startup")
+  discoveryCronExpression          String?  @map("discovery_cron_expression")
+  discoveryPrefilterThreshold      Decimal? @map("discovery_prefilter_threshold") @db.Decimal(20, 8)
+  discoverySettlementWindowDays    Int?     @map("discovery_settlement_window_days")
+  discoveryMaxCandidatesPerContract Int?    @map("discovery_max_candidates_per_contract")
+  discoveryLlmConcurrency          Int?     @map("discovery_llm_concurrency")
+
+  // --- Resolution Polling (3) ---
+  resolutionPollerEnabled        Boolean? @map("resolution_poller_enabled")
+  resolutionPollerCronExpression String?  @map("resolution_poller_cron_expression")
+  resolutionPollerBatchSize      Int?     @map("resolution_poller_batch_size")
+
+  // --- Calibration (2) ---
+  calibrationEnabled        Boolean? @map("calibration_enabled")
+  calibrationCronExpression String?  @map("calibration_cron_expression")
+
+  // --- Staleness Thresholds (2) ---
+  orderbookStalenessThresholdMs Int? @map("orderbook_staleness_threshold_ms")
+  wsStalenessThresholdMs        Int? @map("ws_staleness_threshold_ms")
+
+  // --- Polling Concurrency (2) ---
+  kalshiPollingConcurrency     Int? @map("kalshi_polling_concurrency")
+  polymarketPollingConcurrency Int? @map("polymarket_polling_concurrency")
+
+  // --- Audit Log (1) ---
+  auditLogRetentionDays Int? @map("audit_log_retention_days")
+
+  // --- Stress Testing (3) ---
+  stressTestScenarios       Int?     @map("stress_test_scenarios")
+  stressTestDefaultDailyVol Decimal? @map("stress_test_default_daily_vol") @db.Decimal(20, 8)
+  stressTestMinSnapshots    Int?     @map("stress_test_min_snapshots")
+
+  // --- Auto-Unwind (3) ---
+  autoUnwindEnabled    Boolean? @map("auto_unwind_enabled")
+  autoUnwindDelayMs    Int?     @map("auto_unwind_delay_ms")
+  autoUnwindMaxLossPct Float?   @map("auto_unwind_max_loss_pct")
+
+  // --- Adaptive Sequencing (2) ---
+  adaptiveSequencingEnabled              Boolean? @map("adaptive_sequencing_enabled")
+  adaptiveSequencingLatencyThresholdMs   Int?     @map("adaptive_sequencing_latency_threshold_ms")
+
+  // --- Polymarket Order Polling (2) ---
+  polymarketOrderPollTimeoutMs  Int? @map("polymarket_order_poll_timeout_ms")
+  polymarketOrderPollIntervalMs Int? @map("polymarket_order_poll_interval_ms")
+
+  // --- Exit Mode (10) ---
+  exitMode                String? @map("exit_mode")
+  exitEdgeEvapMultiplier  Float?  @map("exit_edge_evap_multiplier")
+  exitConfidenceDropPct   Int?    @map("exit_confidence_drop_pct")
+  exitTimeDecayHorizonH   Int?    @map("exit_time_decay_horizon_h")
+  exitTimeDecaySteepness  Float?  @map("exit_time_decay_steepness")
+  exitTimeDecayTrigger    Float?  @map("exit_time_decay_trigger")
+  exitRiskBudgetPct       Int?    @map("exit_risk_budget_pct")
+  exitRiskRankCutoff      Int?    @map("exit_risk_rank_cutoff")
+  exitMinDepth            Int?    @map("exit_min_depth")
+  exitProfitCaptureRatio  Float?  @map("exit_profit_capture_ratio")
+
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("engine_config")
 }

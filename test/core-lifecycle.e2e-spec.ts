@@ -133,6 +133,10 @@ describe('Core Lifecycle (e2e)', () => {
         findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
         create: vi.fn().mockRejectedValue(new Error('Connection failed')),
       },
+      engineConfig: {
+        findUnique: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
     };
 
     const failingModule = await Test.createTestingModule({

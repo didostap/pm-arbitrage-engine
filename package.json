@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "audit:revalidate": "nest start --entryFile src/cli/audit-revalidation"
+    "audit:revalidate": "nest start --entryFile src/cli/audit-revalidation",
+    "prisma:seed-config": "tsx prisma/seed-config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
