@@ -55,7 +55,17 @@ export class ExitMonitorService implements OnModuleInit {
   private skipNextCycle = false;
   /** Tracks positions with stale WS data for event deduplication. */
   private readonly stalePositions = new Map<string, boolean>();
-  private readonly wsStalenessThresholdMs: number;
+  private wsStalenessThresholdMs: number;
+  private exitMode: string;
+  private exitEdgeEvapMultiplier: number;
+  private exitConfidenceDropPct: number;
+  private exitTimeDecayHorizonH: number;
+  private exitTimeDecaySteepness: number;
+  private exitTimeDecayTrigger: number;
+  private exitRiskBudgetPct: number;
+  private exitRiskRankCutoff: number;
+  private exitMinDepth: number;
+  private exitProfitCaptureRatio: number;
 
   constructor(
     private readonly positionRepository: PositionRepository,
@@ -75,6 +85,84 @@ export class ExitMonitorService implements OnModuleInit {
       'WS_STALENESS_THRESHOLD_MS',
       60_000,
     );
+    this.exitMode = this.configService.get<string>('EXIT_MODE', 'fixed');
+    this.exitEdgeEvapMultiplier = this.configService.get<number>(
+      'EXIT_EDGE_EVAP_MULTIPLIER',
+      -1.0,
+    );
+    this.exitConfidenceDropPct = this.configService.get<number>(
+      'EXIT_CONFIDENCE_DROP_PCT',
+      20,
+    );
+    this.exitTimeDecayHorizonH = this.configService.get<number>(
+      'EXIT_TIME_DECAY_HORIZON_H',
+      168,
+    );
+    this.exitTimeDecaySteepness = this.configService.get<number>(
+      'EXIT_TIME_DECAY_STEEPNESS',
+      2.0,
+    );
+    this.exitTimeDecayTrigger = this.configService.get<number>(
+      'EXIT_TIME_DECAY_TRIGGER',
+      0.8,
+    );
+    this.exitRiskBudgetPct = this.configService.get<number>(
+      'EXIT_RISK_BUDGET_PCT',
+      85,
+    );
+    this.exitRiskRankCutoff = this.configService.get<number>(
+      'EXIT_RISK_RANK_CUTOFF',
+      1,
+    );
+    this.exitMinDepth = this.configService.get<number>('EXIT_MIN_DEPTH', 5);
+    this.exitProfitCaptureRatio = this.configService.get<number>(
+      'EXIT_PROFIT_CAPTURE_RATIO',
+      0.5,
+    );
+  }
+
+  /** Story 10-5.2 AC6: reload all exit settings from DB-backed config */
+  reloadConfig(settings: {
+    wsStalenessThresholdMs?: number;
+    exitMode?: string;
+    exitEdgeEvapMultiplier?: number;
+    exitConfidenceDropPct?: number;
+    exitTimeDecayHorizonH?: number;
+    exitTimeDecaySteepness?: number;
+    exitTimeDecayTrigger?: number;
+    exitRiskBudgetPct?: number;
+    exitRiskRankCutoff?: number;
+    exitMinDepth?: number;
+    exitProfitCaptureRatio?: number;
+  }): void {
+    if (settings.wsStalenessThresholdMs !== undefined)
+      this.wsStalenessThresholdMs = settings.wsStalenessThresholdMs;
+    if (settings.exitMode !== undefined) this.exitMode = settings.exitMode;
+    if (settings.exitEdgeEvapMultiplier !== undefined)
+      this.exitEdgeEvapMultiplier = settings.exitEdgeEvapMultiplier;
+    if (settings.exitConfidenceDropPct !== undefined)
+      this.exitConfidenceDropPct = settings.exitConfidenceDropPct;
+    if (settings.exitTimeDecayHorizonH !== undefined)
+      this.exitTimeDecayHorizonH = settings.exitTimeDecayHorizonH;
+    if (settings.exitTimeDecaySteepness !== undefined)
+      this.exitTimeDecaySteepness = settings.exitTimeDecaySteepness;
+    if (settings.exitTimeDecayTrigger !== undefined)
+      this.exitTimeDecayTrigger = settings.exitTimeDecayTrigger;
+    if (settings.exitRiskBudgetPct !== undefined)
+      this.exitRiskBudgetPct = settings.exitRiskBudgetPct;
+    if (settings.exitRiskRankCutoff !== undefined)
+      this.exitRiskRankCutoff = settings.exitRiskRankCutoff;
+    if (settings.exitMinDepth !== undefined)
+      this.exitMinDepth = settings.exitMinDepth;
+    if (settings.exitProfitCaptureRatio !== undefined)
+      this.exitProfitCaptureRatio = settings.exitProfitCaptureRatio;
+    this.logger.log({
+      message: 'Exit monitor config reloaded',
+      data: {
+        wsStalenessThresholdMs: this.wsStalenessThresholdMs,
+        exitMode: this.exitMode,
+      },
+    });
   }
 
   onModuleInit(): void {
@@ -150,19 +238,13 @@ export class ExitMonitorService implements OnModuleInit {
     }
 
     // ─── Six-criteria pre-loop computation (Story 10.2) ────────────────
-    const exitMode = this.configService.get<string>(
-      'EXIT_MODE',
-      'fixed',
-    ) as ExitMode;
+    const exitMode = this.exitMode as ExitMode;
     let portfolioRiskApproaching = false;
     const edgeRanking: Map<string, { rank: number; total: number }> = new Map();
 
     if (exitMode === 'model' || exitMode === 'shadow') {
       // Check portfolio risk budget
-      const budgetPct = this.configService.get<number>(
-        'EXIT_RISK_BUDGET_PCT',
-        85,
-      );
+      const budgetPct = this.exitRiskBudgetPct;
       try {
         const exposure = this.riskManager.getCurrentExposure(isPaper);
         if (!exposure.bankrollUsd.isZero()) {
@@ -569,36 +651,15 @@ export class ExitMonitorService implements OnModuleInit {
       portfolioRiskApproaching,
       edgeRankAmongOpen: ranking?.rank,
       totalOpenPositions: ranking?.total,
-      // Config values
-      edgeEvapMultiplier: this.configService.get<number>(
-        'EXIT_EDGE_EVAP_MULTIPLIER',
-        -1.0,
-      ),
-      confidenceDropPct: this.configService.get<number>(
-        'EXIT_CONFIDENCE_DROP_PCT',
-        20,
-      ),
-      timeDecayHorizonH: this.configService.get<number>(
-        'EXIT_TIME_DECAY_HORIZON_H',
-        168,
-      ),
-      timeDecaySteepness: this.configService.get<number>(
-        'EXIT_TIME_DECAY_STEEPNESS',
-        2.0,
-      ),
-      timeDecayTrigger: this.configService.get<number>(
-        'EXIT_TIME_DECAY_TRIGGER',
-        0.8,
-      ),
-      riskRankCutoff: this.configService.get<number>(
-        'EXIT_RISK_RANK_CUTOFF',
-        1,
-      ),
-      minDepth: this.configService.get<number>('EXIT_MIN_DEPTH', 5),
-      profitCaptureRatio: this.configService.get<number>(
-        'EXIT_PROFIT_CAPTURE_RATIO',
-        0.5,
-      ),
+      // Config values (hot-reloadable via cached fields)
+      edgeEvapMultiplier: this.exitEdgeEvapMultiplier,
+      confidenceDropPct: this.exitConfidenceDropPct,
+      timeDecayHorizonH: this.exitTimeDecayHorizonH,
+      timeDecaySteepness: this.exitTimeDecaySteepness,
+      timeDecayTrigger: this.exitTimeDecayTrigger,
+      riskRankCutoff: this.exitRiskRankCutoff,
+      minDepth: this.exitMinDepth,
+      profitCaptureRatio: this.exitProfitCaptureRatio,
     };
 
     const evalResult = this.thresholdEvaluator.evaluate(evalInput);

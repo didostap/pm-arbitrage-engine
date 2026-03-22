@@ -74,7 +74,7 @@ interface ExecutionMetadata {
 @Injectable()
 export class ExecutionService implements IExecutionEngine {
   private readonly logger = new Logger(ExecutionService.name);
-  private readonly minFillRatio: number;
+  private minFillRatio: number;
   private readonly minEdgeThreshold: Decimal;
 
   constructor(
@@ -127,6 +127,20 @@ export class ExecutionService implements IExecutionEngine {
         'error',
         'execution',
       );
+    }
+  }
+
+  /** Story 10-5.2 AC6: reload minFillRatio from DB-backed config */
+  reloadConfig(settings: { minFillRatio?: string }): void {
+    if (settings.minFillRatio !== undefined) {
+      const value = Number(settings.minFillRatio);
+      if (!isNaN(value) && value > 0 && value <= 1) {
+        this.minFillRatio = value;
+        this.logger.log({
+          message: 'Execution config reloaded',
+          data: { minFillRatio: this.minFillRatio },
+        });
+      }
     }
   }
 

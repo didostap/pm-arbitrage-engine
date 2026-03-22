@@ -72,6 +72,43 @@ export class CalibrationService {
     });
   }
 
+  /** Story 10-5.2 AC6: hot-reload cron schedule */
+  reloadCron(expression: string): void {
+    const jobName = 'calibration';
+
+    // Construct new job BEFORE deleting old — if expression is invalid, old job survives
+    let newJob: CronJob;
+    try {
+      newJob = new CronJob(expression, () => {
+        void this.runCalibration('cron');
+      });
+    } catch (error) {
+      this.logger.error({
+        message: `Invalid cron expression for '${jobName}', keeping existing schedule`,
+        data: {
+          expression,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return;
+    }
+
+    try {
+      this.schedulerRegistry.deleteCronJob(jobName);
+    } catch {
+      this.logger.warn({
+        message: `Cron job '${jobName}' not found for deletion`,
+      });
+    }
+
+    this.schedulerRegistry.addCronJob(jobName, newJob);
+    newJob.start();
+    this.logger.log({
+      message: `Cron '${jobName}' reloaded`,
+      data: { expression },
+    });
+  }
+
   getLatestResult(): CalibrationResult | null {
     return this.latestResult;
   }

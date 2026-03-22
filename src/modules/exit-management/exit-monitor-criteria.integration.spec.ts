@@ -590,13 +590,14 @@ describe('ExitMonitorService — Six-Criteria Integration (Story 10.2)', () => {
       thresholdEvaluator.evaluate.mock.calls[0][0];
     expect(evalInput.exitMode).toBe('model');
 
-    // Now change to 'fixed' mode
+    // Now change to 'fixed' mode via hot-reload (service caches exitMode)
     configService.get.mockImplementation((key: string, defaultVal: unknown) => {
       if (key === 'EXIT_MODE') return 'fixed';
       if (key === 'WS_STALENESS_THRESHOLD_MS') return 60000;
       if (key === 'DETECTION_GAS_ESTIMATE_USD') return '0';
       return defaultVal;
     });
+    service.reloadConfig({ exitMode: 'fixed' });
 
     thresholdEvaluator.evaluate.mockClear();
     positionRepository.findByStatusWithOrders.mockResolvedValue([

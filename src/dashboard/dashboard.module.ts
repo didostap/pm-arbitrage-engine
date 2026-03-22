@@ -15,6 +15,10 @@ import { ExitManagementModule } from '../modules/exit-management/exit-management
 import { RiskManagementModule } from '../modules/risk-management/risk-management.module';
 import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
 import { PositionManagementController } from './position-management.controller';
+import { SettingsController } from './settings.controller';
+import { SettingsService } from './settings.service';
+import { MonitoringModule } from '../modules/monitoring/monitoring.module';
+import { ConfigAccessor } from '../common/config/config-accessor.service';
 
 @Module({
   imports: [
@@ -22,12 +26,14 @@ import { PositionManagementController } from './position-management.controller';
     ExecutionModule,
     ExitManagementModule,
     RiskManagementModule,
+    MonitoringModule,
   ],
   controllers: [
     DashboardController,
     MatchApprovalController,
     PerformanceController,
     PositionManagementController,
+    SettingsController,
   ],
   providers: [
     DashboardGateway,
@@ -38,6 +44,9 @@ import { PositionManagementController } from './position-management.controller';
     PerformanceService,
     PositionRepository,
     EngineConfigRepository,
+    SettingsService,
+    ConfigAccessor,
   ],
+  exports: [ConfigAccessor],
 })
 export class DashboardModule {}

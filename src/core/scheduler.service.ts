@@ -53,6 +53,45 @@ export class SchedulerService implements OnModuleInit {
     });
   }
 
+  /** Story 10-5.2 AC6: hot-reload polling interval */
+  reloadPollingInterval(ms: number): void {
+    if (!Number.isInteger(ms) || ms < 1000) {
+      this.logger.error({
+        message: `Invalid polling interval: ${ms}ms (must be integer >= 1000), keeping existing interval`,
+      });
+      return;
+    }
+
+    // Create new interval before deleting old — prevents gap if addInterval fails
+    const newInterval = setInterval(() => {
+      void this.handlePollingCycle();
+    }, ms);
+
+    try {
+      this.schedulerRegistry.deleteInterval('pollingCycle');
+    } catch {
+      this.logger.warn({
+        message: 'pollingCycle interval not found for deletion',
+      });
+    }
+
+    try {
+      this.schedulerRegistry.addInterval('pollingCycle', newInterval);
+    } catch (error) {
+      clearInterval(newInterval);
+      this.logger.error({
+        message: 'Failed to register new polling interval',
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return;
+    }
+
+    this.logger.log({
+      message: 'Polling interval reloaded',
+      data: { pollingIntervalMs: ms },
+    });
+  }
+
   /**
    * Handle each polling cycle trigger.
    * Skips if previous cycle still in progress (prevents overlaps).

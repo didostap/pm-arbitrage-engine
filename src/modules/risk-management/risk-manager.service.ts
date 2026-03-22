@@ -40,6 +40,8 @@ import {
 import { randomUUID } from 'crypto';
 import { CorrelationTrackerService } from './correlation-tracker.service';
 import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
+import { CONFIG_DEFAULTS } from '../../common/config/config-defaults';
+import type { EffectiveConfig } from '../../common/config/effective-config.types';
 import {
   asClusterId,
   asReservationId,
@@ -209,6 +211,83 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
           .toString(),
       },
     });
+  }
+
+  /** Story 10-5.2 AC6: full config reload from DB (bankroll + risk limits + cluster settings) */
+  async reloadConfig(): Promise<void> {
+    const envFallback = this.buildReloadEnvFallback();
+    const effective =
+      await this.engineConfigRepository.getEffectiveConfig(envFallback);
+
+    // P7: Use FinancialDecimal for all monetary/percentage values
+    const bankroll = new FinancialDecimal(effective.bankrollUsd);
+    const paperBankroll = effective.paperBankrollUsd
+      ? new FinancialDecimal(effective.paperBankrollUsd)
+      : undefined;
+    const maxPositionPct = new FinancialDecimal(effective.riskMaxPositionPct);
+    const maxOpenPairs = Number(effective.riskMaxOpenPairs);
+    const dailyLossPct = new FinancialDecimal(effective.riskDailyLossPct);
+
+    // P6: Validate before applying — on failure, keep existing config
+    if (bankroll.lte(0)) {
+      this.logger.error({
+        message:
+          'reloadConfig: bankrollUsd must be positive, keeping existing config',
+      });
+      return;
+    }
+    if (maxPositionPct.lte(0) || maxPositionPct.gt(1)) {
+      this.logger.error({
+        message:
+          'reloadConfig: riskMaxPositionPct must be in (0, 1], keeping existing config',
+      });
+      return;
+    }
+    if (!Number.isInteger(maxOpenPairs) || maxOpenPairs <= 0) {
+      this.logger.error({
+        message:
+          'reloadConfig: riskMaxOpenPairs must be a positive integer, keeping existing config',
+      });
+      return;
+    }
+    if (dailyLossPct.lte(0) || dailyLossPct.gt(1)) {
+      this.logger.error({
+        message:
+          'reloadConfig: riskDailyLossPct must be in (0, 1], keeping existing config',
+      });
+      return;
+    }
+
+    this.config = {
+      ...this.config,
+      bankrollUsd: bankroll.toNumber(),
+      paperBankrollUsd: paperBankroll?.toNumber(),
+      maxPositionPct: maxPositionPct.toNumber(),
+      maxOpenPairs,
+      dailyLossPct: dailyLossPct.toNumber(),
+    };
+    this.correlationTracker.updateBankroll(bankroll);
+    this.logger.log({
+      message: 'Risk manager config reloaded from DB',
+      data: {
+        bankrollUsd: bankroll.toString(),
+        maxPositionPct: maxPositionPct.toString(),
+        maxOpenPairs,
+        dailyLossPct: dailyLossPct.toString(),
+      },
+    });
+  }
+
+  /** Build env fallback for getEffectiveConfig (same pattern as SettingsService) */
+  private buildReloadEnvFallback(): Partial<EffectiveConfig> {
+    const fallback: Record<string, unknown> = {};
+    for (const [field, entry] of Object.entries(CONFIG_DEFAULTS)) {
+      const envValue = this.configService.get<unknown>(entry.envKey);
+      if (envValue !== undefined) {
+        fallback[field] = envValue;
+      }
+    }
+    return fallback as Partial<EffectiveConfig>;
   }
 
   getBankrollConfig(): Promise<{

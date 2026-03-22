@@ -10,7 +10,6 @@
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import { CONFIG_DEFAULTS } from '../src/common/config/config-defaults.js';
-import { fileURLToPath } from 'url';
 
 /** Fields that use Prisma Decimal — values stay as strings for Prisma */
 export const DECIMAL_FIELDS = new Set([
@@ -184,10 +183,8 @@ async function main(): Promise<void> {
 }
 
 // Run main() when executed directly (not imported)
-const isDirectRun =
-  typeof process !== 'undefined' &&
-  process.argv[1] &&
-  fileURLToPath(import.meta.url) === process.argv[1];
+// Uses require.main check (CJS-compatible) instead of import.meta.url (ESM-only)
+const isDirectRun = require.main === module;
 if (isDirectRun) {
   main().catch((err) => {
     console.error('Seed failed:', err);

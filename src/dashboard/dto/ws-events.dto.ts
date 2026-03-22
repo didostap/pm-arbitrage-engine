@@ -105,6 +105,7 @@ export const WS_EVENTS = {
   MATCH_PENDING: 'match.pending',
   BATCH_COMPLETE: 'batch.complete',
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
+  CONFIG_SETTINGS_UPDATED: 'config.settings.updated',
   DIVERGENCE_ALERT: 'divergence.alert',
   TRADING_HALT: 'trading.halt',
   SHADOW_COMPARISON: 'shadow.comparison',

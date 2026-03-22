@@ -139,6 +139,12 @@ describe('DashboardService', () => {
       {
         getWsLastMessageTimestamp: vi.fn().mockReturnValue(null),
       } as unknown as import('../modules/data-ingestion/platform-health.service').PlatformHealthService,
+      {
+        getLatestComparison: vi.fn().mockReturnValue(null),
+      } as unknown as import('../modules/exit-management/shadow-comparison.service').ShadowComparisonService,
+      {
+        append: vi.fn().mockResolvedValue(undefined),
+      } as unknown as import('../modules/monitoring/audit-log.service').AuditLogService,
     );
 
     // Default mock for riskState (overview balance computation)

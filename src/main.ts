@@ -25,6 +25,7 @@ async function bootstrap() {
   // CORS for dashboard SPA cross-origin requests in dev
   app.enableCors({
     origin: process.env.DASHBOARD_ORIGIN || 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
   app.setGlobalPrefix('api');

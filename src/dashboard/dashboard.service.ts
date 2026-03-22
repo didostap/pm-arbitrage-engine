@@ -41,6 +41,7 @@ import { PlatformHealthService } from '../modules/data-ingestion/platform-health
 import { PlatformId } from '../common/types/platform.type';
 import type { BankrollConfigDto } from './dto/bankroll-config.dto';
 import { ShadowComparisonService } from '../modules/exit-management/shadow-comparison.service';
+import { AuditLogService } from '../modules/monitoring/audit-log.service';
 
 @Injectable()
 export class DashboardService {
@@ -59,6 +60,7 @@ export class DashboardService {
     private readonly divergenceService: DataDivergenceService,
     private readonly healthService: PlatformHealthService,
     private readonly shadowComparisonService: ShadowComparisonService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async getOverview(): Promise<DashboardOverviewDto> {
@@ -185,6 +187,24 @@ export class DashboardService {
         'dashboard',
       ),
     );
+
+    // Story 10-5.2 AC8: audit log backfill for bankroll updates
+    try {
+      await this.auditLogService.append({
+        eventType: EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
+        module: 'dashboard',
+        details: {
+          previousValue: previousConfig.bankrollUsd,
+          newValue: newConfig.bankrollUsd,
+          updatedBy: 'dashboard',
+        },
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to create audit log for bankroll update',
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
 
     return newConfig;
   }

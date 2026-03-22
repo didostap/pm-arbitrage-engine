@@ -28,7 +28,10 @@ import type {
 import type { MatchApprovedEvent } from '../common/events/match-approved.event';
 import type { MatchRejectedEvent } from '../common/events/match-rejected.event';
 import { EVENT_NAMES } from '../common/events/event-catalog';
-import type { BankrollUpdatedEvent } from '../common/events/config.events';
+import type {
+  BankrollUpdatedEvent,
+  ConfigSettingsUpdatedEvent,
+} from '../common/events/config.events';
 import type { DataDivergenceEvent } from '../common/events/platform.events';
 import type {
   TradingHaltedEvent,
@@ -244,6 +247,27 @@ export class DashboardGateway
   handleAutoUnwind(event: AutoUnwindEvent): void {
     const envelope = this.mapper.mapAutoUnwindAlert(event);
     this.broadcast(envelope);
+  }
+
+  @OnEvent(EVENT_NAMES.CONFIG_SETTINGS_UPDATED)
+  handleConfigSettingsUpdated(event: ConfigSettingsUpdatedEvent): void {
+    const changedKeys = Object.keys(event.changedFields);
+    const newValues: Record<string, unknown> = {};
+    for (const key of changedKeys) {
+      const entry = event.changedFields[key];
+      if (entry) {
+        newValues[key] = entry.current;
+      }
+    }
+    this.broadcast({
+      event: WS_EVENTS.CONFIG_SETTINGS_UPDATED,
+      data: {
+        changedFields: changedKeys,
+        newValues,
+        updatedBy: event.updatedBy,
+      },
+      timestamp: event.timestamp.toISOString(),
+    });
   }
 
   // --- Private helpers ---

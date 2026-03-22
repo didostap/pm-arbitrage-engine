@@ -57,7 +57,8 @@ export class DataIngestionService implements OnModuleInit {
   private readonly logger = new Logger(DataIngestionService.name);
   private consecutiveFailures = 0;
 
-  private readonly kalshiConcurrency: number;
+  private kalshiConcurrency: number;
+  private polymarketPollingConcurrency: number = 5;
 
   /** Active WS subscriptions keyed by PairId string. */
   private readonly activeSubscriptions = new Map<
@@ -84,6 +85,30 @@ export class DataIngestionService implements OnModuleInit {
       'KALSHI_POLLING_CONCURRENCY',
       10,
     );
+    this.polymarketPollingConcurrency = this.configService.get<number>(
+      'POLYMARKET_POLLING_CONCURRENCY',
+      5,
+    );
+  }
+
+  /** Story 10-5.2 AC6: reload polling concurrency from DB-backed config */
+  reloadConfig(settings: {
+    kalshiConcurrency?: number;
+    polymarketPollingConcurrency?: number;
+  }): void {
+    if (settings.kalshiConcurrency !== undefined) {
+      this.kalshiConcurrency = settings.kalshiConcurrency;
+    }
+    if (settings.polymarketPollingConcurrency !== undefined) {
+      this.polymarketPollingConcurrency = settings.polymarketPollingConcurrency;
+    }
+    this.logger.log({
+      message: 'Data ingestion config reloaded',
+      data: {
+        kalshiConcurrency: this.kalshiConcurrency,
+        polymarketPollingConcurrency: this.polymarketPollingConcurrency,
+      },
+    });
   }
 
   /**

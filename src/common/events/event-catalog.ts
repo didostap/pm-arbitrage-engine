@@ -213,6 +213,11 @@ export const EVENT_NAMES = {
   /** Emitted when bankroll value is updated via dashboard */
   CONFIG_BANKROLL_UPDATED: 'config.bankroll.updated',
 
+  /** [Story 10-5.2] Emitted when DB-backed settings are updated via dashboard */
+  CONFIG_SETTINGS_UPDATED: 'config.settings.updated',
+  /** [Story 10-5.2] Audit log event type when settings are reset to defaults */
+  CONFIG_SETTINGS_RESET: 'config.settings.reset',
+
   // [Story 10.3] Auto-Unwind Events
   /** Emitted when auto-unwind policy is activated on a single-leg exposure */
   AUTO_UNWIND: 'execution.auto_unwind.attempted',

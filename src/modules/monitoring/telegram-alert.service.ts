@@ -238,10 +238,10 @@ export class TelegramAlertService implements OnModuleInit, OnModuleDestroy {
 
   private readonly token: string;
   private readonly chatId: string;
-  private readonly sendTimeoutMs: number;
-  private readonly maxRetries: number;
-  private readonly bufferMaxSize: number;
-  private readonly circuitBreakMs: number;
+  private sendTimeoutMs: number;
+  private maxRetries: number;
+  private bufferMaxSize: number;
+  private circuitBreakMs: number;
   private readonly batchWindowMs: number;
 
   private enabled = false;
@@ -296,6 +296,32 @@ export class TelegramAlertService implements OnModuleInit, OnModuleDestroy {
     this.logger.log({
       message: 'Telegram alerting enabled',
       module: 'monitoring',
+    });
+  }
+
+  /** Story 10-5.2 AC6: reload timeout/retry/buffer/circuit settings from DB-backed config */
+  reloadConfig(settings: {
+    sendTimeoutMs?: number;
+    maxRetries?: number;
+    bufferMaxSize?: number;
+    circuitBreakMs?: number;
+  }): void {
+    if (settings.sendTimeoutMs !== undefined)
+      this.sendTimeoutMs = settings.sendTimeoutMs;
+    if (settings.maxRetries !== undefined)
+      this.maxRetries = settings.maxRetries;
+    if (settings.bufferMaxSize !== undefined)
+      this.bufferMaxSize = settings.bufferMaxSize;
+    if (settings.circuitBreakMs !== undefined)
+      this.circuitBreakMs = settings.circuitBreakMs;
+    this.logger.log({
+      message: 'Telegram alert config reloaded',
+      data: {
+        sendTimeoutMs: this.sendTimeoutMs,
+        maxRetries: this.maxRetries,
+        bufferMaxSize: this.bufferMaxSize,
+        circuitBreakMs: this.circuitBreakMs,
+      },
     });
   }
 
