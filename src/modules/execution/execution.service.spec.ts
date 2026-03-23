@@ -169,6 +169,9 @@ function createConfigService(overrides: Record<string, string> = {}): {
   const defaults: Record<string, string> = {
     EXECUTION_MIN_FILL_RATIO: '0.25',
     DETECTION_MIN_EDGE_THRESHOLD: '0.008',
+    // Low ratio so existing per-leg tests aren't affected by dual-leg gate;
+    // the ATDD tests in dual-leg-depth-gate.spec.ts cover ratio=1.0 behavior.
+    DUAL_LEG_MIN_DEPTH_RATIO: '0.01',
     ...overrides,
   };
   return {
@@ -345,12 +348,15 @@ describe('ExecutionService', () => {
 
   describe('depth verification failure — pre-primary', () => {
     it('should abandon and return failure when primary depth insufficient', async () => {
-      // Return empty order book — no liquidity
+      // Return empty order book — no liquidity on primary
       kalshiConnector.getOrderBook.mockResolvedValue({
         ...makeKalshiOrderBook(),
         asks: [],
         bids: [],
       });
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
 
       const result = await service.execute(
         makeOpportunity(),
@@ -365,22 +371,26 @@ describe('ExecutionService', () => {
       expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
     });
 
-    it('should emit EXECUTION_FAILED event, not ORDER_FILLED', async () => {
+    it('should emit OPPORTUNITY_FILTERED event on dual-leg depth failure, not ORDER_FILLED', async () => {
+      // Dual-leg gate catches insufficient depth before per-leg checks (Story 10-7-1)
       kalshiConnector.getOrderBook.mockResolvedValue({
         ...makeKalshiOrderBook(),
         asks: [],
         bids: [],
       });
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
 
       await service.execute(makeOpportunity(), makeReservation());
 
-      const failedCalls = eventEmitter.emit.mock.calls.filter(
-        (call: unknown[]) => call[0] === EVENT_NAMES.EXECUTION_FAILED,
+      const filteredCalls = eventEmitter.emit.mock.calls.filter(
+        (call: unknown[]) => call[0] === EVENT_NAMES.OPPORTUNITY_FILTERED,
       );
       const filledCalls = eventEmitter.emit.mock.calls.filter(
         (call: unknown[]) => call[0] === EVENT_NAMES.ORDER_FILLED,
       );
-      expect(failedCalls).toHaveLength(1);
+      expect(filteredCalls).toHaveLength(1);
       expect(filledCalls).toHaveLength(0);
     });
   });
@@ -585,10 +595,12 @@ describe('ExecutionService', () => {
 
     it('should handle order book fetch failure gracefully', async () => {
       kalshiConnector.getOrderBook
-        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // dual-leg gate
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // per-leg depth check
         .mockRejectedValueOnce(new Error('API timeout')); // P&L fetch fails
       polymarketConnector.getOrderBook
-        .mockResolvedValueOnce(makePolymarketOrderBook()) // depth check
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // dual-leg gate
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // per-leg depth check
         .mockRejectedValueOnce(new Error('API timeout')); // P&L fetch fails
       kalshiConnector.submitOrder.mockResolvedValue(
         makeFilledOrder(PlatformId.KALSHI),
@@ -968,6 +980,9 @@ describe('ExecutionService', () => {
           'warning',
         ),
       );
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
 
       const result = await service.execute(
         makeOpportunity(),
@@ -989,6 +1004,9 @@ describe('ExecutionService', () => {
           PlatformId.KALSHI,
           'warning',
         ),
+      );
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
       );
 
       await service.execute(makeOpportunity(), makeReservation());
@@ -1301,6 +1319,9 @@ describe('ExecutionService', () => {
         ...makeKalshiOrderBook(),
         asks: [{ price: 0.45, quantity: 10 }],
       });
+      polymarketConnector.getOrderBook.mockResolvedValue(
+        makePolymarketOrderBook(),
+      );
 
       const result = await service.execute(
         makeOpportunity(),
@@ -2097,9 +2118,10 @@ describe('ExecutionService', () => {
 
     it('should fall back to fill price when close-side book is empty', async () => {
       // Kalshi buy@0.45 → close side = bids, make bids empty
-      // Call 1: depth check (normal book), Call 2: close-side capture (empty bids)
+      // Call 1: dual-leg gate, Call 2: per-leg depth check, Call 3+: close-side capture (empty bids)
       kalshiConnector.getOrderBook
-        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // dual-leg gate
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // per-leg depth check
         .mockResolvedValue({
           ...makeKalshiOrderBook(),
           bids: [], // empty close side for buy leg
@@ -2125,12 +2147,14 @@ describe('ExecutionService', () => {
     });
 
     it('should fall back to fill prices when order book fetch fails', async () => {
-      // First 2 calls succeed (depth checks), then close-side capture fails
+      // First calls succeed (dual-leg gate + per-leg depth checks), then close-side capture fails
       kalshiConnector.getOrderBook
-        .mockResolvedValueOnce(makeKalshiOrderBook()) // depth check
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // dual-leg gate
+        .mockResolvedValueOnce(makeKalshiOrderBook()) // per-leg depth check
         .mockRejectedValue(new Error('Network timeout'));
       polymarketConnector.getOrderBook
-        .mockResolvedValueOnce(makePolymarketOrderBook()) // depth check
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // dual-leg gate
+        .mockResolvedValueOnce(makePolymarketOrderBook()) // per-leg depth check
         .mockRejectedValue(new Error('Rate limited'));
       kalshiConnector.submitOrder.mockResolvedValue(
         makeFilledOrder(PlatformId.KALSHI, { filledPrice: 0.45 }),

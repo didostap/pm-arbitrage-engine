@@ -27,6 +27,7 @@ import {
   SingleLegExposureEvent,
   DepthCheckFailedEvent,
 } from '../../common/events/execution.events';
+import { OpportunityFilteredEvent } from '../../common/events/detection.events';
 import { ComplianceValidatorService } from './compliance/compliance-validator.service';
 import type { ComplianceDecision } from './compliance/compliance-config';
 import {
@@ -75,6 +76,7 @@ interface ExecutionMetadata {
 export class ExecutionService implements IExecutionEngine {
   private readonly logger = new Logger(ExecutionService.name);
   private minFillRatio: number;
+  private dualLegMinDepthRatio: number;
   private readonly minEdgeThreshold: Decimal;
 
   constructor(
@@ -106,6 +108,22 @@ export class ExecutionService implements IExecutionEngine {
       );
     }
 
+    this.dualLegMinDepthRatio = Number(
+      this.configService.get<string>('DUAL_LEG_MIN_DEPTH_RATIO', '1.0'),
+    );
+    if (
+      isNaN(this.dualLegMinDepthRatio) ||
+      this.dualLegMinDepthRatio <= 0 ||
+      this.dualLegMinDepthRatio > 1
+    ) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_CONFIGURATION,
+        'Invalid DUAL_LEG_MIN_DEPTH_RATIO: must be >0 and ≤1',
+        'error',
+        'execution',
+      );
+    }
+
     const edgeThresholdRaw = this.configService.get<string>(
       'DETECTION_MIN_EDGE_THRESHOLD',
       '0.008',
@@ -130,18 +148,30 @@ export class ExecutionService implements IExecutionEngine {
     }
   }
 
-  /** Story 10-5.2 AC6: reload minFillRatio from DB-backed config */
-  reloadConfig(settings: { minFillRatio?: string }): void {
+  /** Story 10-5.2 AC6: reload minFillRatio + dualLegMinDepthRatio from DB-backed config */
+  reloadConfig(settings: {
+    minFillRatio?: string;
+    dualLegMinDepthRatio?: string;
+  }): void {
     if (settings.minFillRatio !== undefined) {
       const value = Number(settings.minFillRatio);
       if (!isNaN(value) && value > 0 && value <= 1) {
         this.minFillRatio = value;
-        this.logger.log({
-          message: 'Execution config reloaded',
-          data: { minFillRatio: this.minFillRatio },
-        });
       }
     }
+    if (settings.dualLegMinDepthRatio !== undefined) {
+      const value = Number(settings.dualLegMinDepthRatio);
+      if (!isNaN(value) && value > 0 && value <= 1) {
+        this.dualLegMinDepthRatio = value;
+      }
+    }
+    this.logger.log({
+      message: 'Execution config reloaded',
+      data: {
+        minFillRatio: this.minFillRatio,
+        dualLegMinDepthRatio: this.dualLegMinDepthRatio,
+      },
+    });
   }
 
   async execute(
@@ -300,7 +330,125 @@ export class ExecutionService implements IExecutionEngine {
       };
     }
 
-    // Depth check — both legs BEFORE any order submission
+    // === DUAL-LEG DEPTH GATE (Story 10-7-1) ===
+    // Verify BOTH platforms have sufficient depth before EITHER leg is submitted.
+    // getAvailableDepth returns 0 on API error (fail-closed) and emits DEPTH_CHECK_FAILED internally.
+    const [primaryDualDepth, secondaryDualDepth] = await Promise.all([
+      this.getAvailableDepth(
+        primaryConnector,
+        primaryContractId,
+        primarySide,
+        targetPrice.toNumber(),
+        primaryPlatform,
+      ),
+      this.getAvailableDepth(
+        secondaryConnector,
+        secondaryContractId,
+        secondarySide,
+        secondaryTargetPrice.toNumber(),
+        secondaryPlatform,
+      ),
+    ]);
+
+    const minDepthRequired = Math.ceil(idealCount * this.dualLegMinDepthRatio);
+
+    // Reject if either leg has insufficient total depth
+    if (
+      primaryDualDepth < minDepthRequired ||
+      secondaryDualDepth < minDepthRequired
+    ) {
+      this.logger.warn({
+        message: 'Dual-leg depth gate rejected opportunity',
+        module: 'execution',
+        data: {
+          pairId,
+          idealCount,
+          minDepthRequired,
+          primaryDepth: primaryDualDepth,
+          secondaryDepth: secondaryDualDepth,
+          primaryPlatform,
+          secondaryPlatform,
+          dualLegMinDepthRatio: this.dualLegMinDepthRatio,
+        },
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.OPPORTUNITY_FILTERED,
+        new OpportunityFilteredEvent(
+          dislocation.pairConfig.eventDescription,
+          enriched.netEdge,
+          new Decimal(String(minDepthRequired)),
+          `insufficient dual-leg depth: ${primaryPlatform}=${primaryDualDepth} ${secondaryPlatform}=${secondaryDualDepth} required=${minDepthRequired}`,
+          undefined,
+          { matchId: pairId },
+        ),
+      );
+      return {
+        success: false,
+        partialFill: false,
+        error: new ExecutionError(
+          EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+          `Dual-leg depth insufficient: ${primaryPlatform}=${primaryDualDepth} ${secondaryPlatform}=${secondaryDualDepth} required=${minDepthRequired}`,
+          'warning',
+        ),
+      };
+    }
+
+    // Asymmetric depth capping: cap to min of both legs
+    const dualLegCapped = Math.min(
+      idealCount,
+      primaryDualDepth,
+      secondaryDualDepth,
+    );
+    const dualLegMinFillSize = Math.ceil(idealCount * this.minFillRatio);
+
+    if (dualLegCapped < dualLegMinFillSize) {
+      this.logger.warn({
+        message: 'Dual-leg capped size below minimum fill threshold',
+        module: 'execution',
+        data: {
+          pairId,
+          idealCount,
+          dualLegCapped,
+          dualLegMinFillSize,
+          primaryDepth: primaryDualDepth,
+          secondaryDepth: secondaryDualDepth,
+        },
+      });
+      const error = new ExecutionError(
+        EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+        `Dual-leg capped size ${dualLegCapped} below min fill threshold ${dualLegMinFillSize}`,
+        'warning',
+      );
+      this.eventEmitter.emit(
+        EVENT_NAMES.EXECUTION_FAILED,
+        new ExecutionFailedEvent(
+          EXECUTION_ERROR_CODES.INSUFFICIENT_LIQUIDITY,
+          error.message,
+          opportunity.reservationRequest.opportunityId,
+          {
+            primaryDepth: primaryDualDepth,
+            secondaryDepth: secondaryDualDepth,
+            dualLegCapped,
+            dualLegMinFillSize,
+          },
+          undefined,
+          isPaper,
+          mixedMode,
+        ),
+      );
+      return { success: false, partialFill: false, error };
+    }
+
+    if (dualLegCapped < idealCount) {
+      this.logger.log({
+        message:
+          'Dual-leg depth cap applied — per-leg checks will handle sizing',
+        module: 'execution',
+        data: { idealCount, dualLegCapped },
+      });
+    }
+
+    // Depth check — both legs BEFORE any order submission (defense-in-depth per-leg checks)
     const primaryAvailableDepth = await this.getAvailableDepth(
       primaryConnector,
       primaryContractId,

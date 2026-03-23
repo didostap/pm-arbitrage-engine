@@ -70,6 +70,7 @@ export const envSchema = z.object({
 
   // Execution Depth (String → Decimal)
   EXECUTION_MIN_FILL_RATIO: decimalString('0.25'),
+  DUAL_LEG_MIN_DEPTH_RATIO: decimalString('1.0'),
 
   // Risk Management (String → Decimal)
   RISK_BANKROLL_USD: decimalString('10000'),

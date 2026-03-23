@@ -78,6 +78,11 @@ export class UpdateSettingsDto {
   executionMinFillRatio?: string;
 
   @IsOptional()
+  @IsString()
+  @Matches(DECIMAL_REGEX)
+  dualLegMinDepthRatio?: string;
+
+  @IsOptional()
   @IsBoolean()
   adaptiveSequencingEnabled?: boolean;
 

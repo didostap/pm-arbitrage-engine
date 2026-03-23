@@ -61,6 +61,10 @@ export const CONFIG_DEFAULTS = {
     envKey: 'EXECUTION_MIN_FILL_RATIO',
     defaultValue: '0.25',
   },
+  dualLegMinDepthRatio: {
+    envKey: 'DUAL_LEG_MIN_DEPTH_RATIO',
+    defaultValue: '1.0',
+  },
 
   // --- Risk Management ---
   riskMaxPositionPct: { envKey: 'RISK_MAX_POSITION_PCT', defaultValue: '0.03' },

@@ -39,8 +39,9 @@ model EngineConfig {
   gasPolPriceFallbackUsd       Decimal? @map("gas_pol_price_fallback_usd") @db.Decimal(20, 8)
   polymarketSettlementGasUnits Int?     @map("polymarket_settlement_gas_units")
 
-  // --- Execution (1) ---
-  executionMinFillRatio Decimal? @map("execution_min_fill_ratio") @db.Decimal(20, 8)
+  // --- Execution (2) ---
+  executionMinFillRatio    Decimal? @map("execution_min_fill_ratio") @db.Decimal(20, 8)
+  dualLegMinDepthRatio     Decimal? @map("dual_leg_min_depth_ratio") @db.Decimal(20, 8)
 
   // --- Risk Management (3, bankroll already exists) ---
   riskMaxPositionPct Decimal? @map("risk_max_position_pct") @db.Decimal(20, 8)

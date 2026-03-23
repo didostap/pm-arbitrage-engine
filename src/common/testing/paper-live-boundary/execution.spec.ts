@@ -289,4 +289,97 @@ describe('Paper/Live Boundary — ExecutionService', () => {
     const createArgs = orderRepository.create.mock.calls[0]![0];
     expect(createArgs.isPaper).toBe(true);
   });
+
+  // ════════════════════════════════════════════════════════════════
+  // Story 10-7-1: Dual-Leg Depth Gate — Paper/Live Boundary
+  // ════════════════════════════════════════════════════════════════
+
+  describe('Story 10-7-1: Dual-Leg Depth Gate boundary', () => {
+    describe.each([
+      [true, 'paper'],
+      [false, 'live'],
+    ] as const)(
+      'when isPaper=%s (%s mode) — dual-leg depth gate',
+      (isPaper, modeLabel) => {
+        beforeEach(() => {
+          const mode = modeLabel;
+          kalshiConnector = createMockConnector(mode);
+          polymarketConnector = createMockConnector(mode);
+        });
+
+        it(`[P1] 5.1/5.2 — dual-leg depth gate runs in ${modeLabel} mode`, async () => {
+          // Both legs have shallow books (1 contract each) — should trigger
+          // dual-leg depth rejection regardless of paper/live mode.
+          (
+            kalshiConnector.getOrderBook as ReturnType<typeof vi.fn>
+          ).mockResolvedValue({
+            bids: [{ price: 0.6, quantity: 1 }],
+            asks: [{ price: 0.4, quantity: 1 }],
+          });
+          (
+            polymarketConnector.getOrderBook as ReturnType<typeof vi.fn>
+          ).mockResolvedValue({
+            bids: [{ price: 0.6, quantity: 1 }],
+            asks: [{ price: 0.4, quantity: 1 }],
+          });
+
+          const { opportunity, reservation } = createMockOpportunity(
+            `pair-depth-${modeLabel}`,
+          );
+
+          const service = new ExecutionService(
+            kalshiConnector,
+            polymarketConnector,
+            eventEmitter as any,
+            orderRepository as any,
+            positionRepository as any,
+            {
+              validate: vi
+                .fn()
+                .mockReturnValue({ approved: true, violations: [] }),
+            } as any,
+            configService as any,
+            {
+              getPlatformHealth: vi
+                .fn()
+                .mockImplementation((platformId: PlatformId) => ({
+                  platformId,
+                  status: 'healthy',
+                  lastHeartbeat: new Date(),
+                  latencyMs: 50,
+                  mode: modeLabel,
+                })),
+              getConnectorLatency: vi.fn().mockReturnValue(null),
+            } as any,
+            {
+              getDivergenceStatus: vi.fn().mockReturnValue('aligned'),
+            } as any,
+          );
+
+          const result = await service.execute(opportunity, reservation);
+
+          // ASSERT: Dual-leg depth gate rejects insufficient depth in BOTH modes
+          expect(result.success).toBe(false);
+          // No orders submitted — gate fires before order submission
+          expect(
+            (kalshiConnector.submitOrder as ReturnType<typeof vi.fn>).mock.calls
+              .length,
+          ).toBe(0);
+          expect(
+            (polymarketConnector.submitOrder as ReturnType<typeof vi.fn>).mock
+              .calls.length,
+          ).toBe(0);
+
+          // Verify the rejection event was emitted
+          const filteredCalls = eventEmitter.emit.mock.calls.filter(
+            ([name]: [string]) => name === 'detection.opportunity.filtered',
+          );
+          expect(filteredCalls).toHaveLength(1);
+          expect(
+            (filteredCalls[0]![1] as Record<string, unknown>).reason,
+          ).toEqual(expect.stringContaining('insufficient dual-leg depth'));
+        });
+      },
+    );
+  });
 });

@@ -81,6 +81,7 @@ function buildEffectiveConfig(
     ) as number,
     // Execution
     executionMinFillRatio: resolve('executionMinFillRatio') as string,
+    dualLegMinDepthRatio: resolve('dualLegMinDepthRatio') as string,
     // Risk Management
     riskMaxPositionPct: resolve('riskMaxPositionPct') as string,
     riskMaxOpenPairs: resolve('riskMaxOpenPairs') as number,

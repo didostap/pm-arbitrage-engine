@@ -109,6 +109,7 @@ describe('EngineConfigRepository', () => {
       polymarketSettlementGasUnits: 150000,
       // Execution
       executionMinFillRatio: mockDecimal('0.25000000'),
+      dualLegMinDepthRatio: mockDecimal('1.00000000'),
       // Risk Management
       riskMaxPositionPct: mockDecimal('0.03000000'),
       riskMaxOpenPairs: 10,

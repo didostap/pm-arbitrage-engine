@@ -31,6 +31,7 @@ export interface EffectiveConfig {
 
   // --- Execution ---
   executionMinFillRatio: string;
+  dualLegMinDepthRatio: string;
 
   // --- Risk Management ---
   riskMaxPositionPct: string;

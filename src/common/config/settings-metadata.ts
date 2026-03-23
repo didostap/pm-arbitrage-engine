@@ -166,6 +166,14 @@ export const SETTINGS_METADATA: Record<
     type: 'decimal',
     envDefault: CONFIG_DEFAULTS.executionMinFillRatio.defaultValue,
   },
+  dualLegMinDepthRatio: {
+    group: SettingsGroup.Execution,
+    label: 'Dual-Leg Min Depth Ratio',
+    description:
+      'Minimum ratio of order book depth to target position size required on both platforms before entry. 1.0 = full target must fit.',
+    type: 'decimal',
+    envDefault: CONFIG_DEFAULTS.dualLegMinDepthRatio.defaultValue,
+  },
   adaptiveSequencingEnabled: {
     group: SettingsGroup.Execution,
     label: 'Adaptive Sequencing',

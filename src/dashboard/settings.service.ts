@@ -97,6 +97,7 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
 
   // Execution
   executionMinFillRatio: ['execution'],
+  dualLegMinDepthRatio: ['execution'],
   adaptiveSequencingEnabled: ['execution'],
   adaptiveSequencingLatencyThresholdMs: ['execution'],
   polymarketOrderPollTimeoutMs: ['execution'],
@@ -164,6 +165,7 @@ export class SettingsService implements OnModuleInit {
     this.tryRegisterHandler('execution', EXECUTION_ENGINE_TOKEN, (svc, cfg) =>
       svc.reloadConfig({
         minFillRatio: cfg.executionMinFillRatio,
+        dualLegMinDepthRatio: cfg.dualLegMinDepthRatio,
       }),
     );
     this.tryRegisterHandler(
