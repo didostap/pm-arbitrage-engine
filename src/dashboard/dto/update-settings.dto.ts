@@ -49,6 +49,11 @@ export class UpdateSettingsDto {
   @Matches(DECIMAL_REGEX)
   minAnnualizedReturn?: string;
 
+  @IsOptional()
+  @IsString()
+  @Matches(DECIMAL_REGEX)
+  detectionMinFillRatio?: string;
+
   // ── Gas Estimation ──────────────────────────────────────────────────
   @IsOptional()
   @IsInt()

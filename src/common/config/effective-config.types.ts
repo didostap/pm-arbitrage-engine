@@ -23,6 +23,8 @@ export interface EffectiveConfig {
   detectionPositionSizeUsd: string;
   minAnnualizedReturn: string;
 
+  detectionMinFillRatio: string;
+
   // --- Gas Estimation ---
   gasBufferPercent: number;
   gasPollIntervalMs: number;

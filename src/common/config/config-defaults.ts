@@ -56,6 +56,12 @@ export const CONFIG_DEFAULTS = {
     defaultValue: 150000,
   },
 
+  // --- Detection Depth ---
+  detectionMinFillRatio: {
+    envKey: 'DETECTION_MIN_FILL_RATIO',
+    defaultValue: '0.25',
+  },
+
   // --- Execution ---
   executionMinFillRatio: {
     envKey: 'EXECUTION_MIN_FILL_RATIO',

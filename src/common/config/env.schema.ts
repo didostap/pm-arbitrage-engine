@@ -68,6 +68,9 @@ export const envSchema = z.object({
     .positive()
     .default(150000),
 
+  // Detection Depth (String → Decimal)
+  DETECTION_MIN_FILL_RATIO: decimalString('0.25'),
+
   // Execution Depth (String → Decimal)
   EXECUTION_MIN_FILL_RATIO: decimalString('0.25'),
   DUAL_LEG_MIN_DEPTH_RATIO: decimalString('1.0'),

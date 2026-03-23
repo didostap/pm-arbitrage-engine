@@ -31,6 +31,7 @@ import { CandidateDiscoveryService } from '../modules/contract-matching/candidat
 import { ResolutionPollerService } from '../modules/contract-matching/resolution-poller.service.js';
 import { CalibrationService } from '../modules/contract-matching/calibration.service.js';
 import { SchedulerService } from '../core/scheduler.service.js';
+import { EdgeCalculatorService } from '../modules/arbitrage-detection/edge-calculator.service.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,6 +95,9 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
   exitRiskRankCutoff: ['exit-monitor'],
   exitMinDepth: ['exit-monitor'],
   exitProfitCaptureRatio: ['exit-monitor'],
+
+  // Detection
+  detectionMinFillRatio: ['detection'],
 
   // Execution
   executionMinFillRatio: ['execution'],
@@ -160,6 +164,11 @@ export class SettingsService implements OnModuleInit {
         exitRiskRankCutoff: cfg.exitRiskRankCutoff,
         exitMinDepth: cfg.exitMinDepth,
         exitProfitCaptureRatio: cfg.exitProfitCaptureRatio,
+      }),
+    );
+    this.tryRegisterHandler('detection', EdgeCalculatorService, (svc, cfg) =>
+      svc.reloadConfig({
+        detectionMinFillRatio: cfg.detectionMinFillRatio,
       }),
     );
     this.tryRegisterHandler('execution', EXECUTION_ENGINE_TOKEN, (svc, cfg) =>

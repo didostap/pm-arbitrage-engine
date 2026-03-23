@@ -5,6 +5,7 @@ export interface FilteredDislocation {
   netEdge: string;
   threshold: string;
   reason: string;
+  bestLevelNetEdge?: string;
 }
 
 export interface EdgeCalculationResult {

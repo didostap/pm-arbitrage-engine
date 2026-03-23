@@ -5,6 +5,7 @@ import Decimal from 'decimal.js';
 import {
   FinancialMath,
   calculateVwapClosePrice,
+  calculateVwapWithFillInfo,
   calculateLegPnl,
 } from './financial-math';
 import { FeeSchedule } from '../types/platform.type';
@@ -541,5 +542,117 @@ describe('calculateLegPnl', () => {
       new Decimal('0'),
     );
     expect(result.toNumber()).toBe(0);
+  });
+});
+
+// ==========================================================================
+// Story 10-7-2: calculateVwapWithFillInfo — ATDD Red Phase
+// ==========================================================================
+describe('calculateVwapWithFillInfo (Story 10-7-2)', () => {
+  it('single-level book, full fill → filledQty equals positionSize, vwap equals level price', () => {
+    const book = makeOrderBook([{ price: 0.6, quantity: 100 }], []);
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.vwap.toNumber()).toBe(0.6);
+    expect(result!.filledQty.toNumber()).toBe(50);
+    expect(result!.totalQtyAvailable.toNumber()).toBe(100);
+  });
+
+  it('multi-level book, full fill → correct VWAP and filledQty', () => {
+    // Bids: 0.60 × 30, 0.58 × 70 → fill 50 from top
+    // VWAP = (0.60*30 + 0.58*20) / 50 = 29.6 / 50 = 0.592
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 30 },
+        { price: 0.58, quantity: 70 },
+      ],
+      [],
+    );
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.vwap.toNumber()).toBeCloseTo(0.592, 10);
+    expect(result!.filledQty.toNumber()).toBe(50);
+    expect(result!.totalQtyAvailable.toNumber()).toBe(100);
+  });
+
+  it('partial fill (book has less than requested) → filledQty < positionSize, VWAP across available', () => {
+    // Only 30 available, need 50 → partial fill
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 20 },
+        { price: 0.58, quantity: 10 },
+      ],
+      [],
+    );
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.filledQty.toNumber()).toBe(30);
+    // VWAP = (0.60*20 + 0.58*10) / 30 = 17.8 / 30 ≈ 0.59333
+    expect(result!.vwap.toNumber()).toBeCloseTo(17.8 / 30, 10);
+    expect(result!.totalQtyAvailable.toNumber()).toBe(30);
+  });
+
+  it('empty side → returns null', () => {
+    const book = makeOrderBook([], [{ price: 0.4, quantity: 100 }]);
+    // buy side walks bids, but bids are empty
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('50'));
+    expect(result).toBeNull();
+  });
+
+  it('zero position size → returns null', () => {
+    const book = makeOrderBook([{ price: 0.6, quantity: 100 }], []);
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('0'));
+    expect(result).toBeNull();
+  });
+
+  it('totalQtyAvailable sums all levels correctly', () => {
+    const book = makeOrderBook(
+      [
+        { price: 0.6, quantity: 30 },
+        { price: 0.58, quantity: 70 },
+        { price: 0.55, quantity: 50 },
+      ],
+      [],
+    );
+    const result = calculateVwapWithFillInfo(book, 'buy', new Decimal('10'));
+    expect(result).not.toBeNull();
+    expect(result!.totalQtyAvailable.toNumber()).toBe(150);
+    // Full fill at first level only → vwap = 0.60
+    expect(result!.filledQty.toNumber()).toBe(10);
+    expect(result!.vwap.toNumber()).toBe(0.6);
+  });
+
+  it('closeSide=sell walks asks, multi-level full fill → correct VWAP', () => {
+    // Asks: 0.40 × 30, 0.42 × 70 → fill 50 from lowest ask
+    // VWAP = (0.40*30 + 0.42*20) / 50 = 20.4 / 50 = 0.408
+    const book = makeOrderBook(
+      [],
+      [
+        { price: 0.4, quantity: 30 },
+        { price: 0.42, quantity: 70 },
+      ],
+    );
+    const result = calculateVwapWithFillInfo(book, 'sell', new Decimal('50'));
+    expect(result).not.toBeNull();
+    expect(result!.vwap.toNumber()).toBeCloseTo(0.408, 10);
+    expect(result!.filledQty.toNumber()).toBe(50);
+    expect(result!.totalQtyAvailable.toNumber()).toBe(100);
+  });
+
+  it('closeSide=sell partial fill on asks → correct VWAP for available depth', () => {
+    // Only 40 available on asks, need 60 → partial fill
+    const book = makeOrderBook(
+      [],
+      [
+        { price: 0.4, quantity: 25 },
+        { price: 0.42, quantity: 15 },
+      ],
+    );
+    const result = calculateVwapWithFillInfo(book, 'sell', new Decimal('60'));
+    expect(result).not.toBeNull();
+    expect(result!.filledQty.toNumber()).toBe(40);
+    // VWAP = (0.40*25 + 0.42*15) / 40 = 16.3 / 40 = 0.4075
+    expect(result!.vwap.toNumber()).toBeCloseTo(16.3 / 40, 10);
+    expect(result!.totalQtyAvailable.toNumber()).toBe(40);
   });
 });

@@ -72,6 +72,7 @@ function buildEffectiveConfig(
     detectionGasEstimateUsd: resolve('detectionGasEstimateUsd') as string,
     detectionPositionSizeUsd: resolve('detectionPositionSizeUsd') as string,
     minAnnualizedReturn: resolve('minAnnualizedReturn') as string,
+    detectionMinFillRatio: resolve('detectionMinFillRatio') as string,
     // Gas Estimation
     gasBufferPercent: resolve('gasBufferPercent') as number,
     gasPollIntervalMs: resolve('gasPollIntervalMs') as number,

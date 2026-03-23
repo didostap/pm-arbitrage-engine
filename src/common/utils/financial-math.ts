@@ -222,18 +222,28 @@ export class FinancialMath {
 }
 
 /**
- * Calculate VWAP close price by walking order book levels.
+ * Result of VWAP calculation with fill information.
+ * Used by detection to check fill ratios before accepting VWAP edge.
+ */
+export interface VwapFillResult {
+  vwap: Decimal;
+  filledQty: Decimal;
+  totalQtyAvailable: Decimal;
+}
+
+/**
+ * Calculate VWAP with fill info by walking order book levels.
  * Buy position → sell to close → walk bids (highest first).
  * Sell position → buy to close → walk asks (lowest first).
  *
- * Returns null when: empty side, zero/negative position size.
+ * Returns null when: empty side, zero/negative position size, or filledQty = 0.
  * When total depth < positionSize, returns VWAP across all available depth (partial fill).
  */
-export function calculateVwapClosePrice(
+export function calculateVwapWithFillInfo(
   orderBook: NormalizedOrderBook,
   closeSide: 'buy' | 'sell',
   positionSize: Decimal,
-): Decimal | null {
+): VwapFillResult | null {
   if (positionSize.lte(0)) return null;
 
   const levels = closeSide === 'buy' ? orderBook.bids : orderBook.asks;
@@ -241,6 +251,14 @@ export function calculateVwapClosePrice(
 
   let remainingQty = positionSize;
   let totalCost = new FinancialDecimal(0);
+
+  // Sum all levels for totalQtyAvailable (even beyond what we fill)
+  let totalQtyAvailable = new FinancialDecimal(0);
+  for (const level of levels) {
+    totalQtyAvailable = totalQtyAvailable.plus(
+      new FinancialDecimal(level.quantity),
+    );
+  }
 
   for (const level of levels) {
     const levelQty = new FinancialDecimal(level.quantity);
@@ -253,7 +271,27 @@ export function calculateVwapClosePrice(
 
   const filledQty = positionSize.minus(remainingQty);
   if (filledQty.isZero()) return null;
-  return totalCost.div(filledQty);
+  return {
+    vwap: totalCost.div(filledQty),
+    filledQty,
+    totalQtyAvailable,
+  };
+}
+
+/**
+ * Calculate VWAP close price by walking order book levels.
+ * Delegates to calculateVwapWithFillInfo() and returns only the VWAP price.
+ *
+ * Returns null when: empty side, zero/negative position size.
+ * When total depth < positionSize, returns VWAP across all available depth (partial fill).
+ */
+export function calculateVwapClosePrice(
+  orderBook: NormalizedOrderBook,
+  closeSide: 'buy' | 'sell',
+  positionSize: Decimal,
+): Decimal | null {
+  const result = calculateVwapWithFillInfo(orderBook, closeSide, positionSize);
+  return result?.vwap ?? null;
 }
 
 /**

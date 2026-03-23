@@ -11,7 +11,11 @@ import {
   OpportunityFilteredEvent,
 } from '../../common/events';
 import { PlatformId, FeeSchedule } from '../../common/types';
-import { FinancialMath, FinancialDecimal } from '../../common/utils';
+import {
+  FinancialMath,
+  FinancialDecimal,
+  calculateVwapWithFillInfo,
+} from '../../common/utils';
 import { ConfigValidationError } from '../../common/errors';
 import { getCorrelationId } from '../../common/services/correlation-context';
 import { RawDislocation } from './types/raw-dislocation.type';
@@ -37,11 +41,14 @@ export class EdgeCalculatorService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  private detectionMinFillRatio: Decimal = new FinancialDecimal(0.25);
+
   onModuleInit(): void {
     this.validateConfig('DETECTION_MIN_EDGE_THRESHOLD', 0.008);
     this.validateConfig('DETECTION_GAS_ESTIMATE_USD', 0.3);
     this.validateConfig('DETECTION_POSITION_SIZE_USD', 300);
     this.validateMinAnnualizedReturn();
+    this.validateDetectionMinFillRatio();
     this.logger.log('Edge calculator configuration validated');
   }
 
@@ -84,6 +91,37 @@ export class EdgeCalculatorService implements OnModuleInit {
     return new FinancialDecimal(
       this.configService.get<string>('MIN_ANNUALIZED_RETURN', '0.15'),
     );
+  }
+
+  private validateDetectionMinFillRatio(): void {
+    const raw = this.configService.get<string>(
+      'DETECTION_MIN_FILL_RATIO',
+      '0.25',
+    );
+    const val = Number(raw);
+    if (isNaN(val) || val <= 0 || val > 1.0) {
+      throw new ConfigValidationError(
+        `EdgeCalculatorService: DETECTION_MIN_FILL_RATIO must be > 0 and <= 1.0, got ${raw}`,
+        [`DETECTION_MIN_FILL_RATIO: ${raw} is out of range (0, 1.0]`],
+      );
+    }
+    this.detectionMinFillRatio = new FinancialDecimal(val);
+  }
+
+  reloadConfig(settings: { detectionMinFillRatio?: string }): void {
+    if (settings.detectionMinFillRatio !== undefined) {
+      const val = Number(settings.detectionMinFillRatio);
+      if (isNaN(val) || val <= 0 || val > 1.0) {
+        this.logger.warn({
+          message: `Invalid detectionMinFillRatio: ${settings.detectionMinFillRatio}, keeping current value`,
+        });
+        return;
+      }
+      this.detectionMinFillRatio = new FinancialDecimal(val);
+      this.logger.log(
+        `Detection min fill ratio updated to ${this.detectionMinFillRatio.toString()}`,
+      );
+    }
   }
 
   private get minEdgeThreshold(): Decimal {
@@ -176,7 +214,73 @@ export class EdgeCalculatorService implements OnModuleInit {
 
     const gasEstimate = this.getGasEstimateUsd(buyFeeSchedule, sellFeeSchedule);
 
-    const netEdge = FinancialMath.calculateNetEdge(
+    const pairEventDescription = dislocation.pairConfig.eventDescription;
+
+    // --- VWAP computation (Story 10-7-2) ---
+
+    // Guard: zero prices → cannot compute VWAP target contracts
+    if (dislocation.buyPrice.isZero() || dislocation.sellPrice.isZero()) {
+      this.filterInsufficientVwapDepth(
+        pairEventDescription,
+        dislocation,
+        filtered,
+      );
+      return;
+    }
+
+    // Convert USD position size → target contract counts using best-level prices
+    const buyTargetContracts = this.positionSizeUsd
+      .div(dislocation.buyPrice)
+      .ceil();
+    const sellTargetContracts = this.positionSizeUsd
+      .div(dislocation.sellPrice)
+      .ceil();
+
+    // Compute VWAP for both legs
+    // Buy leg: buying at ask side → closeSide='sell' walks asks (counterintuitive — see design doc)
+    const buyVwapResult = calculateVwapWithFillInfo(
+      dislocation.buyOrderBook,
+      'sell',
+      buyTargetContracts,
+    );
+    // Sell leg: selling at bid side → closeSide='buy' walks bids
+    const sellVwapResult = calculateVwapWithFillInfo(
+      dislocation.sellOrderBook,
+      'buy',
+      sellTargetContracts,
+    );
+
+    // Null VWAP = empty book side → filter
+    if (!buyVwapResult || !sellVwapResult) {
+      this.filterInsufficientVwapDepth(
+        pairEventDescription,
+        dislocation,
+        filtered,
+      );
+      return;
+    }
+
+    // Check fill ratios against detectionMinFillRatio
+    const buyFillRatio = buyVwapResult.filledQty.div(buyTargetContracts);
+    const sellFillRatio = sellVwapResult.filledQty.div(sellTargetContracts);
+
+    if (
+      buyFillRatio.lt(this.detectionMinFillRatio) ||
+      sellFillRatio.lt(this.detectionMinFillRatio)
+    ) {
+      this.filterInsufficientVwapDepth(
+        pairEventDescription,
+        dislocation,
+        filtered,
+      );
+      return;
+    }
+
+    const vwapBuyPrice = buyVwapResult.vwap;
+    const vwapSellPrice = sellVwapResult.vwap;
+
+    // Best-level net edge (for comparison logging)
+    const bestLevelNetEdge = FinancialMath.calculateNetEdge(
       dislocation.grossEdge,
       dislocation.buyPrice,
       dislocation.sellPrice,
@@ -186,12 +290,34 @@ export class EdgeCalculatorService implements OnModuleInit {
       this.positionSizeUsd,
     );
 
+    // VWAP-based gross edge and net edge
+    const vwapGrossEdge = vwapSellPrice.minus(vwapBuyPrice);
+    const netEdge = FinancialMath.calculateNetEdge(
+      vwapGrossEdge,
+      vwapBuyPrice,
+      vwapSellPrice,
+      buyFeeSchedule,
+      sellFeeSchedule,
+      gasEstimate,
+      this.positionSizeUsd,
+    );
+
+    this.logger.debug({
+      message: `Edge comparison: ${pairEventDescription}`,
+      correlationId: getCorrelationId(),
+      data: {
+        bestLevelNetEdge: bestLevelNetEdge.toString(),
+        vwapNetEdge: netEdge.toString(),
+        edgeDelta: bestLevelNetEdge.minus(netEdge).toString(),
+      },
+    });
+
+    // --- Threshold filtering (uses VWAP edge) ---
+
     const multiplier = this.degradationService.getEdgeThresholdMultiplier(
       dislocation.buyPlatformId,
     );
     const effectiveThreshold = this.minEdgeThreshold.mul(multiplier);
-
-    const pairEventDescription = dislocation.pairConfig.eventDescription;
 
     if (!FinancialMath.isAboveThreshold(netEdge, effectiveThreshold)) {
       const reason = netEdge.isNegative() ? 'negative_edge' : 'below_threshold';
@@ -201,6 +327,7 @@ export class EdgeCalculatorService implements OnModuleInit {
         netEdge: netEdge.toString(),
         threshold: effectiveThreshold.toString(),
         reason,
+        bestLevelNetEdge: bestLevelNetEdge.toString(),
       });
 
       this.logger.debug({
@@ -209,6 +336,7 @@ export class EdgeCalculatorService implements OnModuleInit {
         data: {
           pairEventDescription,
           netEdge: netEdge.toString(),
+          bestLevelNetEdge: bestLevelNetEdge.toString(),
           threshold: effectiveThreshold.toString(),
           reason,
         },
@@ -248,7 +376,12 @@ export class EdgeCalculatorService implements OnModuleInit {
     const enriched: EnrichedOpportunity = {
       dislocation,
       netEdge,
-      grossEdge: dislocation.grossEdge,
+      grossEdge: vwapGrossEdge,
+      bestLevelNetEdge,
+      vwapBuyPrice,
+      vwapSellPrice,
+      buyFillRatio: buyFillRatio.toNumber(),
+      sellFillRatio: sellFillRatio.toNumber(),
       feeBreakdown,
       liquidityDepth,
       recommendedPositionSize: null,
@@ -262,7 +395,12 @@ export class EdgeCalculatorService implements OnModuleInit {
       EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
       new OpportunityIdentifiedEvent({
         netEdge: netEdge.toNumber(),
-        grossEdge: dislocation.grossEdge.toNumber(),
+        grossEdge: vwapGrossEdge.toNumber(),
+        bestLevelNetEdge: bestLevelNetEdge.toNumber(),
+        vwapBuyPrice: vwapBuyPrice.toNumber(),
+        vwapSellPrice: vwapSellPrice.toNumber(),
+        buyFillRatio: buyFillRatio.toNumber(),
+        sellFillRatio: sellFillRatio.toNumber(),
         buyPlatformId: dislocation.buyPlatformId,
         sellPlatformId: dislocation.sellPlatformId,
         buyPrice: dislocation.buyPrice.toNumber(),
@@ -442,6 +580,33 @@ export class EdgeCalculatorService implements OnModuleInit {
       buyBestBidSize: buyBook.bids.length > 0 ? buyBook.bids[0]!.quantity : 0,
       sellBestBidSize:
         sellBook.bids.length > 0 ? sellBook.bids[0]!.quantity : 0,
+      // Fillable-side depth: buy leg fills against asks, sell leg fills against bids
+      buyTotalDepth: buyBook.asks.reduce((sum, l) => sum + l.quantity, 0),
+      sellTotalDepth: sellBook.bids.reduce((sum, l) => sum + l.quantity, 0),
     };
+  }
+
+  private filterInsufficientVwapDepth(
+    pairEventDescription: string,
+    dislocation: RawDislocation,
+    filtered: FilteredDislocation[],
+  ): void {
+    filtered.push({
+      pairEventDescription,
+      netEdge: '0',
+      threshold: 'N/A',
+      reason: 'insufficient_vwap_depth',
+    });
+    this.eventEmitter.emit(
+      EVENT_NAMES.OPPORTUNITY_FILTERED,
+      new OpportunityFilteredEvent(
+        pairEventDescription,
+        new FinancialDecimal(0),
+        new FinancialDecimal(0),
+        'insufficient_vwap_depth',
+        undefined,
+        { matchId: dislocation.pairConfig.matchId },
+      ),
+    );
   }
 }

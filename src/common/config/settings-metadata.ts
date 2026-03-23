@@ -57,7 +57,7 @@ export interface SettingsMetadataEntry {
 }
 
 // ---------------------------------------------------------------------------
-// SETTINGS_METADATA — all 72 CONFIG_DEFAULTS keys (71 Category B + bankrollUsd reference; bankrollUsd excluded from settings UI)
+// SETTINGS_METADATA — all 73 CONFIG_DEFAULTS keys (72 Category B + bankrollUsd reference; bankrollUsd excluded from settings UI)
 // ---------------------------------------------------------------------------
 
 export const SETTINGS_METADATA: Record<
@@ -118,6 +118,15 @@ export const SETTINGS_METADATA: Record<
     description: 'Minimum annualized return threshold to filter opportunities.',
     type: 'decimal',
     envDefault: CONFIG_DEFAULTS.minAnnualizedReturn.defaultValue,
+  },
+
+  detectionMinFillRatio: {
+    group: SettingsGroup.DetectionEdge,
+    label: 'Min VWAP Fill Ratio',
+    description:
+      'Minimum ratio of fillable depth to target contracts for VWAP edge calculation. Opportunities below this are filtered as insufficient depth.',
+    type: 'decimal',
+    envDefault: CONFIG_DEFAULTS.detectionMinFillRatio.defaultValue,
   },
 
   // ── Gas Estimation ────────────────────────────────────────────────────

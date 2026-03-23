@@ -16,12 +16,19 @@ export interface LiquidityDepth {
   sellBestAskSize: number;
   buyBestBidSize: number;
   sellBestBidSize: number;
+  buyTotalDepth: number;
+  sellTotalDepth: number;
 }
 
 export interface EnrichedOpportunity {
   dislocation: RawDislocation;
   netEdge: Decimal;
   grossEdge: Decimal;
+  bestLevelNetEdge: Decimal;
+  vwapBuyPrice: Decimal;
+  vwapSellPrice: Decimal;
+  buyFillRatio: number;
+  sellFillRatio: number;
   feeBreakdown: FeeBreakdown;
   liquidityDepth: LiquidityDepth;
   recommendedPositionSize: null;
