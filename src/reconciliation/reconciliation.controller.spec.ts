@@ -231,6 +231,7 @@ describe('ReconciliationController', () => {
       });
       expect(mockPositionRepository.findByStatus).toHaveBeenCalledWith(
         'RECONCILIATION_REQUIRED',
+        false,
       );
     });
 

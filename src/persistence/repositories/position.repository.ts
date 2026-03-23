@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Platform } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import type { PositionId, PairId } from '../../common/types/branded.type';
+import { withModeFilter } from './mode-filter.helper';
 
 @Injectable()
 export class PositionRepository {
@@ -21,18 +22,20 @@ export class PositionRepository {
 
   async findByStatus(
     status: Prisma.OpenPositionWhereInput['status'],
-    isPaper: boolean = false,
+    isPaper: boolean,
   ) {
-    return this.prisma.openPosition.findMany({ where: { status, isPaper } });
+    return this.prisma.openPosition.findMany({
+      where: { status, ...withModeFilter(isPaper) },
+    });
   }
 
   /** Fetches positions by status with associated ContractMatch included. */
   async findByStatusWithPair(
     status: Prisma.OpenPositionWhereInput['status'],
-    isPaper: boolean = false,
+    isPaper: boolean,
   ) {
     return this.prisma.openPosition.findMany({
-      where: { status, isPaper },
+      where: { status, ...withModeFilter(isPaper) },
       include: { pair: true },
     });
   }
@@ -43,10 +46,10 @@ export class PositionRepository {
    */
   async findByStatusWithOrders(
     status: Prisma.OpenPositionWhereInput['status'],
-    isPaper: boolean = false,
+    isPaper: boolean,
   ) {
     return this.prisma.openPosition.findMany({
-      where: { status, isPaper },
+      where: { status, ...withModeFilter(isPaper) },
       include: { pair: true, kalshiOrder: true, polymarketOrder: true },
     });
   }
@@ -81,10 +84,10 @@ export class PositionRepository {
    * Finds all active positions (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL, RECONCILIATION_REQUIRED)
    * with associated pair, kalshiOrder, and polymarketOrder for reconciliation.
    */
-  async findActivePositions(isPaper: boolean = false) {
+  async findActivePositions(isPaper: boolean) {
     return this.prisma.openPosition.findMany({
       where: {
-        isPaper,
+        ...withModeFilter(isPaper),
         status: {
           in: [
             'OPEN',
@@ -103,6 +106,10 @@ export class PositionRepository {
    * When statuses is undefined or empty, returns ALL positions (no status filter).
    * Includes pair, kalshiOrder, polymarketOrder for enrichment and P&L computation.
    */
+  /**
+   * Dashboard query method — supports `isPaper: undefined` for "show all modes".
+   * When isPaper is provided, applies withModeFilter; when undefined, no mode filter.
+   */
   async findManyWithFilters(
     statuses?: string[],
     isPaper?: boolean,
@@ -119,7 +126,7 @@ export class PositionRepository {
     }
 
     if (isPaper !== undefined) {
-      where['isPaper'] = isPaper;
+      Object.assign(where, withModeFilter(isPaper));
     }
 
     if (pairId) {
@@ -156,28 +163,33 @@ export class PositionRepository {
     });
   }
 
-  /** Counts all positions with a given status (both live and paper). */
+  /** Counts positions with a given status, mode-scoped. */
   async countByStatus(
     status: Prisma.OpenPositionWhereInput['status'],
+    isPaper: boolean,
   ): Promise<number> {
-    return this.prisma.openPosition.count({ where: { status } });
+    return this.prisma.openPosition.count({
+      where: { status, ...withModeFilter(isPaper) },
+    });
   }
 
-  /** Counts positions closed within a date range. */
+  /** Counts positions closed within a date range, mode-scoped. */
   async countClosedByDateRange(
     startDate: Date,
     endDate: Date,
+    isPaper: boolean,
   ): Promise<number> {
     return this.prisma.openPosition.count({
       where: {
         status: 'CLOSED',
         updatedAt: { gte: startDate, lte: endDate },
+        ...withModeFilter(isPaper),
       },
     });
   }
 
   /**
-   * Sums expectedEdge for positions closed in date range.
+   * Sums expectedEdge for positions closed in date range, mode-scoped.
    * NOTE: This is a proxy for realized P&L — OpenPosition has no dedicated realizedPnl
    * Decimal column. The reconciliationContext JSON may contain actual P&L but extracting
    * from JSON aggregates is unreliable. True realized P&L tracking requires a schema
@@ -186,11 +198,13 @@ export class PositionRepository {
   async sumClosedEdgeByDateRange(
     startDate: Date,
     endDate: Date,
+    isPaper: boolean,
   ): Promise<string> {
     const result = await this.prisma.openPosition.aggregate({
       where: {
         status: 'CLOSED',
         updatedAt: { gte: startDate, lte: endDate },
+        ...withModeFilter(isPaper),
       },
       _sum: { expectedEdge: true },
     });
@@ -198,18 +212,20 @@ export class PositionRepository {
   }
 
   /**
-   * Counts orders by platform within a date range.
+   * Counts orders by platform within a date range, mode-scoped.
    * Used by tax report for per-platform trade counts.
    */
   async countOrdersByPlatformAndDateRange(
     platform: Platform,
     startDate: Date,
     endDate: Date,
+    isPaper: boolean,
   ): Promise<number> {
     return this.prisma.order.count({
       where: {
         platform,
         createdAt: { gte: startDate, lte: endDate },
+        ...withModeFilter(isPaper),
       },
     });
   }

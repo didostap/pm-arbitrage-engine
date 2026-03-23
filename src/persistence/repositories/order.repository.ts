@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { type OrderId, type PairId } from '../../common/types/branded.type';
+import { withModeFilter } from './mode-filter.helper';
 
 @Injectable()
 export class OrderRepository {
@@ -30,9 +31,9 @@ export class OrderRepository {
   }
 
   /** Finds all orders with PENDING status. */
-  async findPendingOrders(isPaper: boolean = false) {
+  async findPendingOrders(isPaper: boolean) {
     return this.prisma.order.findMany({
-      where: { status: 'PENDING', isPaper },
+      where: { status: 'PENDING', ...withModeFilter(isPaper) },
     });
   }
 
@@ -52,12 +53,17 @@ export class OrderRepository {
     });
   }
 
-  /** Counts filled orders within a date range. */
-  async countByDateRange(startDate: Date, endDate: Date): Promise<number> {
+  /** Counts filled orders within a date range, mode-scoped. */
+  async countByDateRange(
+    startDate: Date,
+    endDate: Date,
+    isPaper: boolean,
+  ): Promise<number> {
     return this.prisma.order.count({
       where: {
         status: 'FILLED',
         createdAt: { gte: startDate, lte: endDate },
+        ...withModeFilter(isPaper),
       },
     });
   }

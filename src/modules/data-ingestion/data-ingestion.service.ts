@@ -165,9 +165,12 @@ export class DataIngestionService implements OnModuleInit {
     try {
       // Rehydrate both live and paper positions — paper mode uses real WS data (AC #4)
       const [livePositions, paperPositions] = await Promise.all([
-        this.positionRepository.findByStatusWithPair({
-          in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
-        }),
+        this.positionRepository.findByStatusWithPair(
+          {
+            in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+          },
+          false,
+        ),
         this.positionRepository.findByStatusWithPair(
           { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
           true,

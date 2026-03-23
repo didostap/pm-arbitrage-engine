@@ -98,12 +98,13 @@ export class DailySummaryService {
   ): Promise<DailySummaryData> {
     const metrics = this.eventConsumerService.getMetrics();
 
+    // Daily summary reports live-mode metrics only (paper is informational, not reportable)
     const [totalTrades, openPositions, closedPositions, totalPnl] =
       await Promise.all([
-        this.orderRepository.countByDateRange(start, end),
-        this.positionRepository.countByStatus('OPEN'),
-        this.positionRepository.countClosedByDateRange(start, end),
-        this.positionRepository.sumClosedEdgeByDateRange(start, end),
+        this.orderRepository.countByDateRange(start, end, false),
+        this.positionRepository.countByStatus('OPEN', false),
+        this.positionRepository.countClosedByDateRange(start, end, false),
+        this.positionRepository.sumClosedEdgeByDateRange(start, end, false),
       ]);
 
     const uptimeSeconds = Math.floor(process.uptime());

@@ -227,9 +227,12 @@ describe('ExposureAlertScheduler', () => {
 
     await scheduler.checkExposedPositions();
 
-    expect(positionRepository.findByStatusWithPair).toHaveBeenCalledWith({
-      in: ['SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
-    });
+    expect(positionRepository.findByStatusWithPair).toHaveBeenCalledWith(
+      {
+        in: ['SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+      },
+      false,
+    );
     // Should NOT call findByIdWithPair separately
     expect(positionRepository.findByIdWithPair).not.toHaveBeenCalled();
   });

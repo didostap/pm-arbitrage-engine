@@ -41,9 +41,12 @@ export class ExposureAlertScheduler {
 
   @Interval(REMINDER_INTERVAL_MS)
   async checkExposedPositions(): Promise<void> {
-    const positions = await this.positionRepository.findByStatusWithPair({
-      in: ['SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
-    });
+    const positions = await this.positionRepository.findByStatusWithPair(
+      {
+        in: ['SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+      },
+      false,
+    );
 
     for (const position of positions) {
       try {

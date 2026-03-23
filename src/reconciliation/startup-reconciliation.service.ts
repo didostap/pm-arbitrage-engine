@@ -237,7 +237,7 @@ export class StartupReconciliationService {
     checked: number;
     discrepancies: ReconciliationDiscrepancy[];
   }> {
-    const pendingOrders = await this.orderRepository.findPendingOrders();
+    const pendingOrders = await this.orderRepository.findPendingOrders(false);
     let resolved = 0;
     let checked = 0;
     const discrepancies: ReconciliationDiscrepancy[] = [];
@@ -297,8 +297,10 @@ export class StartupReconciliationService {
           });
         } else if (platformStatus.status === 'not_found') {
           // Look up the actual position for this order's pair
-          const relatedPositions =
-            await this.positionRepository.findByStatus('SINGLE_LEG_EXPOSED');
+          const relatedPositions = await this.positionRepository.findByStatus(
+            'SINGLE_LEG_EXPOSED',
+            false,
+          );
           const matchingPosition = relatedPositions.find(
             (p) => p.pairId === order.pairId,
           );
@@ -552,6 +554,7 @@ export class StartupReconciliationService {
     // Check if any RECONCILIATION_REQUIRED positions remain
     const remaining = await this.positionRepository.findByStatus(
       'RECONCILIATION_REQUIRED',
+      false,
     );
     const remainingDiscrepancies = remaining.length;
 
@@ -574,8 +577,10 @@ export class StartupReconciliationService {
     },
   ): Promise<void> {
     // Find positions for this pair that are SINGLE_LEG_EXPOSED
-    const positions =
-      await this.positionRepository.findByStatus('SINGLE_LEG_EXPOSED');
+    const positions = await this.positionRepository.findByStatus(
+      'SINGLE_LEG_EXPOSED',
+      false,
+    );
     const matchingPosition = positions.find((p) => p.pairId === order.pairId);
 
     if (!matchingPosition) return;

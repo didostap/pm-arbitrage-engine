@@ -115,8 +115,10 @@ export class ExposureTrackerService implements OnModuleInit {
 
   private async rebuildFromDb(): Promise<void> {
     try {
-      const exposedPositions =
-        await this.positionRepository.findByStatus('SINGLE_LEG_EXPOSED');
+      const exposedPositions = await this.positionRepository.findByStatus(
+        'SINGLE_LEG_EXPOSED',
+        false,
+      );
 
       const now = new Date();
       const currentMonth = this.getMonthKey(now);

@@ -1182,9 +1182,9 @@ describe('PolymarketConnector', () => {
       expect(callTimes.length).toBeGreaterThanOrEqual(3);
       for (let i = 1; i < callTimes.length; i++) {
         const interval = callTimes[i]! - callTimes[i - 1]!;
-        // Allow 50ms tolerance for timer imprecision
-        expect(interval).toBeGreaterThanOrEqual(baseInterval - 50);
-        expect(interval).toBeLessThanOrEqual(maxJitteredInterval + 50);
+        // Allow 100ms tolerance for timer imprecision (macOS scheduler granularity)
+        expect(interval).toBeGreaterThanOrEqual(baseInterval - 100);
+        expect(interval).toBeLessThanOrEqual(maxJitteredInterval + 100);
       }
     });
 

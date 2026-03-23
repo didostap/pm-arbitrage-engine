@@ -92,7 +92,10 @@ describe('DailySummaryService', () => {
       await service.handleDailySummary();
 
       expect(mockOrderRepo.countByDateRange).toHaveBeenCalled();
-      expect(mockPositionRepo.countByStatus).toHaveBeenCalledWith('OPEN');
+      expect(mockPositionRepo.countByStatus).toHaveBeenCalledWith(
+        'OPEN',
+        false,
+      );
       expect(mockPositionRepo.countClosedByDateRange).toHaveBeenCalled();
       expect(mockPositionRepo.sumClosedEdgeByDateRange).toHaveBeenCalled();
     });

@@ -250,9 +250,18 @@ describe('DataIngestionService', () => {
 
       await service.onModuleInit();
 
-      expect(mockPositionRepository.findByStatusWithPair).toHaveBeenCalledWith({
-        in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
-      });
+      expect(mockPositionRepository.findByStatusWithPair).toHaveBeenCalledWith(
+        {
+          in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+        },
+        false,
+      );
+      expect(mockPositionRepository.findByStatusWithPair).toHaveBeenCalledWith(
+        {
+          in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'],
+        },
+        true,
+      );
       expect(mockKalshiConnector.subscribeToContracts).toHaveBeenCalledTimes(2);
       expect(
         mockPolymarketConnector.subscribeToContracts,

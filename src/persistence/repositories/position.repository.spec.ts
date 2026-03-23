@@ -70,7 +70,7 @@ describe('PositionRepository', () => {
       { positionId: 'pos-1', status: 'OPEN' },
     ]);
 
-    const result = await repo.findByStatus('OPEN');
+    const result = await repo.findByStatus('OPEN', false);
 
     expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
       where: { status: 'OPEN', isPaper: false },
@@ -94,10 +94,10 @@ describe('PositionRepository', () => {
   });
 
   describe('isPaper filtering', () => {
-    it('findByStatus defaults to isPaper false', async () => {
+    it('findByStatus filters to isPaper false when passed explicitly', async () => {
       mockPrisma.openPosition.findMany.mockResolvedValue([]);
 
-      await repo.findByStatus('OPEN');
+      await repo.findByStatus('OPEN', false);
 
       expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
         where: { status: 'OPEN', isPaper: false },
@@ -114,10 +114,10 @@ describe('PositionRepository', () => {
       });
     });
 
-    it('findByStatusWithPair defaults to isPaper false', async () => {
+    it('findByStatusWithPair filters to isPaper false when passed explicitly', async () => {
       mockPrisma.openPosition.findMany.mockResolvedValue([]);
 
-      await repo.findByStatusWithPair('OPEN');
+      await repo.findByStatusWithPair('OPEN', false);
 
       expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
         where: { status: 'OPEN', isPaper: false },
@@ -136,10 +136,10 @@ describe('PositionRepository', () => {
       });
     });
 
-    it('findByStatusWithOrders defaults to isPaper false', async () => {
+    it('findByStatusWithOrders filters to isPaper false when passed explicitly', async () => {
       mockPrisma.openPosition.findMany.mockResolvedValue([]);
 
-      await repo.findByStatusWithOrders('OPEN');
+      await repo.findByStatusWithOrders('OPEN', false);
 
       expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
         where: { status: 'OPEN', isPaper: false },
@@ -158,10 +158,10 @@ describe('PositionRepository', () => {
       });
     });
 
-    it('findActivePositions defaults to isPaper false', async () => {
+    it('findActivePositions filters to isPaper false when passed explicitly', async () => {
       mockPrisma.openPosition.findMany.mockResolvedValue([]);
 
-      await repo.findActivePositions();
+      await repo.findActivePositions(false);
 
       expect(mockPrisma.openPosition.findMany).toHaveBeenCalledWith({
         where: {

@@ -147,7 +147,7 @@ export class EngineLifecycleService
         // Check if active positions exist
         const activeCount = await this.prisma.$queryRaw<
           { count: bigint }[]
-        >`SELECT COUNT(*) as count FROM open_positions WHERE status IN ('OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL') AND is_paper = false`;
+        >`SELECT COUNT(*) as count FROM open_positions WHERE status IN ('OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL') AND is_paper = false -- MODE-FILTERED`;
         const count = Number(activeCount[0]?.count ?? 0);
 
         if (count > 0) {

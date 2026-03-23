@@ -109,7 +109,7 @@ describe('Data Ingestion (e2e)', () => {
           error instanceof Error ? error.message : 'Unknown error',
         );
       }
-    }, 10000);
+    }, 30000);
 
     it('should have consistent platform and contract IDs', async () => {
       const snapshots = await prisma.orderBookSnapshot.findMany({

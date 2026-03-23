@@ -199,10 +199,12 @@ export class TradeExportController {
       let totalPolymarketTrades = 0;
 
       for (const q of quarters) {
+        // Tax reports cover live trades only (paper trades are not taxable events)
         const kalshiEdge =
           await this.positionRepository.sumClosedEdgeByDateRange(
             q.start,
             q.end,
+            false,
           );
         // MVP simplification: split expectedEdge 50/50 between platforms.
         // In reality each leg has different entry prices so P&L attribution
@@ -215,12 +217,14 @@ export class TradeExportController {
             'KALSHI',
             q.start,
             q.end,
+            false,
           );
         const polyCount =
           await this.positionRepository.countOrdersByPlatformAndDateRange(
             'POLYMARKET',
             q.start,
             q.end,
+            false,
           );
 
         totalKalshiPnl = totalKalshiPnl.plus(halfEdge);

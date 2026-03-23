@@ -156,6 +156,7 @@ export class ReconciliationController {
     // Live positions only (isPaper defaults to false) — paper positions are excluded
     const outstandingPositions = await this.positionRepository.findByStatus(
       'RECONCILIATION_REQUIRED',
+      false,
     );
 
     return {

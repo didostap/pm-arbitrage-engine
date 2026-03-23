@@ -86,10 +86,10 @@ describe('OrderRepository', () => {
   });
 
   describe('isPaper filtering', () => {
-    it('findPendingOrders defaults to isPaper false', async () => {
+    it('findPendingOrders filters to isPaper false when passed explicitly', async () => {
       mockPrisma.order.findMany.mockResolvedValue([]);
 
-      await repo.findPendingOrders();
+      await repo.findPendingOrders(false);
 
       expect(mockPrisma.order.findMany).toHaveBeenCalledWith({
         where: { status: 'PENDING', isPaper: false },
