@@ -46,6 +46,7 @@ export const FLOAT_FIELDS = new Set([
   'exitEdgeEvapMultiplier',
   'exitTimeDecaySteepness',
   'exitTimeDecayTrigger',
+  'exitDepthSlippageTolerance',
   'exitProfitCaptureRatio',
 ]);
 

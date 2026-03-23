@@ -66,6 +66,7 @@ export class ExitMonitorService implements OnModuleInit {
   private exitRiskBudgetPct: number;
   private exitRiskRankCutoff: number;
   private exitMinDepth: number;
+  private exitDepthSlippageTolerance: number;
   private exitProfitCaptureRatio: number;
 
   constructor(
@@ -116,6 +117,10 @@ export class ExitMonitorService implements OnModuleInit {
       1,
     );
     this.exitMinDepth = this.configService.get<number>('EXIT_MIN_DEPTH', 5);
+    this.exitDepthSlippageTolerance = this.configService.get<number>(
+      'EXIT_DEPTH_SLIPPAGE_TOLERANCE',
+      0.02,
+    );
     this.exitProfitCaptureRatio = this.configService.get<number>(
       'EXIT_PROFIT_CAPTURE_RATIO',
       0.5,
@@ -134,6 +139,7 @@ export class ExitMonitorService implements OnModuleInit {
     exitRiskBudgetPct?: number;
     exitRiskRankCutoff?: number;
     exitMinDepth?: number;
+    exitDepthSlippageTolerance?: number;
     exitProfitCaptureRatio?: number;
   }): void {
     if (settings.wsStalenessThresholdMs !== undefined)
@@ -155,6 +161,8 @@ export class ExitMonitorService implements OnModuleInit {
       this.exitRiskRankCutoff = settings.exitRiskRankCutoff;
     if (settings.exitMinDepth !== undefined)
       this.exitMinDepth = settings.exitMinDepth;
+    if (settings.exitDepthSlippageTolerance !== undefined)
+      this.exitDepthSlippageTolerance = settings.exitDepthSlippageTolerance;
     if (settings.exitProfitCaptureRatio !== undefined)
       this.exitProfitCaptureRatio = settings.exitProfitCaptureRatio;
     this.logger.log({
@@ -597,12 +605,14 @@ export class ExitMonitorService implements OnModuleInit {
             position.pair.kalshiContractId,
             kalshiCloseSide,
             kalshiClosePrice,
+            this.exitDepthSlippageTolerance,
           ),
           this.getAvailableExitDepth(
             this.polymarketConnector,
             position.pair.polymarketClobTokenId!,
             polymarketCloseSide,
             polymarketClosePrice,
+            this.exitDepthSlippageTolerance,
           ),
         ]);
       } catch {
@@ -876,12 +886,14 @@ export class ExitMonitorService implements OnModuleInit {
           primaryContractId,
           primaryCloseSide,
           primaryClosePrice,
+          this.exitDepthSlippageTolerance,
         ),
         this.getAvailableExitDepth(
           secondaryConnector,
           secondaryContractId,
           secondaryCloseSide,
           secondaryClosePrice,
+          this.exitDepthSlippageTolerance,
         ),
       ]);
 
@@ -1263,27 +1275,43 @@ export class ExitMonitorService implements OnModuleInit {
   }
 
   /**
-   * Calculate available depth at close price or better for exit sizing.
+   * Calculate available depth at close price (with slippage tolerance) for exit sizing.
+   * @param slippageTolerance Decimal fraction expanding the price cutoff band.
+   *   Buy-close: includes asks ≤ closePrice × (1 + tolerance).
+   *   Sell-close: includes bids ≥ closePrice × (1 - tolerance).
    */
   private async getAvailableExitDepth(
     connector: IPlatformConnector,
     contractId: string,
     closeSide: 'buy' | 'sell',
     closePrice: Decimal,
+    slippageTolerance: number,
   ): Promise<Decimal> {
     const book = await connector.getOrderBook(asContractId(contractId));
     // Close side buy → consume asks at closePrice or lower
     // Close side sell → consume bids at closePrice or higher
     const levels = closeSide === 'buy' ? book.asks : book.bids;
 
+    // Apply slippage tolerance band (Story 10-7-3)
+    // Buy-close (asks): accept prices up to closePrice × (1 + tolerance)
+    // Sell-close (bids): accept prices down to closePrice × (1 - tolerance)
+    const toleranceFraction =
+      closeSide === 'buy'
+        ? new Decimal(1).plus(slippageTolerance)
+        : new Decimal(1).minus(slippageTolerance);
+    const adjustedCutoff = closePrice.mul(toleranceFraction);
+
     let depth = new Decimal(0);
     for (const level of levels) {
+      const levelPrice = new Decimal(level.price);
       const priceOk =
         closeSide === 'buy'
-          ? level.price <= closePrice.toNumber()
-          : level.price >= closePrice.toNumber();
+          ? levelPrice.lte(adjustedCutoff)
+          : levelPrice.gte(adjustedCutoff);
       if (priceOk) {
-        depth = depth.plus(level.quantity);
+        if (level.quantity > 0) {
+          depth = depth.plus(level.quantity);
+        }
       } else if (depth.gt(0)) {
         // Sorted book: once a level fails after qualifying levels, all subsequent fail too
         break;

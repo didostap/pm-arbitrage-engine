@@ -94,6 +94,7 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
   exitRiskBudgetPct: ['exit-monitor'],
   exitRiskRankCutoff: ['exit-monitor'],
   exitMinDepth: ['exit-monitor'],
+  exitDepthSlippageTolerance: ['exit-monitor'],
   exitProfitCaptureRatio: ['exit-monitor'],
 
   // Detection
@@ -163,6 +164,7 @@ export class SettingsService implements OnModuleInit {
         exitRiskBudgetPct: cfg.exitRiskBudgetPct,
         exitRiskRankCutoff: cfg.exitRiskRankCutoff,
         exitMinDepth: cfg.exitMinDepth,
+        exitDepthSlippageTolerance: cfg.exitDepthSlippageTolerance,
         exitProfitCaptureRatio: cfg.exitProfitCaptureRatio,
       }),
     );

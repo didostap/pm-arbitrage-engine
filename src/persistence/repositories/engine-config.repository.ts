@@ -179,6 +179,7 @@ function buildEffectiveConfig(
     exitRiskBudgetPct: resolve('exitRiskBudgetPct') as number,
     exitRiskRankCutoff: resolve('exitRiskRankCutoff') as number,
     exitMinDepth: resolve('exitMinDepth') as number,
+    exitDepthSlippageTolerance: resolve('exitDepthSlippageTolerance') as number,
     exitProfitCaptureRatio: resolve('exitProfitCaptureRatio') as number,
   };
 }

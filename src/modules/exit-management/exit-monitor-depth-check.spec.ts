@@ -12,6 +12,7 @@ import {
   asContractId,
 } from '../../common/types/branded.type';
 import { PlatformId } from '../../common/types/platform.type';
+import type { ExitMonitorService } from './exit-monitor.service';
 
 vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -24,6 +25,7 @@ describe('ExitMonitorService — depth check', () => {
   let kalshiConnector: ExitMonitorTestContext['kalshiConnector'];
   let polymarketConnector: ExitMonitorTestContext['polymarketConnector'];
   let thresholdEvaluator: ExitMonitorTestContext['thresholdEvaluator'];
+  let prisma: ExitMonitorTestContext['prisma'];
 
   beforeEach(async () => {
     ({
@@ -33,6 +35,7 @@ describe('ExitMonitorService — depth check', () => {
       kalshiConnector,
       polymarketConnector,
       thresholdEvaluator,
+      prisma,
     } = await createExitMonitorTestModule());
   });
 
@@ -219,6 +222,351 @@ describe('ExitMonitorService — depth check', () => {
       await service.evaluatePositions();
 
       // Should still submit orders (fall back to entry fill size)
+      expect(kalshiConnector.submitOrder).toHaveBeenCalled();
+      expect(polymarketConnector.submitOrder).toHaveBeenCalled();
+    });
+  });
+
+  describe('tolerance band (10-7-3)', () => {
+    /**
+     * Helper to call the private getAvailableExitDepth() method directly.
+     */
+    async function callGetAvailableExitDepth(
+      svc: ExitMonitorService,
+      connector: ExitMonitorTestContext['kalshiConnector'],
+      contractId: string,
+      closeSide: 'buy' | 'sell',
+      closePrice: Decimal,
+      slippageTolerance: number,
+    ): Promise<Decimal> {
+      return (svc as Record<string, unknown>)['getAvailableExitDepth'](
+        connector,
+        contractId,
+        closeSide,
+        closePrice,
+        slippageTolerance,
+      ) as Promise<Decimal>;
+    }
+
+    it('buy-close with 2% tolerance includes ask levels within band', async () => {
+      // VWAP = 0.50, 2% band → cutoff = 0.51
+      // Asks at 0.50 (qty 1) and 0.505 (qty 10) both <= 0.51 → included
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.5, quantity: 1 },
+          { price: 0.505, quantity: 10 },
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      expect(depth).toEqual(new Decimal(11));
+    });
+
+    it('sell-close with 2% tolerance includes bid levels within band', async () => {
+      // VWAP = 0.60, 2% band → cutoff = 0.60 × 0.98 = 0.588
+      // Bids at 0.60 (qty 5) and 0.59 (qty 8) both >= 0.588 → included
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [
+          { price: 0.6, quantity: 5 },
+          { price: 0.59, quantity: 8 },
+        ],
+        asks: [],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'sell',
+        new Decimal('0.60'),
+        0.02,
+      );
+
+      expect(depth).toEqual(new Decimal(13));
+    });
+
+    it('levels beyond the tolerance band are excluded', async () => {
+      // VWAP = 0.50, 2% band → cutoff = 0.51
+      // Ask at 0.52 > 0.51 → excluded
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.5, quantity: 1 },
+          { price: 0.505, quantity: 10 },
+          { price: 0.52, quantity: 20 },
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      // Only 0.50 (1) + 0.505 (10) = 11, 0.52 excluded
+      expect(depth).toEqual(new Decimal(11));
+    });
+
+    it('tolerance=0.0 restores strict-VWAP behavior', async () => {
+      // VWAP = 0.50, tolerance = 0 → cutoff = 0.50 × 1.0 = 0.50
+      // Only ask at exactly 0.50 (qty 1) passes
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.5, quantity: 1 },
+          { price: 0.505, quantity: 10 },
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.0,
+      );
+
+      expect(depth).toEqual(new Decimal(1));
+    });
+
+    it('empty order book returns zero depth', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      expect(depth).toEqual(new Decimal(0));
+    });
+
+    it('all levels within band accumulates total depth correctly', async () => {
+      // VWAP = 0.50, 2% band → cutoff = 0.51
+      // 3 levels all within band
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.49, quantity: 3 },
+          { price: 0.5, quantity: 7 },
+          { price: 0.508, quantity: 15 },
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      expect(depth).toEqual(new Decimal(25));
+    });
+
+    it('excludes levels with zero or negative quantity', async () => {
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.49, quantity: 3 },
+          { price: 0.5, quantity: 0 },
+          { price: 0.505, quantity: -1 },
+          { price: 0.508, quantity: 7 },
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      // Only qty 3 + qty 7 = 10; zero and negative excluded
+      expect(depth).toEqual(new Decimal(10));
+    });
+
+    it('hot-reload updates exitDepthSlippageTolerance', () => {
+      service.reloadConfig({ exitDepthSlippageTolerance: 0.05 });
+
+      expect(
+        (service as Record<string, unknown>)['exitDepthSlippageTolerance'],
+      ).toBe(0.05);
+    });
+  });
+
+  describe('tolerance band integration (10-7-3)', () => {
+    beforeEach(() => {
+      setupOrderCreateMock(orderRepository);
+      // Enable model exit mode so depth is fetched for C5 evaluation
+      service.reloadConfig({ exitMode: 'model' });
+      // Mock contractMatch lookup needed in model mode
+      (prisma as Record<string, unknown>)['contractMatch'] = {
+        findUnique: vi.fn().mockResolvedValue({ confidenceScore: 0.85 }),
+      };
+    });
+
+    it('C5 does NOT trigger when sufficient depth exists within tolerance band', async () => {
+      const position = createMockPosition();
+      positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
+
+      // Order book: strict cutoff would give depth=1, but with 2% tolerance → depth=11
+      // VWAP for buy-close of kalshi (sell to close = bids):
+      // Book bids: [0.66×1, 0.645×10] → VWAP for 100 contracts walks through these
+      // The close price is computed internally by getClosePrice()
+      // For getAvailableExitDepth (sell-close, bids): bids at 0.66 and 0.645
+      // With 2% tolerance: cutoff = closePrice × 0.98
+      // We need enough depth within band for C5 to be satisfied
+
+      // Kalshi book (buy side → sell to close → consume bids)
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [
+          { price: 0.66, quantity: 5 },
+          { price: 0.645, quantity: 10 },
+        ],
+        asks: [{ price: 0.68, quantity: 500 }],
+        timestamp: new Date(),
+      });
+
+      // Polymarket book (sell side → buy to close → consume asks)
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: asContractId('poly-contract-1'),
+        bids: [{ price: 0.62, quantity: 500 }],
+        asks: [
+          { price: 0.64, quantity: 5 },
+          { price: 0.65, quantity: 10 },
+        ],
+        timestamp: new Date(),
+      });
+
+      // Mock evaluator: return NOT triggered (sufficient depth should mean no C5 issue)
+      thresholdEvaluator.evaluate!.mockReturnValue({
+        triggered: false,
+        currentEdge: new Decimal('0.01'),
+        currentPnl: new Decimal('0.50'),
+        capturedEdgePercent: new Decimal('16.7'),
+      });
+
+      await service.evaluatePositions();
+
+      // Evaluator called with depth values (tolerance-expanded, should be > exitMinDepth=5)
+      const evalCall = thresholdEvaluator.evaluate!.mock.calls[0]?.[0] as {
+        kalshiExitDepth: Decimal | null;
+        polymarketExitDepth: Decimal | null;
+      };
+      expect(evalCall).toBeDefined();
+      // Both depths should be non-null and > 0 (tolerance band included levels)
+      expect(evalCall.kalshiExitDepth).toBeDefined();
+      expect(evalCall.polymarketExitDepth).toBeDefined();
+      expect(evalCall.kalshiExitDepth!.gte(5)).toBe(true);
+      expect(evalCall.polymarketExitDepth!.gte(5)).toBe(true);
+
+      // No exit submitted since evaluator said not triggered
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+      expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
+    });
+
+    it('C5 still triggers when depth is insufficient even with tolerance band', async () => {
+      const position = createMockPosition();
+      positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
+
+      // Very thin book — even with 2% tolerance, total depth is only 2
+      kalshiConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [{ price: 0.66, quantity: 2 }],
+        asks: [{ price: 0.68, quantity: 500 }],
+        timestamp: new Date(),
+      });
+
+      polymarketConnector.getOrderBook.mockResolvedValue({
+        platformId: PlatformId.POLYMARKET,
+        contractId: asContractId('poly-contract-1'),
+        bids: [{ price: 0.62, quantity: 500 }],
+        asks: [{ price: 0.64, quantity: 2 }],
+        timestamp: new Date(),
+      });
+
+      // Mock evaluator: returns triggered (C5 fires due to insufficient depth)
+      thresholdEvaluator.evaluate!.mockReturnValue({
+        triggered: true,
+        type: 'liquidity_deterioration',
+        currentEdge: new Decimal('0.025'),
+        currentPnl: new Decimal('3.00'),
+        capturedEdgePercent: new Decimal('100'),
+      });
+
+      kalshiConnector.submitOrder.mockResolvedValue({
+        orderId: asOrderId('kalshi-exit-1'),
+        status: 'filled',
+        filledPrice: 0.66,
+        filledQuantity: 2,
+        timestamp: new Date(),
+      });
+      polymarketConnector.submitOrder.mockResolvedValue({
+        orderId: asOrderId('poly-exit-1'),
+        status: 'filled',
+        filledPrice: 0.64,
+        filledQuantity: 2,
+        timestamp: new Date(),
+      });
+
+      await service.evaluatePositions();
+
+      // Evaluator called with low depth values
+      const evalCall = thresholdEvaluator.evaluate!.mock.calls[0]?.[0] as {
+        kalshiExitDepth: Decimal | null;
+      };
+      expect(evalCall).toBeDefined();
+      expect(evalCall.kalshiExitDepth!.lte(5)).toBe(true);
+
+      // Exit was triggered and orders submitted
       expect(kalshiConnector.submitOrder).toHaveBeenCalled();
       expect(polymarketConnector.submitOrder).toHaveBeenCalled();
     });

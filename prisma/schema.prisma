@@ -134,8 +134,9 @@ model EngineConfig {
   exitTimeDecayTrigger    Float?  @map("exit_time_decay_trigger")
   exitRiskBudgetPct       Int?    @map("exit_risk_budget_pct")
   exitRiskRankCutoff      Int?    @map("exit_risk_rank_cutoff")
-  exitMinDepth            Int?    @map("exit_min_depth")
-  exitProfitCaptureRatio  Float?  @map("exit_profit_capture_ratio")
+  exitMinDepth                 Int?    @map("exit_min_depth")
+  exitDepthSlippageTolerance   Float?  @map("exit_depth_slippage_tolerance")
+  exitProfitCaptureRatio       Float?  @map("exit_profit_capture_ratio")
 
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz

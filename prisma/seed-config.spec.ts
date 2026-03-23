@@ -342,7 +342,7 @@ describe('seedConfig()', () => {
       exitMode: 'fixed', exitEdgeEvapMultiplier: -1.0, exitConfidenceDropPct: 20,
       exitTimeDecayHorizonH: 168, exitTimeDecaySteepness: 2.0,
       exitTimeDecayTrigger: 0.8, exitRiskBudgetPct: 85, exitRiskRankCutoff: 1,
-      exitMinDepth: 5, exitProfitCaptureRatio: 0.5,
+      exitMinDepth: 5, exitDepthSlippageTolerance: 0.02, exitProfitCaptureRatio: 0.5,
     };
     mockPrisma.engineConfig.upsert.mockResolvedValueOnce(createdRow);
 

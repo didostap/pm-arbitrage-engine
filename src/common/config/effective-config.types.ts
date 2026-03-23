@@ -126,6 +126,7 @@ export interface EffectiveConfig {
   exitRiskBudgetPct: number;
   exitRiskRankCutoff: number;
   exitMinDepth: number;
+  exitDepthSlippageTolerance: number;
   exitProfitCaptureRatio: number;
 }
 

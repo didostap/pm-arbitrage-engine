@@ -106,6 +106,7 @@ const CATEGORY_B_FIELDS: string[] = [
   'exitRiskBudgetPct',
   'exitRiskRankCutoff',
   'exitMinDepth',
+  'exitDepthSlippageTolerance',
   'exitProfitCaptureRatio',
 ];
 
@@ -183,6 +184,7 @@ const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   exitRiskBudgetPct: 'EXIT_RISK_BUDGET_PCT',
   exitRiskRankCutoff: 'EXIT_RISK_RANK_CUTOFF',
   exitMinDepth: 'EXIT_MIN_DEPTH',
+  exitDepthSlippageTolerance: 'EXIT_DEPTH_SLIPPAGE_TOLERANCE',
   exitProfitCaptureRatio: 'EXIT_PROFIT_CAPTURE_RATIO',
 };
 
@@ -195,7 +197,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(71);
+    expect(categoryBKeys.length).toBe(72);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {
@@ -391,6 +393,7 @@ describe('CONFIG_DEFAULTS', () => {
       'exitRiskBudgetPct',
       'exitRiskRankCutoff',
       'exitMinDepth',
+      'exitDepthSlippageTolerance',
       'exitProfitCaptureRatio',
     ];
     for (const key of effectiveConfigKeys) {

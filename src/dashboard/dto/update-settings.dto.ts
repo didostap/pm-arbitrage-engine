@@ -402,6 +402,12 @@ export class UpdateSettingsDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
+  @Max(1)
+  exitDepthSlippageTolerance?: number;
+
+  @IsOptional()
+  @IsNumber()
   @Min(0.01)
   @Max(5)
   exitProfitCaptureRatio?: number;

@@ -286,6 +286,10 @@ export const CONFIG_DEFAULTS = {
   exitRiskBudgetPct: { envKey: 'EXIT_RISK_BUDGET_PCT', defaultValue: 85 },
   exitRiskRankCutoff: { envKey: 'EXIT_RISK_RANK_CUTOFF', defaultValue: 1 },
   exitMinDepth: { envKey: 'EXIT_MIN_DEPTH', defaultValue: 5 },
+  exitDepthSlippageTolerance: {
+    envKey: 'EXIT_DEPTH_SLIPPAGE_TOLERANCE',
+    defaultValue: 0.02,
+  },
   exitProfitCaptureRatio: {
     envKey: 'EXIT_PROFIT_CAPTURE_RATIO',
     defaultValue: 0.5,

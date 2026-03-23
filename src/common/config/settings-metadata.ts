@@ -701,6 +701,16 @@ export const SETTINGS_METADATA: Record<
     envDefault: CONFIG_DEFAULTS.exitMinDepth.defaultValue,
     min: 0,
   },
+  exitDepthSlippageTolerance: {
+    group: SettingsGroup.ExitStrategy,
+    label: 'Exit Depth Slippage Tolerance',
+    description:
+      'Fraction of VWAP close price to expand depth cutoff. 0 = strict VWAP, 0.02 = 2% band.',
+    type: 'decimal',
+    envDefault: CONFIG_DEFAULTS.exitDepthSlippageTolerance.defaultValue,
+    min: 0,
+    max: 1,
+  },
   exitProfitCaptureRatio: {
     group: SettingsGroup.ExitStrategy,
     label: 'Profit Capture Ratio',
