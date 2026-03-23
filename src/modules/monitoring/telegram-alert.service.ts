@@ -251,6 +251,7 @@ export class TelegramAlertService implements OnModuleInit, OnModuleDestroy {
   private buffer: BufferedMessage[] = [];
   private draining = false;
 
+  /** Cleanup: .clear() on send, bounded by batch interval */
   private batchBuffer = new Map<
     string,
     {

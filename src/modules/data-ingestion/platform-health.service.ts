@@ -27,26 +27,31 @@ export class PlatformHealthService {
   private static readonly CONSECUTIVE_UNHEALTHY_TICKS_THRESHOLD = 2;
   private static readonly CONSECUTIVE_HEALTHY_TICKS_THRESHOLD = 2;
 
+  /** Cleanup: bounded by PlatformId enum (2 entries), overwrite semantics */
   private lastUpdateTime: Map<PlatformId, number> = new Map();
+  /** Cleanup: bounded by PlatformId (2), array capped at 100 samples via shift() */
   private latencySamples: Map<PlatformId, number[]> = new Map();
+  /** Cleanup: bounded by PlatformId (2), overwrite semantics */
   private previousStatus: Map<
     PlatformId,
     'healthy' | 'degraded' | 'disconnected' | 'initializing'
   > = new Map();
 
+  /** Cleanup: bounded by PlatformId (2), overwrite semantics */
   private consecutiveUnhealthyTicks: Map<PlatformId, number> = new Map();
+  /** Cleanup: bounded by PlatformId (2), overwrite semantics */
   private consecutiveHealthyTicks: Map<PlatformId, number> = new Map();
 
+  /** Cleanup: bounded by PlatformId (2), overwrite semantics */
   private orderbookStale = new Map<PlatformId, boolean>();
+  /** Cleanup: bounded by PlatformId (2), .delete() on recovery */
   private orderbookStaleStartTime = new Map<PlatformId, number>();
   private readonly orderbookStalenessThreshold: number;
 
-  // Per-contract staleness tracking (Story 9.15)
-  // Key format: `${platformId}:${contractId}` — composite key for cross-platform uniqueness
-  // Memory: ~40 bytes per entry. 100K entries = ~4MB — acceptable, no cleanup needed.
+  /** Cleanup: .delete() via removeContractTracking() when contract unsubscribed. Key: `${platformId}:${contractId}` */
   private readonly lastContractUpdateTime = new Map<string, number>();
 
-  /** Last WS message received timestamp per platform (Story 10-0-1). */
+  /** Cleanup: bounded by PlatformId (2), overwrite semantics */
   private readonly lastWsMessageTimestamp = new Map<PlatformId, Date>();
 
   constructor(
@@ -445,6 +450,15 @@ export class PlatformHealthService {
    * Returns per-contract staleness status.
    * Used by detection to evaluate staleness per pair instead of per platform.
    */
+  /**
+   * Remove contract tracking entry when unsubscribed.
+   * Prevents lastContractUpdateTime from growing unbounded.
+   */
+  removeContractTracking(platform: PlatformId, contractId: string): void {
+    const key = `${platform}:${contractId}`;
+    this.lastContractUpdateTime.delete(key);
+  }
+
   getContractStaleness(
     platform: PlatformId,
     contractId: string,

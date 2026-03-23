@@ -73,6 +73,7 @@ export class CsvTradeLogService implements OnModuleInit {
   private readonly logger = new Logger(CsvTradeLogService.name);
   private enabled = true;
   private logDir: string;
+  /** Cleanup: .delete() on write completion */
   private writeQueues = new Map<string, Promise<void>>();
 
   constructor(private readonly configService: ConfigService) {

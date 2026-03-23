@@ -45,9 +45,12 @@ const RESUBSCRIBE_COOLDOWN_MS = 1_000;
 export class KalshiWebSocketClient {
   private readonly logger = new Logger(KalshiWebSocketClient.name);
   private ws: WebSocket | null = null;
+  /** Cleanup: .delete() on unsub, .clear() on disconnect */
   private orderbookState = new Map<string, LocalOrderbookState>();
+  /** Cleanup: .delete() on unsub, .clear() on disconnect */
   private lastSequence = new Map<string, number>();
   private subscribers: Array<(book: NormalizedOrderBook) => void> = [];
+  /** Cleanup: .delete() on unsub */
   private subscriptions = new Set<string>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +59,7 @@ export class KalshiWebSocketClient {
   private commandId = 0;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** Cleanup: .delete() on unsub, .clear() on disconnect */
   private lastResubscribeTime = new Map<string, number>();
   private _subscriptionId: number | null = null;
   private _pendingSubscription = false;

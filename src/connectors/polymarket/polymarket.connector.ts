@@ -54,6 +54,7 @@ export class PolymarketConnector
   private wsClient: PolymarketWebSocketClient | null = null;
   private connected = false;
   private lastHeartbeat: Date | null = null;
+  /** Cleanup: bounded by active contracts, overwrite semantics */
   private readonly lastWsUpdateMap = new Map<string, Date>();
 
   private readonly privateKey: string;

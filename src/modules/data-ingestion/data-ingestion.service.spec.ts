@@ -59,6 +59,7 @@ describe('DataIngestionService', () => {
   const mockHealthService = {
     recordUpdate: vi.fn(),
     recordContractUpdate: vi.fn(),
+    removeContractTracking: vi.fn(),
     publishHealth: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -838,6 +839,15 @@ describe('DataIngestionService', () => {
         PlatformId.POLYMARKET,
         polyId,
       );
+      // P1 fix: removeContractTracking must also be called alongside clearContractData
+      expect(mockHealthService.removeContractTracking).toHaveBeenCalledWith(
+        PlatformId.KALSHI,
+        'KALSHI-CLEAR',
+      );
+      expect(mockHealthService.removeContractTracking).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        'POLY-CLEAR',
+      );
     });
 
     it('should NOT call clearContractData when other positions still reference the contract', () => {
@@ -863,10 +873,22 @@ describe('DataIngestionService', () => {
         );
       expect(kalshiClearCalls).toHaveLength(0);
 
+      // Kalshi removeContractTracking should also NOT be called (refCount still > 0)
+      const kalshiRemoveCalls =
+        mockHealthService.removeContractTracking.mock.calls.filter(
+          (c: unknown[]) => c[0] === PlatformId.KALSHI,
+        );
+      expect(kalshiRemoveCalls).toHaveLength(0);
+
       // Polymarket clearContractData SHOULD be called (refCount dropped to 0)
       expect(mockDivergenceService.clearContractData).toHaveBeenCalledWith(
         PlatformId.POLYMARKET,
         polyId1,
+      );
+      // Polymarket removeContractTracking SHOULD also be called
+      expect(mockHealthService.removeContractTracking).toHaveBeenCalledWith(
+        PlatformId.POLYMARKET,
+        'POLY-1',
       );
     });
   });

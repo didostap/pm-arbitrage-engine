@@ -18,6 +18,7 @@ export interface DegradationState {
 @Injectable()
 export class DegradationProtocolService {
   private readonly logger = new Logger(DegradationProtocolService.name);
+  /** Cleanup: bounded by PlatformId (2), .set() on degrade, .delete() on recover */
   private readonly degradedPlatforms = new Map<PlatformId, DegradationState>();
   private readonly thresholdMultiplier: number;
   private readonly allPlatforms: PlatformId[] = Object.values(PlatformId);

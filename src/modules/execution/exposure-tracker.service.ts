@@ -11,9 +11,11 @@ const WEEKLY_CONSECUTIVE_THRESHOLD = 3;
 export class ExposureTrackerService implements OnModuleInit {
   private readonly logger = new Logger(ExposureTrackerService.name);
 
+  /** Cleanup: grows at 1 entry/month, no pruning — acceptable for operational lifetime */
   /** Map<YYYY-MM, count> */
   readonly monthlyExposures = new Map<string, number>();
 
+  /** Cleanup: grows at 1 entry/week, no pruning — acceptable for operational lifetime */
   /** Map<YYYY-Wnn, count> */
   readonly weeklyExposures = new Map<string, number>();
 

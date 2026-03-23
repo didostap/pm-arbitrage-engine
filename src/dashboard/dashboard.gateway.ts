@@ -45,6 +45,7 @@ export class DashboardGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   private readonly logger = new Logger(DashboardGateway.name);
+  /** Cleanup: .add() on connect, .delete() on disconnect, .clear() on onModuleDestroy */
   private readonly clients = new Set<WebSocket>();
 
   constructor(

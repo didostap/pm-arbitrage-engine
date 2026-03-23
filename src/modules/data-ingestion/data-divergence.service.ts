@@ -23,8 +23,11 @@ interface SnapshotData {
 export class DataDivergenceService {
   private readonly logger = new Logger(DataDivergenceService.name);
 
+  /** Cleanup: bounded by active contracts, overwrite semantics */
   private readonly lastPollSnapshot = new Map<string, SnapshotData>();
+  /** Cleanup: bounded by active contracts, overwrite semantics */
   private readonly lastWsSnapshot = new Map<string, SnapshotData>();
+  /** Cleanup: .delete() on recovery via checkDivergence(), .delete() via clearContractData() */
   private readonly divergentContracts = new Set<string>();
 
   private readonly priceThreshold: Decimal;

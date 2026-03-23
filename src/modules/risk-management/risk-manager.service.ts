@@ -61,6 +61,7 @@ interface ModeRiskState {
   openPositionCount: number;
   totalCapitalDeployed: Decimal;
   dailyPnl: Decimal;
+  /** Cleanup: .delete() on resume, .clear() on daily reset */
   activeHaltReasons: Set<HaltReason>;
   dailyLossApproachEmitted: boolean;
   lastResetTimestamp: Date | null;
@@ -83,7 +84,9 @@ export class RiskManagerService implements IRiskManager, OnModuleInit {
   private config!: RiskConfig;
   private liveState: ModeRiskState = createDefaultModeRiskState();
   private paperState: ModeRiskState = createDefaultModeRiskState();
+  /** Cleanup: .delete() on release/commit, .clear() on stale reservation sweep */
   private reservations = new Map<string, BudgetReservation>();
+  /** Cleanup: .delete() on position close */
   private paperActivePairIds = new Set<string>();
   private bankrollUpdatedAt: Date = new Date();
 

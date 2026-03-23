@@ -63,6 +63,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
   private processingDepth = 0;
 
   private readonly isPaperMode: boolean;
+  /** Cleanup: .delete(pairId) on exit, .clear() on overflow (MAX_NOTIFIED_PAIRS), .clear() on onModuleDestroy */
   private readonly notifiedOpportunityPairs = new Set<string>();
   private readonly MAX_NOTIFIED_PAIRS = 1000;
 
@@ -118,6 +119,7 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       this.eventEmitter.offAny(this.onAnyListener);
       this.onAnyListener = null;
     }
+    this.notifiedOpportunityPairs.clear();
   }
 
   /** @internal Called by onAny listener. Public only for unit test access. */

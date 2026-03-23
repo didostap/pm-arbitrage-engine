@@ -53,6 +53,7 @@ interface LossEstimate {
 export class AutoUnwindService {
   private readonly logger = new Logger(AutoUnwindService.name);
 
+  /** Cleanup: .delete() in finally block after each unwind attempt */
   /** Tracks positionIds currently being auto-unwound to prevent duplicate processing.
    *  Node.js is single-threaded so check+add is atomic within the event loop (#2). */
   private readonly inFlightUnwinds = new Set<string>();

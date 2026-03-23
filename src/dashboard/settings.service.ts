@@ -120,6 +120,7 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
 export class SettingsService implements OnModuleInit {
   private readonly logger = new Logger(SettingsService.name);
 
+  /** Cleanup: .delete() on unsubscribe, .clear() on shutdown */
   /** Callback-based reload handlers, registered lazily via ModuleRef in onModuleInit */
   private readonly reloadHandlers = new Map<string, ReloadHandler>();
 

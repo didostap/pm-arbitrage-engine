@@ -60,12 +60,14 @@ export class DataIngestionService implements OnModuleInit {
   private kalshiConcurrency: number;
   private polymarketPollingConcurrency: number = 5;
 
+  /** Cleanup: .delete() on unsubscribe, lifecycle-bound to position close */
   /** Active WS subscriptions keyed by PairId string. */
   private readonly activeSubscriptions = new Map<
     string,
     { kalshiContractId: ContractId; polymarketContractId: ContractId }
   >();
 
+  /** Cleanup: .delete() when refcount reaches 0 on unsubscribe */
   /** Ref-counts per platform:contractId to avoid duplicate subscribe/unsubscribe calls. */
   private readonly contractRefCounts = new Map<string, number>();
 
@@ -655,6 +657,10 @@ export class DataIngestionService implements OnModuleInit {
         PlatformId.KALSHI,
         entry.kalshiContractId,
       );
+      this.healthService.removeContractTracking(
+        PlatformId.KALSHI,
+        entry.kalshiContractId as string,
+      );
     } else {
       this.contractRefCounts.set(kalshiKey, kalshiCount);
     }
@@ -670,6 +676,10 @@ export class DataIngestionService implements OnModuleInit {
       this.divergenceService.clearContractData(
         PlatformId.POLYMARKET,
         entry.polymarketContractId,
+      );
+      this.healthService.removeContractTracking(
+        PlatformId.POLYMARKET,
+        entry.polymarketContractId as string,
       );
     } else {
       this.contractRefCounts.set(polyKey, polyCount);

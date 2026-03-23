@@ -18,6 +18,7 @@ import {
  * Plain class — NOT @Injectable(). One instance per PaperTradingConnector.
  */
 export class FillSimulatorService {
+  /** Cleanup: .delete() on fill/cancel */
   private readonly orderMap = new Map<string, SimulatedOrder>();
 
   constructor(private readonly config: PaperTradingConfig) {}

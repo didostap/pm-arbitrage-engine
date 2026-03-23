@@ -53,6 +53,7 @@ export class ExitMonitorService implements OnModuleInit {
   private readonly logger = new Logger(ExitMonitorService.name);
   private consecutiveFullFailures = 0;
   private skipNextCycle = false;
+  /** Cleanup: .set()/.delete() on status changes, bounded by open positions */
   /** Tracks positions with stale WS data for event deduplication. */
   private readonly stalePositions = new Map<string, boolean>();
   private wsStalenessThresholdMs: number;

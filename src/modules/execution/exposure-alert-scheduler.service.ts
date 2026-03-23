@@ -25,6 +25,7 @@ const DEBOUNCE_MS = 55_000;
 @Injectable()
 export class ExposureAlertScheduler {
   private readonly logger = new Logger(ExposureAlertScheduler.name);
+  /** Cleanup: .delete() for closed positions in checkExposedPositions() every 60s interval */
   private readonly lastEmitted = new Map<string, number>();
 
   constructor(

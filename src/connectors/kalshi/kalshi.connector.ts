@@ -94,6 +94,7 @@ export class KalshiConnector
   private rateLimiter: RateLimiter;
   private lastHeartbeat: Date | null = null;
   private connected = false;
+  /** Cleanup: bounded by active contracts, overwrite semantics */
   private readonly lastWsUpdateMap = new Map<string, Date>();
 
   constructor(private readonly configService: ConfigService) {

@@ -36,8 +36,10 @@ export class PolymarketWebSocketClient {
   private readonly logger = new Logger(PolymarketWebSocketClient.name);
   private readonly eventEmitter: EventEmitter2;
   private ws: WebSocket | null = null;
+  /** Cleanup: .clear() on disconnect */
   private orderbookState = new Map<string, LocalOrderBookState>();
   private subscribers: Array<(book: PolymarketOrderBookMessage) => void> = [];
+  /** Cleanup: lifecycle-managed via subscribe/unsubscribe */
   private subscriptions = new Set<string>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
