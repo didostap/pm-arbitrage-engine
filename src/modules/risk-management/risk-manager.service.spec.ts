@@ -8,10 +8,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Decimal from 'decimal.js';
-import {
-  RiskManagerService,
-  HALT_REASONS as HALT_REASONS_CONST,
-} from './risk-manager.service';
+import { RiskManagerService } from './risk-manager.service';
+import { HALT_REASONS as HALT_REASONS_CONST } from './risk-state-manager.service';
+import { RiskStateManager } from './risk-state-manager.service';
+import { TradingHaltService } from './trading-halt.service';
+import { BudgetReservationService } from './budget-reservation.service';
 import { PrismaService } from '../../common/prisma.service';
 import { CorrelationTrackerService } from './correlation-tracker.service';
 import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
@@ -116,6 +117,8 @@ function makeEnrichedOpportunity(
 
 describe('RiskManagerService', () => {
   let service: RiskManagerService;
+  let riskStateManager: RiskStateManager;
+  let budgetService: BudgetReservationService;
   let mockConfigService: Record<string, unknown>;
   let mockEventEmitter: { emit: ReturnType<typeof vi.fn> };
   let mockPrisma: {
@@ -186,6 +189,9 @@ describe('RiskManagerService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RiskManagerService,
+        RiskStateManager,
+        TradingHaltService,
+        BudgetReservationService,
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: PrismaService, useValue: mockPrisma },
@@ -207,7 +213,13 @@ describe('RiskManagerService', () => {
     }).compile();
 
     service = module.get<RiskManagerService>(RiskManagerService);
-    await service.onModuleInit();
+    riskStateManager = module.get<RiskStateManager>(RiskStateManager);
+    budgetService = module.get<BudgetReservationService>(
+      BudgetReservationService,
+    );
+    await riskStateManager.onModuleInit();
+    // BudgetReservationService.onModuleInit runs after RiskStateManager (DI order)
+    await budgetService.onModuleInit();
   });
 
   describe('config validation', () => {
@@ -215,6 +227,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_BANKROLL_USD: -100 }),
@@ -236,8 +251,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_BANKROLL_USD must be a positive number',
       );
     });
@@ -246,6 +260,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_MAX_POSITION_PCT: 1.5 }),
@@ -267,8 +284,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_MAX_POSITION_PCT must be between 0 and 1',
       );
     });
@@ -277,6 +293,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_MAX_OPEN_PAIRS: 0 }),
@@ -298,8 +317,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_MAX_OPEN_PAIRS must be a positive integer',
       );
     });
@@ -308,6 +326,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_DAILY_LOSS_PCT: -0.01 }),
@@ -329,8 +350,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_DAILY_LOSS_PCT must be between 0 (exclusive) and 1 (inclusive)',
       );
     });
@@ -339,6 +359,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_DAILY_LOSS_PCT: 0 }),
@@ -360,8 +383,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_DAILY_LOSS_PCT must be between 0 (exclusive) and 1 (inclusive)',
       );
     });
@@ -370,6 +392,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_DAILY_LOSS_PCT: 1.5 }),
@@ -391,8 +416,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_DAILY_LOSS_PCT must be between 0 (exclusive) and 1 (inclusive)',
       );
     });
@@ -401,6 +425,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_DAILY_LOSS_PCT: 1.0 }),
@@ -422,8 +449,9 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).resolves.not.toThrow();
+      await expect(
+        module.get(RiskStateManager).onModuleInit(),
+      ).resolves.not.toThrow();
     });
   });
 
@@ -437,7 +465,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject opportunity when max open pairs reached', async () => {
-      (service as any).liveState.openPositionCount = 10;
+      riskStateManager.getState(false).openPositionCount = 10;
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
       );
@@ -454,7 +482,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit LimitApproachedEvent when open pairs at 80% of max', async () => {
-      (service as any).liveState.openPositionCount = 8; // 80% of 10
+      riskStateManager.getState(false).openPositionCount = 8; // 80% of 10
       await service.validatePosition(makeEnrichedOpportunity());
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         EVENT_NAMES.LIMIT_APPROACHED,
@@ -468,7 +496,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT emit LimitApproachedEvent when below 80%', async () => {
-      (service as any).liveState.openPositionCount = 7; // 70% of 10
+      riskStateManager.getState(false).openPositionCount = 7; // 70% of 10
       await service.validatePosition(makeEnrichedOpportunity());
       expect(mockEventEmitter.emit).not.toHaveBeenCalled();
     });
@@ -477,6 +505,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           {
             provide: ConfigService,
             useValue: createMockConfigService({ RISK_BANKROLL_USD: 0 }),
@@ -498,8 +529,7 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      await expect(svc.onModuleInit()).rejects.toThrow(
+      await expect(module.get(RiskStateManager).onModuleInit()).rejects.toThrow(
         'RISK_BANKROLL_USD must be a positive number',
       );
     });
@@ -512,7 +542,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should log rejection with current count and limit', async () => {
-      (service as any).liveState.openPositionCount = 10;
+      riskStateManager.getState(false).openPositionCount = 10;
       const logSpy = vi.spyOn(service['logger'], 'warn');
       await service.validatePosition(makeEnrichedOpportunity());
       expect(logSpy).toHaveBeenCalledWith(
@@ -527,7 +557,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject all opportunities when trading halted', async () => {
-      (service as any).liveState.activeHaltReasons.add('daily_loss_limit');
+      riskStateManager
+        .getState(false)
+        .activeHaltReasons.add('daily_loss_limit');
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
       );
@@ -538,8 +570,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should short-circuit when halted (no open-pairs check)', async () => {
-      (service as any).liveState.activeHaltReasons.add('daily_loss_limit');
-      (service as any).liveState.openPositionCount = 10;
+      riskStateManager
+        .getState(false)
+        .activeHaltReasons.add('daily_loss_limit');
+      riskStateManager.getState(false).openPositionCount = 10;
       const logSpy = vi.spyOn(service['logger'], 'warn');
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
@@ -999,7 +1033,7 @@ describe('RiskManagerService', () => {
       });
 
       it('should populate confidence fields on rejection paths (max open pairs)', async () => {
-        (service as any).liveState.openPositionCount = 10;
+        riskStateManager.getState(false).openPositionCount = 10;
         const decision = await service.validatePosition(
           makeConfidenceOpportunity(90),
         );
@@ -1049,6 +1083,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -1068,7 +1105,8 @@ describe('RiskManagerService', () => {
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
-      await svc.onModuleInit();
+      await module.get(RiskStateManager).onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
       expect(svc.getOpenPositionCount()).toBe(5);
       expect(svc.getCurrentExposure().totalCapitalDeployed.toNumber()).toBe(
@@ -1094,12 +1132,12 @@ describe('RiskManagerService', () => {
       mockPrisma.riskState.upsert.mockRejectedValueOnce(
         new Error('DB connection lost'),
       );
-      const logSpy = vi.spyOn(service['logger'], 'error');
+      const logSpy = vi.spyOn(riskStateManager['logger'], 'error');
 
       await service.updateDailyPnl(new Decimal('-200'));
 
       // In-memory state should still reflect the update
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-200);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(-200);
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           message: 'Failed to persist risk state to database',
@@ -1111,18 +1149,18 @@ describe('RiskManagerService', () => {
   describe('updateDailyPnl', () => {
     it('should accumulate negative delta correctly', async () => {
       await service.updateDailyPnl(new Decimal('-100'));
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-100);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(-100);
 
       await service.updateDailyPnl(new Decimal('-50'));
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(-150);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(-150);
     });
 
     it('should accumulate positive delta correctly', async () => {
       await service.updateDailyPnl(new Decimal('200'));
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(200);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(200);
 
       await service.updateDailyPnl(new Decimal('100'));
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(300);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(300);
     });
 
     it('should halt trading when daily loss reaches 5% of bankroll', async () => {
@@ -1130,7 +1168,9 @@ describe('RiskManagerService', () => {
       await service.updateDailyPnl(new Decimal('-500'));
       expect(service.isTradingHalted()).toBe(true);
       expect(
-        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('daily_loss_limit'),
       ).toBe(true);
     });
 
@@ -1195,16 +1235,16 @@ describe('RiskManagerService', () => {
       await service.updateDailyPnl(new Decimal('-500'));
       expect(service.isTradingHalted()).toBe(true);
 
-      await service.handleMidnightReset();
+      await riskStateManager.handleMidnightReset();
       expect(service.isTradingHalted()).toBe(false);
-      expect((service as any).liveState.dailyPnl.toNumber()).toBe(0);
+      expect(riskStateManager.getState(false).dailyPnl.toNumber()).toBe(0);
     });
 
     it('should log previous day P&L', async () => {
       await service.updateDailyPnl(new Decimal('-300'));
-      const logSpy = vi.spyOn(service['logger'], 'log');
+      const logSpy = vi.spyOn(riskStateManager['logger'], 'log');
 
-      await service.handleMidnightReset();
+      await riskStateManager.handleMidnightReset();
 
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1218,10 +1258,14 @@ describe('RiskManagerService', () => {
 
     it('should reset dailyLossApproachEmitted flag', async () => {
       await service.updateDailyPnl(new Decimal('-400'));
-      expect((service as any).liveState.dailyLossApproachEmitted).toBe(true);
+      expect(riskStateManager.getState(false).dailyLossApproachEmitted).toBe(
+        true,
+      );
 
-      await service.handleMidnightReset();
-      expect((service as any).liveState.dailyLossApproachEmitted).toBe(false);
+      await riskStateManager.handleMidnightReset();
+      expect(riskStateManager.getState(false).dailyLossApproachEmitted).toBe(
+        false,
+      );
     });
   });
 
@@ -1247,6 +1291,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -1266,10 +1313,12 @@ describe('RiskManagerService', () => {
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
-      await svc.onModuleInit();
+      const stateManager = module.get(RiskStateManager);
+      await stateManager.onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
       expect(svc.isTradingHalted()).toBe(false);
-      expect((svc as any).liveState.dailyPnl.toNumber()).toBe(0);
+      expect(stateManager.getState(false).dailyPnl.toNumber()).toBe(0);
     });
 
     it('should restore halt state if dailyPnl exceeds limit and same day', async () => {
@@ -1292,6 +1341,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -1311,7 +1363,8 @@ describe('RiskManagerService', () => {
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
-      await svc.onModuleInit();
+      await module.get(RiskStateManager).onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
       // Should re-evaluate and halt since -600 > -500 limit
       expect(svc.isTradingHalted()).toBe(true);
@@ -1334,6 +1387,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -1352,12 +1408,13 @@ describe('RiskManagerService', () => {
           },
         ],
       }).compile();
-      const svc = module.get<RiskManagerService>(RiskManagerService);
-      const logSpy = vi.spyOn(svc['logger'], 'warn');
+      const stateManager = module.get(RiskStateManager);
+      const logSpy = vi.spyOn(stateManager['logger'], 'warn');
 
-      await svc.onModuleInit();
+      await stateManager.onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
-      expect((svc as any).liveState.dailyPnl.toNumber()).toBe(0);
+      expect((stateManager as any).liveState.dailyPnl.toNumber()).toBe(0);
       expect(logSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
@@ -1419,7 +1476,7 @@ describe('RiskManagerService', () => {
 
     it('should return denied when daily loss halt active', async () => {
       // Trigger halt via large loss
-      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+      await service.updateDailyPnl(new FinancialDecimal(-600));
       expect(service.isTradingHalted()).toBe(true);
 
       const decision = await service.processOverride(
@@ -1445,7 +1502,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit OverrideDeniedEvent on daily loss denial', async () => {
-      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+      await service.updateDailyPnl(new FinancialDecimal(-600));
 
       await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1475,7 +1532,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should persist denial log to DB on denial', async () => {
-      await (service as any).updateDailyPnl(new FinancialDecimal(-600));
+      await service.updateDailyPnl(new FinancialDecimal(-600));
 
       await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1510,7 +1567,7 @@ describe('RiskManagerService', () => {
 
     it('should correctly derive originalRejectionReason when open pairs at limit', async () => {
       // Set open position count to max
-      (service as any).liveState.openPositionCount = 10;
+      riskStateManager.getState(false).openPositionCount = 10;
 
       await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1525,10 +1582,9 @@ describe('RiskManagerService', () => {
 
     it('should return full position cap regardless of current capital deployed', async () => {
       // Deploy some capital
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        5000,
-      );
-      (service as any).liveState.openPositionCount = 5;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(5000);
+      riskStateManager.getState(false).openPositionCount = 5;
 
       const decision = await service.processOverride(
         asOpportunityId('opp-123'),
@@ -1582,7 +1638,7 @@ describe('RiskManagerService', () => {
     it('should fail reservation when max open pairs reached (including reserved slots)', async () => {
       // Config: maxOpenPairs=10, bankroll=10000, maxPositionPct=0.03 → maxPositionSize=300
       // Fill 9 real positions
-      (service as any).liveState.openPositionCount = 9;
+      riskStateManager.getState(false).openPositionCount = 9;
 
       // Reserve one slot → effective = 10
       await service.reserveBudget(
@@ -1604,9 +1660,8 @@ describe('RiskManagerService', () => {
       // Each reservation takes 300 (10000 * 0.03)
       // But maxOpenPairs=10 so we can only have 10 slots
       // Let's increase bankroll scenario: set open capital very low
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        9800,
-      );
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(9800);
 
       await expect(
         service.reserveBudget(makeReservationRequest()),
@@ -1615,7 +1670,7 @@ describe('RiskManagerService', () => {
 
     it('should reduce available budget for subsequent validatePosition calls', async () => {
       // maxOpenPairs=10, openPositionCount=9
-      (service as any).liveState.openPositionCount = 9;
+      riskStateManager.getState(false).openPositionCount = 9;
 
       // Reserve 1 slot → effective = 10
       await service.reserveBudget(makeReservationRequest());
@@ -1630,15 +1685,17 @@ describe('RiskManagerService', () => {
     it('should commit reservation and convert to permanent state', async () => {
       const reservation = await service.reserveBudget(makeReservationRequest());
 
-      const prevCount = (service as any).liveState.openPositionCount;
-      const prevCapital = (service as any).liveState.totalCapitalDeployed;
+      const prevCount = riskStateManager.getState(false).openPositionCount;
+      const prevCapital = riskStateManager.getState(false).totalCapitalDeployed;
 
       await service.commitReservation(reservation.reservationId);
 
-      expect((service as any).liveState.openPositionCount).toBe(prevCount + 1);
-      expect((service as any).liveState.totalCapitalDeployed.toNumber()).toBe(
-        prevCapital.add(new FinancialDecimal(300)).toNumber(),
+      expect(riskStateManager.getState(false).openPositionCount).toBe(
+        prevCount + 1,
       );
+      expect(
+        riskStateManager.getState(false).totalCapitalDeployed.toNumber(),
+      ).toBe(prevCapital.add(new FinancialDecimal(300)).toNumber());
     });
 
     it('should emit BUDGET_COMMITTED event on commit', async () => {
@@ -1714,7 +1771,7 @@ describe('RiskManagerService', () => {
 
       // Commit the other
       await service.commitReservation(r2.reservationId);
-      expect((service as any).liveState.openPositionCount).toBe(1);
+      expect(riskStateManager.getState(false).openPositionCount).toBe(1);
     });
 
     it('should include reservation totals in getCurrentExposure', async () => {
@@ -1771,9 +1828,8 @@ describe('RiskManagerService', () => {
 
     it('should reject validatePosition when insufficient capital including reservations', async () => {
       // Deploy most capital, leaving less than maxPositionSize
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        9800,
-      );
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(9800);
 
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
@@ -1785,10 +1841,9 @@ describe('RiskManagerService', () => {
 
   describe('closePosition', () => {
     it('should decrement open position count', async () => {
-      (service as any).liveState.openPositionCount = 3;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        1000,
-      );
+      riskStateManager.getState(false).openPositionCount = 3;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(1000);
 
       await service.closePosition(
         new FinancialDecimal(300),
@@ -1799,10 +1854,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should subtract capital from total deployed', async () => {
-      (service as any).liveState.openPositionCount = 2;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        1000,
-      );
+      riskStateManager.getState(false).openPositionCount = 2;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(1000);
 
       await service.closePosition(
         new FinancialDecimal(300),
@@ -1816,11 +1870,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should update daily P&L via updateDailyPnl', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        500,
-      );
-      (service as any).liveState.dailyPnl = new FinancialDecimal(0);
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(500);
+      riskStateManager.getState(false).dailyPnl = new FinancialDecimal(0);
 
       await service.closePosition(
         new FinancialDecimal(500),
@@ -1832,10 +1885,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit BUDGET_RELEASED event', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        500,
-      );
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(500);
 
       await service.closePosition(
         new FinancialDecimal(500),
@@ -1849,8 +1901,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should not allow position count to go below 0', async () => {
-      (service as any).liveState.openPositionCount = 0;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(0);
+      riskStateManager.getState(false).openPositionCount = 0;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(0);
 
       await service.closePosition(
         new FinancialDecimal(100),
@@ -1863,10 +1916,9 @@ describe('RiskManagerService', () => {
 
   describe('releasePartialCapital', () => {
     it('should reduce totalCapitalDeployed by capitalReleased', async () => {
-      (service as any).liveState.openPositionCount = 2;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        1000,
-      );
+      riskStateManager.getState(false).openPositionCount = 2;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(1000);
 
       await service.releasePartialCapital(
         new FinancialDecimal(300),
@@ -1880,10 +1932,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should clamp totalCapitalDeployed to 0 if release exceeds deployed', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        100,
-      );
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(100);
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1897,10 +1948,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT decrement openPositionCount', async () => {
-      (service as any).liveState.openPositionCount = 3;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        1000,
-      );
+      riskStateManager.getState(false).openPositionCount = 3;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(1000);
 
       await service.releasePartialCapital(
         new FinancialDecimal(300),
@@ -1911,11 +1961,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should NOT delete from paperActivePairIds', async () => {
-      (service as any).liveState.openPositionCount = 2;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        1000,
-      );
-      (service as any).paperActivePairIds.add('pair-1');
+      riskStateManager.getState(false).openPositionCount = 2;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(1000);
+      (budgetService as any).paperActivePairIds.add('pair-1');
 
       await service.releasePartialCapital(
         new FinancialDecimal(300),
@@ -1923,15 +1972,16 @@ describe('RiskManagerService', () => {
         'pair-1',
       );
 
-      expect((service as any).paperActivePairIds.has('pair-1')).toBe(true);
+      expect((budgetService as any).paperActivePairIds.has('pair-1')).toBe(
+        true,
+      );
     });
 
     it('should update dailyPnl with realizedPnl', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        500,
-      );
-      (service as any).liveState.dailyPnl = new FinancialDecimal(0);
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(500);
+      riskStateManager.getState(false).dailyPnl = new FinancialDecimal(0);
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1943,10 +1993,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should emit BUDGET_RELEASED event with reason partial-exit', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        500,
-      );
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(500);
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1964,10 +2013,9 @@ describe('RiskManagerService', () => {
     });
 
     it('should persist state after release', async () => {
-      (service as any).liveState.openPositionCount = 1;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        500,
-      );
+      riskStateManager.getState(false).openPositionCount = 1;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(500);
 
       await service.releasePartialCapital(
         new FinancialDecimal(200),
@@ -1983,7 +2031,9 @@ describe('RiskManagerService', () => {
       service.haltTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(true);
       expect(
-        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('daily_loss_limit'),
       ).toBe(true);
     });
 
@@ -2010,7 +2060,7 @@ describe('RiskManagerService', () => {
       service.haltTrading('daily_loss_limit');
       service.haltTrading('reconciliation_discrepancy');
       expect(service.isTradingHalted()).toBe(true);
-      expect((service as any).liveState.activeHaltReasons.size).toBe(2);
+      expect(riskStateManager.getState(false).activeHaltReasons.size).toBe(2);
     });
   });
 
@@ -2020,7 +2070,9 @@ describe('RiskManagerService', () => {
       service.resumeTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(false);
       expect(
-        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('daily_loss_limit'),
       ).toBe(false);
     });
 
@@ -2051,9 +2103,9 @@ describe('RiskManagerService', () => {
       service.resumeTrading('daily_loss_limit');
       expect(service.isTradingHalted()).toBe(true);
       expect(
-        (service as any).liveState.activeHaltReasons.has(
-          'reconciliation_discrepancy',
-        ),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('reconciliation_discrepancy'),
       ).toBe(true);
     });
 
@@ -2086,10 +2138,9 @@ describe('RiskManagerService', () => {
 
   describe('recalculateFromPositions', () => {
     it('should force-set openPositionCount and totalCapitalDeployed', async () => {
-      (service as any).liveState.openPositionCount = 5;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        2000,
-      );
+      riskStateManager.getState(false).openPositionCount = 5;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(2000);
 
       await service.recalculateFromPositions(3, new Decimal('1200'));
 
@@ -2108,11 +2159,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should log the override with previous and new values', async () => {
-      (service as any).liveState.openPositionCount = 5;
-      (service as any).liveState.totalCapitalDeployed = new FinancialDecimal(
-        2000,
-      );
-      const logSpy = vi.spyOn(service['logger'], 'log');
+      riskStateManager.getState(false).openPositionCount = 5;
+      riskStateManager.getState(false).totalCapitalDeployed =
+        new FinancialDecimal(2000);
+      const logSpy = vi.spyOn(riskStateManager['logger'], 'log');
 
       await service.recalculateFromPositions(3, new Decimal('1200'));
 
@@ -2179,6 +2229,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -2198,13 +2251,15 @@ describe('RiskManagerService', () => {
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
-      await svc.onModuleInit();
+      const stateManager = module.get(RiskStateManager);
+      await stateManager.onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
       expect(svc.isTradingHalted()).toBe(true);
       expect(
-        (svc as any).liveState.activeHaltReasons.has(
-          'reconciliation_discrepancy',
-        ),
+        stateManager
+          .getState(false)
+          .activeHaltReasons.has('reconciliation_discrepancy'),
       ).toBe(true);
     });
 
@@ -2227,6 +2282,9 @@ describe('RiskManagerService', () => {
       const module = await Test.createTestingModule({
         providers: [
           RiskManagerService,
+          RiskStateManager,
+          TradingHaltService,
+          BudgetReservationService,
           { provide: ConfigService, useValue: createMockConfigService() },
           { provide: EventEmitter2, useValue: mockEventEmitter },
           { provide: PrismaService, useValue: mockPrisma },
@@ -2246,12 +2304,14 @@ describe('RiskManagerService', () => {
         ],
       }).compile();
       const svc = module.get<RiskManagerService>(RiskManagerService);
-      await svc.onModuleInit();
+      const stateManager = module.get(RiskStateManager);
+      await stateManager.onModuleInit();
+      await module.get(BudgetReservationService).onModuleInit();
 
       // Legacy format should be interpreted correctly
       expect(svc.isTradingHalted()).toBe(true);
       expect(
-        (svc as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+        stateManager.getState(false).activeHaltReasons.has('daily_loss_limit'),
       ).toBe(true);
     });
   });
@@ -2262,17 +2322,19 @@ describe('RiskManagerService', () => {
       service.haltTrading('reconciliation_discrepancy');
       expect(service.isTradingHalted()).toBe(true);
 
-      await service.handleMidnightReset();
+      await riskStateManager.handleMidnightReset();
 
       // Daily loss should be cleared
       expect(
-        (service as any).liveState.activeHaltReasons.has('daily_loss_limit'),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('daily_loss_limit'),
       ).toBe(false);
       // Reconciliation halt should remain
       expect(
-        (service as any).liveState.activeHaltReasons.has(
-          'reconciliation_discrepancy',
-        ),
+        riskStateManager
+          .getState(false)
+          .activeHaltReasons.has('reconciliation_discrepancy'),
       ).toBe(true);
       // Trading should still be halted
       expect(service.isTradingHalted()).toBe(true);
@@ -2296,21 +2358,21 @@ describe('RiskManagerService', () => {
         correlationExposure: new FinancialDecimal(0),
         createdAt: new Date(),
       };
-      (service as any).reservations.set(id, reservation);
+      (budgetService as any).reservations.set(id, reservation);
       return reservation;
     }
 
     it('should reduce reservation capital downward', async () => {
       seedReservation('res-adj-1', 300);
       // Stub persistState to avoid Prisma
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
 
       await service.adjustReservation(
         asReservationId('res-adj-1'),
         new Decimal('150'),
       );
 
-      const map = (service as any).reservations as Map<
+      const map = (budgetService as any).reservations as Map<
         string,
         BudgetReservation
       >;
@@ -2321,7 +2383,7 @@ describe('RiskManagerService', () => {
     it('should be a no-op when newCapital >= oldCapital', async () => {
       seedReservation('res-adj-2', 300);
       const persistSpy = vi
-        .spyOn(service as any, 'persistState')
+        .spyOn(riskStateManager, 'persistState')
         .mockResolvedValue(undefined);
 
       await service.adjustReservation(
@@ -2330,7 +2392,7 @@ describe('RiskManagerService', () => {
       );
 
       // Capital should remain unchanged — persistState should NOT be called
-      const map = (service as any).reservations as Map<
+      const map = (budgetService as any).reservations as Map<
         string,
         BudgetReservation
       >;
@@ -2351,7 +2413,7 @@ describe('RiskManagerService', () => {
     it('should persist state after adjustment', async () => {
       seedReservation('res-adj-3', 300);
       const persistSpy = vi
-        .spyOn(service as any, 'persistState')
+        .spyOn(riskStateManager, 'persistState')
         .mockResolvedValue(undefined);
 
       await service.adjustReservation(
@@ -2365,7 +2427,7 @@ describe('RiskManagerService', () => {
     it('should release excess capital back to available pool', async () => {
       seedReservation('res-adj-4', 300);
       seedReservation('res-adj-5', 200);
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
 
       // Total reserved = 500. Adjust res-adj-4 down to 100 → total should be 300
       await service.adjustReservation(
@@ -2373,7 +2435,7 @@ describe('RiskManagerService', () => {
         new Decimal('100'),
       );
 
-      const map = (service as any).reservations as Map<
+      const map = (budgetService as any).reservations as Map<
         string,
         BudgetReservation
       >;
@@ -2395,7 +2457,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should reject duplicate pair in paper mode', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
 
       await expect(
@@ -2406,7 +2468,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should allow after release in paper mode', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       const reservation = await service.reserveBudget(makePaperRequest());
 
       await service.releaseReservation(reservation.reservationId);
@@ -2418,13 +2480,14 @@ describe('RiskManagerService', () => {
     });
 
     it('should allow after close in paper mode', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       const reservation = await service.reserveBudget(makePaperRequest());
       await service.commitReservation(reservation.reservationId);
       await service.closePosition(
         new FinancialDecimal(300),
         new FinancialDecimal(0),
         'pair-paper-1',
+        true,
       );
 
       const second = await service.reserveBudget(
@@ -2434,7 +2497,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should not apply dedup in live mode', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       const liveRequest = {
         opportunityId: asOpportunityId('opp-live-1'),
         recommendedPositionSizeUsd: new FinancialDecimal(300),
@@ -2451,7 +2514,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should treat mixed mode as paper (isPaper: true)', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
 
       await expect(
@@ -2462,7 +2525,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should allow different pairs in paper mode', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
 
       const second = await service.reserveBudget(
@@ -2480,9 +2543,10 @@ describe('RiskManagerService', () => {
         { pairId: 'pair-restored-2' },
       ]);
 
-      await (service as any).initializeStateFromDb();
+      await (riskStateManager as any).initializeStateFromDb();
+      await budgetService.onModuleInit();
 
-      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      const paperSet = (budgetService as any).paperActivePairIds as Set<string>;
       expect(paperSet.has('pair-restored-1')).toBe(true);
       expect(paperSet.has('pair-restored-2')).toBe(true);
     });
@@ -2492,8 +2556,9 @@ describe('RiskManagerService', () => {
         { pairId: 'pair-restored-1' },
       ]);
 
-      await (service as any).initializeStateFromDb();
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      await (riskStateManager as any).initializeStateFromDb();
+      await budgetService.onModuleInit();
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
 
       await expect(
         service.reserveBudget(
@@ -2518,17 +2583,18 @@ describe('RiskManagerService', () => {
       // findMany for open paper positions returns empty (all closed)
       mockPrisma.openPosition.findMany.mockResolvedValueOnce([]);
 
-      await (service as any).initializeStateFromDb();
+      await (riskStateManager as any).initializeStateFromDb();
+      await budgetService.onModuleInit();
 
-      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      const paperSet = (budgetService as any).paperActivePairIds as Set<string>;
       expect(paperSet.size).toBe(0);
     });
 
     it('should warn when closePosition called without pairId while paper pairs tracked', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
 
-      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      const warnSpy = vi.spyOn(budgetService['logger'], 'warn');
       await service.closePosition(
         new FinancialDecimal(300),
         new FinancialDecimal(0),
@@ -2545,27 +2611,28 @@ describe('RiskManagerService', () => {
       );
 
       // Set entry should NOT be removed
-      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      const paperSet = (budgetService as any).paperActivePairIds as Set<string>;
       expect(paperSet.has('pair-paper-1')).toBe(true);
     });
 
     it('should clean up Set when closePosition called with pairId', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
       await service.commitReservation(
-        ((service as any).reservations as Map<string, BudgetReservation>)
+        ((budgetService as any).reservations as Map<string, BudgetReservation>)
           .values()
           .next().value!.reservationId,
       );
 
-      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      const warnSpy = vi.spyOn(budgetService['logger'], 'warn');
       await service.closePosition(
         new FinancialDecimal(300),
         new FinancialDecimal(0),
         'pair-paper-1',
+        true,
       );
 
-      const paperSet = (service as any).paperActivePairIds as Set<string>;
+      const paperSet = (budgetService as any).paperActivePairIds as Set<string>;
       expect(paperSet.has('pair-paper-1')).toBe(false);
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2577,10 +2644,10 @@ describe('RiskManagerService', () => {
     });
 
     it('should log warning when blocking duplicate paper pair', async () => {
-      vi.spyOn(service as any, 'persistState').mockResolvedValue(undefined);
+      vi.spyOn(riskStateManager, 'persistState').mockResolvedValue(undefined);
       await service.reserveBudget(makePaperRequest());
 
-      const warnSpy = vi.spyOn(service['logger'], 'warn');
+      const warnSpy = vi.spyOn(budgetService['logger'], 'warn');
       await expect(
         service.reserveBudget(
           makePaperRequest({ opportunityId: asOpportunityId('opp-paper-2') }),
@@ -2639,7 +2706,7 @@ describe('RiskManagerService', () => {
 
     it('should use paper state openPositionCount and totalCapitalDeployed', async () => {
       // Set paper state to max open pairs
-      const paperState = (service as any).paperState;
+      const paperState = riskStateManager.getState(true);
       paperState.openPositionCount = 10; // maxOpenPairs = 10
 
       const decision = await service.validatePosition(
@@ -2659,9 +2726,9 @@ describe('RiskManagerService', () => {
 
     it('should use paper bankroll for capital checks', async () => {
       // Set paper bankroll to a very small amount
-      (service as any).config.paperBankrollUsd = '100';
+      (riskStateManager as any).config.paperBankrollUsd = '100';
       // Deploy most of paper capital
-      (service as any).paperState.totalCapitalDeployed = new Decimal('98');
+      riskStateManager.getState(true).totalCapitalDeployed = new Decimal('98');
 
       const decision = await service.validatePosition(
         makeEnrichedOpportunity(),
@@ -2704,10 +2771,10 @@ describe('RiskManagerService', () => {
   describe('getCurrentExposure mode-awareness', () => {
     it('should return paper state values when isPaper=true', () => {
       // Set up paper state with specific values
-      (service as any).paperState.openPositionCount = 3;
-      (service as any).paperState.totalCapitalDeployed = new Decimal('500');
-      (service as any).paperState.dailyPnl = new Decimal('-50');
-      (service as any).config.paperBankrollUsd = '5000';
+      riskStateManager.getState(true).openPositionCount = 3;
+      riskStateManager.getState(true).totalCapitalDeployed = new Decimal('500');
+      riskStateManager.getState(true).dailyPnl = new Decimal('-50');
+      (riskStateManager as any).config.paperBankrollUsd = '5000';
 
       const exposure = service.getCurrentExposure(true);
       expect(exposure.openPairCount).toBe(3);
@@ -2717,7 +2784,7 @@ describe('RiskManagerService', () => {
     });
 
     it('should default to live (backward compat)', () => {
-      (service as any).liveState.openPositionCount = 2;
+      riskStateManager.getState(false).openPositionCount = 2;
       const exposure = service.getCurrentExposure();
       expect(exposure.openPairCount).toBe(2);
       expect(exposure.bankrollUsd.toNumber()).toBe(10000);

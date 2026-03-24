@@ -13,10 +13,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
-import {
-  RiskManagerService,
-  HALT_REASONS,
-} from '../../../modules/risk-management/risk-manager.service';
+import { RiskManagerService } from '../../../modules/risk-management/risk-manager.service';
+import { HALT_REASONS } from '../../../modules/risk-management/risk-state-manager.service';
+import { RiskStateManager } from '../../../modules/risk-management/risk-state-manager.service';
+import { TradingHaltService } from '../../../modules/risk-management/trading-halt.service';
+import { BudgetReservationService } from '../../../modules/risk-management/budget-reservation.service';
 import { CorrelationTrackerService } from '../../../modules/risk-management/correlation-tracker.service';
 import { EngineConfigRepository } from '../../../persistence/repositories/engine-config.repository';
 import { PrismaService } from '../../prisma.service';
@@ -103,6 +104,7 @@ function mockEngineConfigRepo() {
 
 describe('Paper/Live Boundary — RiskManagerService', () => {
   let service: RiskManagerService;
+  let stateManager: RiskStateManager;
   let module: TestingModule;
 
   beforeEach(async () => {
@@ -110,6 +112,9 @@ describe('Paper/Live Boundary — RiskManagerService', () => {
       imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' })],
       providers: [
         RiskManagerService,
+        RiskStateManager,
+        TradingHaltService,
+        BudgetReservationService,
         mockConfigService(),
         mockPrisma(),
         mockCorrelationTracker(),
@@ -118,6 +123,7 @@ describe('Paper/Live Boundary — RiskManagerService', () => {
     }).compile();
 
     service = module.get(RiskManagerService);
+    stateManager = module.get(RiskStateManager);
     await module.init();
   });
 
@@ -254,7 +260,7 @@ describe('Paper/Live Boundary — RiskManagerService', () => {
     expect(service.getCurrentExposure(true).dailyPnl.toNumber()).toBe(-100);
 
     // Act: trigger midnight reset
-    await service.handleMidnightReset();
+    await stateManager.handleMidnightReset();
 
     // Assert: both modes reset to zero
     expect(service.getCurrentExposure(false).dailyPnl.toNumber()).toBe(0);

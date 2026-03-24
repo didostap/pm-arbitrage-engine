@@ -8,6 +8,9 @@ import { RISK_MANAGER_TOKEN } from './risk-management.constants';
 import { CorrelationTrackerService } from './correlation-tracker.service';
 import { ContractMatchingModule } from '../contract-matching/contract-matching.module';
 import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
+import { RiskStateManager } from './risk-state-manager.service';
+import { TradingHaltService } from './trading-halt.service';
+import { BudgetReservationService } from './budget-reservation.service';
 
 export { RISK_MANAGER_TOKEN };
 
@@ -19,6 +22,9 @@ export { RISK_MANAGER_TOKEN };
       provide: RISK_MANAGER_TOKEN,
       useClass: RiskManagerService,
     },
+    RiskStateManager,
+    TradingHaltService,
+    BudgetReservationService,
     CorrelationTrackerService,
     StressTestService,
     AuthTokenGuard,

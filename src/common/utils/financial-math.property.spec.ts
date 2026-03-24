@@ -8,6 +8,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FinancialMath, FinancialDecimal } from './financial-math';
 import { FeeSchedule, PlatformId } from '../types/platform.type';
 import { RiskManagerService } from '../../modules/risk-management/risk-manager.service';
+import { RiskStateManager } from '../../modules/risk-management/risk-state-manager.service';
+import { TradingHaltService } from '../../modules/risk-management/trading-halt.service';
+import { BudgetReservationService } from '../../modules/risk-management/budget-reservation.service';
 import { CorrelationTrackerService } from '../../modules/risk-management/correlation-tracker.service';
 import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository';
 import { PrismaService } from '../prisma.service';
@@ -414,6 +417,9 @@ describe('Composition chain end-to-end property tests', () => {
         const module = await Test.createTestingModule({
           providers: [
             RiskManagerService,
+            RiskStateManager,
+            TradingHaltService,
+            BudgetReservationService,
             { provide: ConfigService, useValue: mockConfig },
             { provide: EventEmitter2, useValue: { emit: vi.fn() } },
             { provide: PrismaService, useValue: mockPrisma },
@@ -437,8 +443,12 @@ describe('Composition chain end-to-end property tests', () => {
           ],
         }).compile();
 
+        const rsm = module.get<RiskStateManager>(RiskStateManager);
+        await rsm.onModuleInit();
+        await module
+          .get<BudgetReservationService>(BudgetReservationService)
+          .onModuleInit();
         const service = module.get<RiskManagerService>(RiskManagerService);
-        await service.onModuleInit();
 
         const reservation = await service.reserveBudget({
           opportunityId: 'test-opp',
