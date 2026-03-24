@@ -727,15 +727,23 @@ export function formatShadowDailySummary(event: {
   modelTriggerCount: number;
   criterionTriggerCounts: Record<string, number>;
   cumulativePnlDelta: string;
+  // Story 10.7.7 — agreement aggregation
+  agreeCount: number;
+  disagreeCount: number;
   timestamp: Date;
   correlationId?: string;
 }): string {
   const header = `${SEVERITY_EMOJI.info} <b>Shadow Mode Daily Summary</b>`;
+  const agreeRate =
+    event.totalComparisons > 0
+      ? ((event.agreeCount / event.totalComparisons) * 100).toFixed(1)
+      : '0.0';
   const body = [
     `Date: <code>${escapeHtml(event.date)}</code>`,
     `Total Comparisons: <code>${event.totalComparisons}</code>`,
     `Fixed Triggers: <code>${event.fixedTriggerCount}</code>`,
     `Model Triggers: <code>${event.modelTriggerCount}</code>`,
+    `Agreement: <code>${event.agreeCount}/${event.totalComparisons}</code> (${agreeRate}%)`,
     `Cumulative P&amp;L Delta: <code>${escapeHtml(event.cumulativePnlDelta)}</code>`,
     '',
     '<b>Criterion Triggers:</b>',

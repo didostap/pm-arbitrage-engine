@@ -224,6 +224,11 @@ export class DashboardGateway
         fixedTriggered: event.fixedResult.triggered,
         modelPnl: event.modelResult.currentPnl,
         fixedPnl: event.fixedResult.currentPnl,
+        // Story 10.7.7 — decision summary fields
+        shadowDecision: event.shadowDecision,
+        modelDecision: event.modelDecision,
+        agreement: event.agreement,
+        currentEdge: event.currentEdge,
       },
       timestamp: new Date().toISOString(),
     });
@@ -239,6 +244,9 @@ export class DashboardGateway
         fixedTriggerCount: event.fixedTriggerCount,
         modelTriggerCount: event.modelTriggerCount,
         cumulativePnlDelta: event.cumulativePnlDelta,
+        // Story 10.7.7 — agreement aggregation
+        agreeCount: event.agreeCount,
+        disagreeCount: event.disagreeCount,
       },
       timestamp: new Date().toISOString(),
     });

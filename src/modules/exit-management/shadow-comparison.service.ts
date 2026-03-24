@@ -6,6 +6,7 @@ import { EVENT_NAMES } from '../../common/events/event-catalog';
 import {
   ExitTriggeredEvent,
   ShadowDailySummaryEvent,
+  type DivergenceDetail,
 } from '../../common/events/execution.events';
 import type { PositionId, PairId } from '../../common/types/branded.type';
 
@@ -29,6 +30,10 @@ export interface ShadowComparisonPayload {
     currentPnl: Decimal;
   };
   timestamp: Date;
+  // Story 10.7.7 — decision summary fields
+  agreement: boolean;
+  currentEdge: Decimal;
+  divergenceDetail: DivergenceDetail | null;
 }
 
 /** Shape of a position close event payload. */
@@ -59,6 +64,9 @@ interface DailySummary {
   modelTriggerCount: number;
   triggerCountByCriterion: Record<string, number>;
   cumulativePnlDelta: Decimal;
+  // Story 10.7.7 — agreement aggregation
+  agreeCount: number;
+  disagreeCount: number;
 }
 
 @Injectable()
@@ -99,7 +107,17 @@ export class ShadowComparisonService {
           currentPnl: Decimal | string;
         };
         timestamp: Date;
+        // Story 10.7.7 fields
+        agreement?: boolean;
+        currentEdge?: Decimal | string;
+        divergenceDetail?: DivergenceDetail | null;
       };
+
+      const rawCurrentEdge = raw.currentEdge;
+      const currentEdge =
+        rawCurrentEdge instanceof Decimal
+          ? rawCurrentEdge
+          : new Decimal(String(rawCurrentEdge ?? '0'));
 
       const normalized: ShadowComparisonPayload = {
         positionId: raw.positionId,
@@ -129,6 +147,9 @@ export class ShadowComparisonService {
               : new Decimal(raw.fixedResult.currentPnl),
         },
         timestamp: raw.timestamp,
+        agreement: raw.agreement ?? false,
+        currentEdge,
+        divergenceDetail: raw.divergenceDetail ?? null,
       };
 
       this.comparisons.push(normalized);
@@ -220,10 +241,19 @@ export class ShadowComparisonService {
     let fixedTriggerCount = 0;
     let modelTriggerCount = 0;
     let cumulativePnlDelta = new Decimal(0);
+    let agreeCount = 0;
+    let disagreeCount = 0;
 
     for (const comp of this.comparisons) {
       if (comp.fixedResult.triggered) fixedTriggerCount++;
       if (comp.modelResult.triggered) modelTriggerCount++;
+
+      // Story 10.7.7 — agreement aggregation
+      if (comp.agreement) {
+        agreeCount++;
+      } else {
+        disagreeCount++;
+      }
 
       // Count criterion triggers
       for (const criterion of comp.modelResult.criteria) {
@@ -245,6 +275,8 @@ export class ShadowComparisonService {
       modelTriggerCount,
       triggerCountByCriterion,
       cumulativePnlDelta,
+      agreeCount,
+      disagreeCount,
     };
   }
 
@@ -267,6 +299,8 @@ export class ShadowComparisonService {
         summary.modelTriggerCount,
         summary.triggerCountByCriterion,
         summary.cumulativePnlDelta.toFixed(8),
+        summary.agreeCount,
+        summary.disagreeCount,
       ),
     );
 

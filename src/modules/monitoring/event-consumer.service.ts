@@ -368,17 +368,18 @@ export class EventConsumerService implements OnModuleInit, OnModuleDestroy {
       const modelResult = e['modelResult'] as
         | Record<string, unknown>
         | undefined;
+      const agreement = e['agreement'] as boolean | undefined;
       return {
         timestamp: event.timestamp.toISOString(),
         platform: 'N/A',
         contractId: 'N/A',
-        side: 'shadow_comparison',
+        side: `shadow_comparison:${agreement ? 'agree' : 'disagree'}`,
         price: '0',
         size: '0',
         fillPrice: '0',
         fees: 'N/A',
         gas: 'N/A',
-        edge: 'N/A',
+        edge: this.str(e['currentEdge'], 'N/A'),
         pnl: this.str(modelResult?.['currentPnl'], '0'),
         positionId: this.str(e['positionId']),
         pairId: this.str(e['pairId']),

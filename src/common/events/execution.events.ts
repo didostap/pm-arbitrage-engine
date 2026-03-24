@@ -121,7 +121,15 @@ export class ExitTriggeredEvent extends BaseEvent {
   }
 }
 
-/** Emitted per-position in shadow mode with both fixed and model evaluation results (Story 10.2). */
+/** Divergence detail when shadow (fixed) and model evaluators disagree (Story 10.7.7). */
+export interface DivergenceDetail {
+  triggeredCriteria: string[];
+  proximityValues: Record<string, string>;
+  fixedType: string | null;
+  modelType: string | null;
+}
+
+/** Emitted per-position in shadow mode with both fixed and model evaluation results (Story 10.2, enhanced Story 10.7.7). */
 export class ShadowComparisonEvent extends BaseEvent {
   constructor(
     public readonly positionId: PositionId,
@@ -143,13 +151,19 @@ export class ShadowComparisonEvent extends BaseEvent {
       }>;
     },
     public readonly timestamp: Date,
+    // ── New fields (appended after existing, Story 10.7.7) ──
+    public readonly shadowDecision: string,
+    public readonly modelDecision: string,
+    public readonly agreement: boolean,
+    public readonly currentEdge: string,
+    public readonly divergenceDetail: DivergenceDetail | null,
     correlationId?: string,
   ) {
     super(correlationId);
   }
 }
 
-/** Emitted once daily in shadow mode with aggregate comparison summary (Story 10.2). */
+/** Emitted once daily in shadow mode with aggregate comparison summary (Story 10.2, enhanced Story 10.7.7). */
 export class ShadowDailySummaryEvent extends BaseEvent {
   constructor(
     public readonly date: string,
@@ -158,6 +172,9 @@ export class ShadowDailySummaryEvent extends BaseEvent {
     public readonly modelTriggerCount: number,
     public readonly criterionTriggerCounts: Record<string, number>,
     public readonly cumulativePnlDelta: string,
+    // ── New fields (appended after existing, Story 10.7.7) ──
+    public readonly agreeCount: number,
+    public readonly disagreeCount: number,
     correlationId?: string,
   ) {
     super(correlationId);

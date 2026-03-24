@@ -6,7 +6,9 @@ import {
   SingleLegExposureEvent,
   SingleLegResolvedEvent,
   ComplianceBlockedEvent,
+  ShadowComparisonEvent,
 } from './execution.events';
+import type { DivergenceDetail } from './execution.events';
 import { PlatformId } from '../types/platform.type';
 import { EVENT_NAMES } from './event-catalog';
 
@@ -585,6 +587,213 @@ describe('ExitTriggeredEvent', () => {
   it('should match EVENT_NAMES.EXIT_PARTIAL_CHUNKED catalog entry', () => {
     expect(EVENT_NAMES.EXIT_PARTIAL_CHUNKED).toBe(
       'execution.exit.partial_chunked',
+    );
+  });
+});
+
+describe('ShadowComparisonEvent', () => {
+  const baseFixedResult = { triggered: false, currentPnl: '0.01000000' };
+  const baseModelResult = {
+    triggered: false,
+    currentPnl: '0.01000000',
+    criteria: [
+      {
+        criterion: 'edge_evaporation',
+        proximity: '0.75000000',
+        triggered: false,
+      },
+      {
+        criterion: 'model_confidence',
+        proximity: '0.50000000',
+        triggered: false,
+      },
+      { criterion: 'time_decay', proximity: '0.30000000', triggered: false },
+      { criterion: 'risk_budget', proximity: '0.10000000', triggered: false },
+      {
+        criterion: 'liquidity_deterioration',
+        proximity: '0.05000000',
+        triggered: false,
+      },
+      {
+        criterion: 'profit_capture',
+        proximity: '0.60000000',
+        triggered: false,
+      },
+    ],
+  };
+
+  it('should serialize all new fields via JSON round-trip', () => {
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      baseFixedResult,
+      baseModelResult,
+      new Date('2026-03-24T12:00:00Z'),
+      'hold',
+      'hold',
+      true,
+      '0.02500000',
+      null,
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const serialized = JSON.parse(JSON.stringify(event));
+    expect(serialized).toEqual(
+      expect.objectContaining({
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        shadowDecision: 'hold',
+        modelDecision: 'hold',
+        agreement: true,
+        currentEdge: '0.02500000',
+        divergenceDetail: null,
+      }),
+    );
+  });
+
+  it('should have divergenceDetail null when agreement is true', () => {
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      baseFixedResult,
+      baseModelResult,
+      new Date('2026-03-24T12:00:00Z'),
+      'hold',
+      'hold',
+      true,
+      '0.02500000',
+      null,
+    );
+
+    expect(event.agreement).toBe(true);
+    expect(event.divergenceDetail).toBeNull();
+  });
+
+  it('should have divergenceDetail populated when agreement is false', () => {
+    const divergence: DivergenceDetail = {
+      triggeredCriteria: ['edge_evaporation'],
+      proximityValues: {
+        edge_evaporation: '1.00000000',
+        model_confidence: '0.50000000',
+        time_decay: '0.30000000',
+        risk_budget: '0.10000000',
+        liquidity_deterioration: '0.05000000',
+        profit_capture: '0.60000000',
+      },
+      fixedType: null,
+      modelType: 'edge_evaporation',
+    };
+
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      baseFixedResult,
+      { ...baseModelResult, triggered: true, type: 'edge_evaporation' },
+      new Date('2026-03-24T12:00:00Z'),
+      'hold',
+      'exit:edge_evaporation',
+      false,
+      '0.00300000',
+      divergence,
+    );
+
+    expect(event.agreement).toBe(false);
+    expect(event.divergenceDetail).toEqual(
+      expect.objectContaining({
+        triggeredCriteria: ['edge_evaporation'],
+        fixedType: null,
+        modelType: 'edge_evaporation',
+      }),
+    );
+    expect(event.divergenceDetail!.proximityValues).toHaveProperty(
+      'edge_evaporation',
+      '1.00000000',
+    );
+  });
+
+  it('should format decision as "hold" when not triggered', () => {
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      baseFixedResult,
+      baseModelResult,
+      new Date('2026-03-24T12:00:00Z'),
+      'hold',
+      'hold',
+      true,
+      '0.02500000',
+      null,
+    );
+
+    expect(event.shadowDecision).toBe('hold');
+    expect(event.modelDecision).toBe('hold');
+  });
+
+  it('should format decision as "exit:<type>" when triggered', () => {
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      { ...baseFixedResult, triggered: true, type: 'stop_loss' },
+      { ...baseModelResult, triggered: true, type: 'edge_evaporation' },
+      new Date('2026-03-24T12:00:00Z'),
+      'exit:stop_loss',
+      'exit:edge_evaporation',
+      true,
+      '0.00100000',
+      null,
+    );
+
+    expect(event.shadowDecision).toBe('exit:stop_loss');
+    expect(event.modelDecision).toBe('exit:edge_evaporation');
+    // Both triggered → agreement is true even with different types
+    expect(event.agreement).toBe(true);
+  });
+
+  it('should format decision as "exit:unknown" when triggered but type is undefined', () => {
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      { triggered: true, currentPnl: '-0.05000000' },
+      { ...baseModelResult, triggered: true },
+      new Date('2026-03-24T12:00:00Z'),
+      'exit:unknown',
+      'exit:unknown',
+      true,
+      '0.00100000',
+      null,
+    );
+
+    expect(event.shadowDecision).toBe('exit:unknown');
+    expect(event.modelDecision).toBe('exit:unknown');
+  });
+
+  it('should preserve existing fields unchanged (backward-compatible)', () => {
+    const ts = new Date('2026-03-24T12:00:00Z');
+    const event = new ShadowComparisonEvent(
+      'pos-1',
+      'pair-1',
+      baseFixedResult,
+      baseModelResult,
+      ts,
+      'hold',
+      'hold',
+      true,
+      '0.02500000',
+      null,
+      'corr-123',
+    );
+
+    expect(event.positionId).toBe('pos-1');
+    expect(event.pairId).toBe('pair-1');
+    expect(event.fixedResult).toEqual(baseFixedResult);
+    expect(event.modelResult).toEqual(baseModelResult);
+    expect(event.timestamp).toBe(ts);
+    expect(event.correlationId).toBe('corr-123');
+  });
+
+  it('should match EVENT_NAMES.SHADOW_COMPARISON catalog entry', () => {
+    expect(EVENT_NAMES.SHADOW_COMPARISON).toBe(
+      'execution.exit.shadow_comparison',
     );
   });
 });

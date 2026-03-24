@@ -510,6 +510,70 @@ describe('EventConsumerService', () => {
 
       expect(mockCsvTradeLog.logTrade).not.toHaveBeenCalled();
     });
+
+    it('[10.7.7] should populate edge from currentEdge in SHADOW_COMPARISON', () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        modelResult: { triggered: false, currentPnl: '0.01000000' },
+        fixedResult: { triggered: false, currentPnl: '0.01000000' },
+        agreement: true,
+        currentEdge: '0.02500000',
+      };
+
+      csvService.handleEvent(EVENT_NAMES.SHADOW_COMPARISON, event as never);
+
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          edge: '0.02500000',
+        }),
+      );
+    });
+
+    it('[10.7.7] should set side to shadow_comparison:agree when agreement is true', () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        modelResult: { triggered: false, currentPnl: '0.01000000' },
+        fixedResult: { triggered: false, currentPnl: '0.01000000' },
+        agreement: true,
+        currentEdge: '0.02500000',
+      };
+
+      csvService.handleEvent(EVENT_NAMES.SHADOW_COMPARISON, event as never);
+
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          side: 'shadow_comparison:agree',
+        }),
+      );
+    });
+
+    it('[10.7.7] should set side to shadow_comparison:disagree when agreement is false', () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        modelResult: {
+          triggered: true,
+          type: 'edge_evaporation',
+          currentPnl: '-0.03000000',
+        },
+        fixedResult: { triggered: false, currentPnl: '-0.03000000' },
+        agreement: false,
+        currentEdge: '0.00300000',
+      };
+
+      csvService.handleEvent(EVENT_NAMES.SHADOW_COMPARISON, event as never);
+
+      expect(mockCsvTradeLog.logTrade).toHaveBeenCalledWith(
+        expect.objectContaining({
+          side: 'shadow_comparison:disagree',
+        }),
+      );
+    });
   });
 
   describe('audit log integration (Story 6.5)', () => {
@@ -602,6 +666,80 @@ describe('EventConsumerService', () => {
       expect(() =>
         auditService.handleEvent(EVENT_NAMES.ORDER_FILLED, makeBaseEvent()),
       ).not.toThrow();
+    });
+
+    it('[10.7.7] should produce audit JSON with top-level decision fields for SHADOW_COMPARISON', () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        fixedResult: {
+          triggered: true,
+          type: 'stop_loss',
+          currentPnl: '-0.05000000',
+        },
+        modelResult: {
+          triggered: false,
+          currentPnl: '-0.03000000',
+          criteria: [
+            {
+              criterion: 'edge_evaporation',
+              proximity: '0.75',
+              triggered: false,
+            },
+          ],
+        },
+        shadowDecision: 'exit:stop_loss',
+        modelDecision: 'hold',
+        agreement: false,
+        currentEdge: '0.01500000',
+        divergenceDetail: {
+          triggeredCriteria: [],
+          proximityValues: { edge_evaporation: '0.75000000' },
+          fixedType: 'stop_loss',
+          modelType: null,
+        },
+      };
+
+      const sanitized = auditService.sanitizeEventForAudit(event);
+
+      // AC-6: top-level fields are non-null and queryable
+      expect(sanitized['shadowDecision']).toBe('exit:stop_loss');
+      expect(sanitized['modelDecision']).toBe('hold');
+      expect(sanitized['agreement']).toBe(false);
+      expect(sanitized['currentEdge']).toBe('0.01500000');
+      // divergenceDetail is non-null when agreement is false
+      expect(sanitized['divergenceDetail']).toEqual(
+        expect.objectContaining({
+          triggeredCriteria: [],
+          fixedType: 'stop_loss',
+          modelType: null,
+        }),
+      );
+    });
+
+    it('[10.7.7] should have null divergenceDetail when agreement is true in audit JSON', () => {
+      const event = {
+        ...makeBaseEvent(),
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        fixedResult: { triggered: false, currentPnl: '0.01000000' },
+        modelResult: {
+          triggered: false,
+          currentPnl: '0.01000000',
+          criteria: [],
+        },
+        shadowDecision: 'hold',
+        modelDecision: 'hold',
+        agreement: true,
+        currentEdge: '0.02500000',
+        divergenceDetail: null,
+      };
+
+      const sanitized = auditService.sanitizeEventForAudit(event);
+
+      expect(sanitized['agreement']).toBe(true);
+      expect(sanitized['divergenceDetail']).toBeNull();
     });
   });
 

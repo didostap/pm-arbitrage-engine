@@ -31,6 +31,7 @@ import {
   SingleLegExposureEvent,
   ShadowComparisonEvent,
 } from '../../common/events/execution.events';
+import type { DivergenceDetail } from '../../common/events/execution.events';
 import { PlatformDataFallbackEvent } from '../../common/events/platform.events';
 import { RiskStateDivergenceEvent } from '../../common/events/system.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
@@ -769,13 +770,40 @@ export class ExitMonitorService implements OnModuleInit {
       });
     }
 
-    // Shadow comparison event emission (Story 10.2 Task 5)
+    // Shadow comparison event emission (Story 10.2 Task 5, enhanced Story 10.7.7)
     // In shadow mode: fixed is primary (evalResult), model is shadow (shadowModelResult)
     if (
       exitMode === 'shadow' &&
       evalResult.shadowModelResult &&
       evalResult.criteria
     ) {
+      const shadowDecision = evalResult.triggered
+        ? `exit:${evalResult.type ?? 'unknown'}`
+        : 'hold';
+      const modelDecision = evalResult.shadowModelResult.triggered
+        ? `exit:${evalResult.shadowModelResult.type ?? 'unknown'}`
+        : 'hold';
+      const agreement =
+        evalResult.triggered === evalResult.shadowModelResult.triggered;
+      const currentEdgeStr = evalResult.currentEdge.toFixed(8);
+
+      let divergenceDetail: DivergenceDetail | null = null;
+      if (!agreement) {
+        const criteria = evalResult.criteria ?? [];
+        divergenceDetail = {
+          triggeredCriteria: criteria
+            .filter((c) => c.triggered)
+            .map((c) => c.criterion),
+          proximityValues: Object.fromEntries(
+            criteria.map((c) => [c.criterion, c.proximity.toFixed(8)]),
+          ),
+          fixedType: evalResult.triggered ? (evalResult.type ?? null) : null,
+          modelType: evalResult.shadowModelResult.triggered
+            ? (evalResult.shadowModelResult.type ?? null)
+            : null,
+        };
+      }
+
       this.eventEmitter.emit(
         EVENT_NAMES.SHADOW_COMPARISON,
         new ShadowComparisonEvent(
@@ -798,6 +826,11 @@ export class ExitMonitorService implements OnModuleInit {
             })),
           },
           now,
+          shadowDecision,
+          modelDecision,
+          agreement,
+          currentEdgeStr,
+          divergenceDetail,
         ),
       );
     }

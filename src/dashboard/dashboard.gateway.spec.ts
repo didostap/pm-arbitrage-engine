@@ -10,6 +10,7 @@ import {
   TradingHaltedEvent,
   TradingResumedEvent,
 } from '../common/events/system.events';
+import { ShadowComparisonEvent } from '../common/events/execution.events';
 
 vi.mock('../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -264,6 +265,59 @@ describe('DashboardGateway', () => {
       expect(sent.event).toBe('trading.halt');
       expect(sent.data.halted).toBe(false);
       expect(sent.data.reasons).toEqual([]);
+    });
+  });
+
+  describe('handleShadowComparison (Story 10.7.7)', () => {
+    it('should broadcast new decision fields with correct values', () => {
+      const client = createMockWsClient();
+      const request = createMockRequest('test-token');
+      gateway.handleConnection(client as never, request);
+
+      const event = new ShadowComparisonEvent(
+        'pos-1' as never,
+        'pair-1' as never,
+        { triggered: true, type: 'stop_loss', currentPnl: '-0.05000000' },
+        {
+          triggered: false,
+          currentPnl: '-0.03000000',
+          criteria: [
+            {
+              criterion: 'edge_evaporation',
+              proximity: '0.75',
+              triggered: false,
+            },
+          ],
+        },
+        new Date('2026-03-24T12:00:00Z'),
+        'exit:stop_loss',
+        'hold',
+        false,
+        '0.01500000',
+        {
+          triggeredCriteria: [],
+          proximityValues: { edge_evaporation: '0.75000000' },
+          fixedType: 'stop_loss',
+          modelType: null,
+        },
+      );
+
+      gateway.handleShadowComparison(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('shadow.comparison');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          shadowDecision: 'exit:stop_loss',
+          modelDecision: 'hold',
+          agreement: false,
+          currentEdge: '0.01500000',
+        }),
+      );
     });
   });
 });

@@ -87,6 +87,11 @@ export interface WsShadowComparisonPayload {
   fixedTriggered: boolean;
   modelPnl: string;
   fixedPnl: string;
+  // Story 10.7.7 — decision summary fields
+  shadowDecision: string;
+  modelDecision: string;
+  agreement: boolean;
+  currentEdge: string;
 }
 
 export interface WsShadowDailySummaryPayload {
@@ -95,6 +100,9 @@ export interface WsShadowDailySummaryPayload {
   fixedTriggerCount: number;
   modelTriggerCount: number;
   cumulativePnlDelta: string;
+  // Story 10.7.7 — agreement aggregation
+  agreeCount: number;
+  disagreeCount: number;
 }
 
 export const WS_EVENTS = {
