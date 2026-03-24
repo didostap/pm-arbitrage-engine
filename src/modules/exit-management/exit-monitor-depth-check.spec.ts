@@ -138,6 +138,8 @@ describe('ExitMonitorService — depth check', () => {
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
 
       // Depth check: kalshi bids only 80 contracts at close price or better
+      // Story 10-7-5: 3rd+ call returns 0 depth to limit chunking to 1 iteration
+      const emptyBook = { bids: [], asks: [], timestamp: new Date() };
       kalshiConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.KALSHI,
@@ -152,23 +154,33 @@ describe('ExitMonitorService — depth check', () => {
           bids: [{ price: 0.66, quantity: 80 }],
           asks: [{ price: 0.68, quantity: 500 }],
           timestamp: new Date(),
+        })
+        .mockResolvedValue({
+          platformId: PlatformId.KALSHI,
+          contractId: asContractId('kalshi-contract-1'),
+          ...emptyBook,
         });
 
-      // Polymarket: plenty of depth
+      // Polymarket: plenty of depth for first chunk, then 0
       polymarketConnector.getOrderBook
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
           contractId: asContractId('poly-contract-1'),
-          bids: [{ price: 0.62, quantity: 500 }],
+          bids: [{ price: 0.64, quantity: 500 }],
           asks: [{ price: 0.64, quantity: 500 }],
           timestamp: new Date(),
         })
         .mockResolvedValueOnce({
           platformId: PlatformId.POLYMARKET,
           contractId: asContractId('poly-contract-1'),
-          bids: [{ price: 0.62, quantity: 500 }],
+          bids: [{ price: 0.64, quantity: 500 }],
           asks: [{ price: 0.64, quantity: 500 }],
           timestamp: new Date(),
+        })
+        .mockResolvedValue({
+          platformId: PlatformId.POLYMARKET,
+          contractId: asContractId('poly-contract-1'),
+          ...emptyBook,
         });
 
       kalshiConnector.submitOrder.mockResolvedValue({
@@ -207,7 +219,7 @@ describe('ExitMonitorService — depth check', () => {
       );
     });
 
-    it('should fall back to entry fill size when depth fetch fails', async () => {
+    it('should defer exit when depth fetch fails (D2)', async () => {
       const position = createMockPosition();
       positionRepository.findByStatusWithOrders!.mockResolvedValue([position]);
 
@@ -225,9 +237,12 @@ describe('ExitMonitorService — depth check', () => {
 
       await service.evaluatePositions();
 
-      // Should still submit orders (fall back to entry fill size)
-      expect(kalshiConnector.submitOrder).toHaveBeenCalled();
-      expect(polymarketConnector.submitOrder).toHaveBeenCalled();
+      // D2: Should NOT submit orders — exit deferred to next cycle
+      expect(kalshiConnector.submitOrder).not.toHaveBeenCalled();
+      expect(polymarketConnector.submitOrder).not.toHaveBeenCalled();
+      // Position stays unchanged (no status update)
+      expect(positionRepository.updateStatus).not.toHaveBeenCalled();
+      expect(positionRepository.closePosition).not.toHaveBeenCalled();
     });
   });
 
@@ -573,6 +588,83 @@ describe('ExitMonitorService — depth check', () => {
       // Exit was triggered and orders submitted
       expect(kalshiConnector.submitOrder).toHaveBeenCalled();
       expect(polymarketConnector.submitOrder).toHaveBeenCalled();
+    });
+  });
+
+  // ─── D4: Defensive sort for unsorted order books ───
+  describe('D4: unsorted order book levels', () => {
+    /**
+     * Helper to call the private getAvailableExitDepth() method directly.
+     */
+    async function callGetAvailableExitDepth(
+      svc: ExitMonitorService,
+      connector: ExitMonitorTestContext['kalshiConnector'],
+      contractId: string,
+      closeSide: 'buy' | 'sell',
+      closePrice: Decimal,
+      slippageTolerance: number,
+    ): Promise<Decimal> {
+      return (svc as Record<string, unknown>)['getAvailableExitDepth'](
+        connector,
+        contractId,
+        closeSide,
+        closePrice,
+        slippageTolerance,
+      ) as Promise<Decimal>;
+    }
+
+    it('should compute correct depth when ask levels are unsorted', async () => {
+      // Asks in WRONG order (out-of-band first, then in-band)
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [],
+        asks: [
+          { price: 0.52, quantity: 20 }, // beyond band (cutoff=0.51)
+          { price: 0.505, quantity: 10 }, // within band
+          { price: 0.5, quantity: 1 }, // within band
+        ],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'buy',
+        new Decimal('0.50'),
+        0.02,
+      );
+
+      // Defensive sort: 0.50(1) + 0.505(10) = 11. 0.52 is beyond cutoff 0.51.
+      expect(depth).toEqual(new Decimal(11));
+    });
+
+    it('should compute correct depth when bid levels are unsorted', async () => {
+      // Bids in WRONG order (low first, then high)
+      kalshiConnector.getOrderBook.mockResolvedValueOnce({
+        platformId: PlatformId.KALSHI,
+        contractId: asContractId('kalshi-contract-1'),
+        bids: [
+          { price: 0.55, quantity: 5 }, // below cutoff (0.588)
+          { price: 0.6, quantity: 5 }, // within band
+          { price: 0.59, quantity: 8 }, // within band
+        ],
+        asks: [],
+        timestamp: new Date(),
+      });
+
+      const depth = await callGetAvailableExitDepth(
+        service,
+        kalshiConnector,
+        'kalshi-contract-1',
+        'sell',
+        new Decimal('0.60'),
+        0.02,
+      );
+
+      // Defensive sort descending: 0.60(5) + 0.59(8) = 13. 0.55 < cutoff 0.588.
+      expect(depth).toEqual(new Decimal(13));
     });
   });
 });

@@ -290,6 +290,7 @@ export const CONFIG_DEFAULTS = {
     envKey: 'EXIT_DEPTH_SLIPPAGE_TOLERANCE',
     defaultValue: 0.02,
   },
+  exitMaxChunkSize: { envKey: 'EXIT_MAX_CHUNK_SIZE', defaultValue: 0 },
   exitProfitCaptureRatio: {
     envKey: 'EXIT_PROFIT_CAPTURE_RATIO',
     defaultValue: 0.5,

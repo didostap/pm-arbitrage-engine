@@ -243,6 +243,49 @@ describe('ExitMonitorService — partial reevaluation', () => {
 
       setupOrderCreateMock(orderRepository);
 
+      // Story 10-7-5: Limit chunking to 1 iteration so partial fill stays partial
+      const emptyBook = { bids: [], asks: [], timestamp: new Date() };
+      kalshiConnector.getOrderBook
+        .mockResolvedValueOnce({
+          platformId: PlatformId.KALSHI,
+          contractId: asContractId('kalshi-contract-1'),
+          bids: [{ price: 0.66, quantity: 500 }],
+          asks: [{ price: 0.68, quantity: 500 }],
+          timestamp: new Date(),
+        })
+        .mockResolvedValueOnce({
+          platformId: PlatformId.KALSHI,
+          contractId: asContractId('kalshi-contract-1'),
+          bids: [{ price: 0.66, quantity: 500 }],
+          asks: [{ price: 0.68, quantity: 500 }],
+          timestamp: new Date(),
+        })
+        .mockResolvedValue({
+          platformId: PlatformId.KALSHI,
+          contractId: asContractId('kalshi-contract-1'),
+          ...emptyBook,
+        });
+      polymarketConnector.getOrderBook
+        .mockResolvedValueOnce({
+          platformId: PlatformId.POLYMARKET,
+          contractId: asContractId('poly-contract-1'),
+          bids: [{ price: 0.64, quantity: 500 }],
+          asks: [{ price: 0.64, quantity: 500 }],
+          timestamp: new Date(),
+        })
+        .mockResolvedValueOnce({
+          platformId: PlatformId.POLYMARKET,
+          contractId: asContractId('poly-contract-1'),
+          bids: [{ price: 0.64, quantity: 500 }],
+          asks: [{ price: 0.64, quantity: 500 }],
+          timestamp: new Date(),
+        })
+        .mockResolvedValue({
+          platformId: PlatformId.POLYMARKET,
+          contractId: asContractId('poly-contract-1'),
+          ...emptyBook,
+        });
+
       // Fills only 20 of residual 40
       kalshiConnector.submitOrder.mockResolvedValue({
         orderId: asOrderId('kalshi-exit-2'),

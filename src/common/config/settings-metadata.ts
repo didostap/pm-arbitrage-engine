@@ -711,6 +711,15 @@ export const SETTINGS_METADATA: Record<
     min: 0,
     max: 1,
   },
+  exitMaxChunkSize: {
+    group: SettingsGroup.ExitStrategy,
+    label: 'Exit Max Chunk Size',
+    description:
+      'Maximum contracts per exit chunk. 0 = unlimited (full depth-matched size).',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.exitMaxChunkSize.defaultValue,
+    min: 0,
+  },
   exitProfitCaptureRatio: {
     group: SettingsGroup.ExitStrategy,
     label: 'Profit Capture Ratio',

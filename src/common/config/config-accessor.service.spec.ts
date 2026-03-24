@@ -81,6 +81,7 @@ function buildMockConfig(
     exitRiskRankCutoff: 1,
     exitMinDepth: 5,
     exitDepthSlippageTolerance: 0.02,
+    exitMaxChunkSize: 0,
     exitProfitCaptureRatio: 0.5,
     ...overrides,
   };

@@ -180,6 +180,7 @@ function buildEffectiveConfig(
     exitRiskRankCutoff: resolve('exitRiskRankCutoff') as number,
     exitMinDepth: resolve('exitMinDepth') as number,
     exitDepthSlippageTolerance: resolve('exitDepthSlippageTolerance') as number,
+    exitMaxChunkSize: resolve('exitMaxChunkSize') as number,
     exitProfitCaptureRatio: resolve('exitProfitCaptureRatio') as number,
   };
 }

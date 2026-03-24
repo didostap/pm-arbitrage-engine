@@ -239,8 +239,8 @@ describe('SettingsService', () => {
         expect(setting).toHaveProperty('group');
       }
 
-      // 74 settings (75 CONFIG_DEFAULTS minus bankrollUsd)
-      expect(allSettings.length).toBe(74);
+      // 75 settings (76 CONFIG_DEFAULTS minus bankrollUsd)
+      expect(allSettings.length).toBe(75);
     });
 
     it('[P0] currentValue falls back to env default when DB column is NULL', async () => {

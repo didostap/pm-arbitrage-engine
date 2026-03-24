@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- vitest expect.any() returns any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import {
@@ -47,6 +46,32 @@ describe('ExitMonitorService — partial fills', () => {
         capturedEdgePercent: new Decimal('100'),
       });
       setupOrderCreateMock(orderRepository);
+
+      // Story 10-7-5: With chunking, loop would continue after partial fills.
+      // Limit to 1 chunk by returning 0 depth on 3rd+ getOrderBook call.
+      const emptyBook = { bids: [], asks: [], timestamp: new Date() };
+      const kalshiBook = {
+        platformId: 'KALSHI',
+        contractId: 'kalshi-contract-1',
+        bids: [{ price: 0.66, quantity: 500 }],
+        asks: [{ price: 0.68, quantity: 500 }],
+        timestamp: new Date(),
+      };
+      const polyBook = {
+        platformId: 'POLYMARKET',
+        contractId: 'poly-contract-1',
+        bids: [{ price: 0.64, quantity: 500 }],
+        asks: [{ price: 0.64, quantity: 500 }],
+        timestamp: new Date(),
+      };
+      kalshiConnector.getOrderBook
+        .mockResolvedValueOnce(kalshiBook) // getClosePrice
+        .mockResolvedValueOnce(kalshiBook) // chunk 1 depth
+        .mockResolvedValue({ ...kalshiBook, ...emptyBook });
+      polymarketConnector.getOrderBook
+        .mockResolvedValueOnce(polyBook) // getClosePrice
+        .mockResolvedValueOnce(polyBook) // chunk 1 depth
+        .mockResolvedValue({ ...polyBook, ...emptyBook });
     });
 
     it('should use exit fill sizes for P&L calculation, not entry fill sizes', async () => {
@@ -208,7 +233,10 @@ describe('ExitMonitorService — partial fills', () => {
       expect(riskManager.closePosition).not.toHaveBeenCalled();
     });
 
-    it('should emit SingleLegExposureEvent with remainder details on partial fills', async () => {
+    // Story 10-7-5: With chunking, both-leg partial fills result in EXIT_PARTIAL
+    // without SingleLegExposureEvent. That event is reserved for actual single-leg
+    // exposure (one leg fills, other fails) via handlePartialExit.
+    it('should NOT emit SingleLegExposureEvent when both legs fill partially (chunked exit)', async () => {
       const position = createMockPosition({
         kalshiOrder: {
           orderId: asOrderId('order-kalshi-1'),
@@ -250,34 +278,19 @@ describe('ExitMonitorService — partial fills', () => {
 
       await service.evaluatePositions();
 
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        EVENT_NAMES.SINGLE_LEG_EXPOSURE,
-        expect.objectContaining({
-          positionId: asPositionId('pos-1'),
-          filledLeg: expect.objectContaining({
-            price: expect.any(Number) as number,
-            size: expect.any(Number) as number,
-            fillPrice: 0.66,
-            fillSize: 300,
-          }),
-          failedLeg: expect.objectContaining({
-            reason: 'Partial exit — remainder contracts unexited',
-            reasonCode: 2008,
-          }),
-          recommendedActions: expect.arrayContaining([
-            expect.stringContaining('retry-leg') as string,
-            expect.stringContaining('close-leg') as string,
-          ]) as string[],
-        }),
+      // Both legs filled → EXIT_PARTIAL, NOT SingleLegExposureEvent
+      expect(
+        positionRepository.updateStatusWithAccumulatedPnl,
+      ).toHaveBeenCalledWith(
+        asPositionId('pos-1'),
+        'EXIT_PARTIAL',
+        expect.any(Decimal),
+        expect.any(Decimal),
       );
-      // filledLeg.price must be a valid probability (0-1), NOT a quantity
       const singleLegCall = eventEmitter.emit.mock.calls.find(
         (c: unknown[]) => c[0] === EVENT_NAMES.SINGLE_LEG_EXPOSURE,
       );
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const filledLegPrice = singleLegCall![1].filledLeg.price as number;
-      expect(filledLegPrice).toBeGreaterThan(0);
-      expect(filledLegPrice).toBeLessThanOrEqual(1);
+      expect(singleLegCall).toBeUndefined();
     });
 
     it('should transition to CLOSED when exit fills equal entry fills', async () => {

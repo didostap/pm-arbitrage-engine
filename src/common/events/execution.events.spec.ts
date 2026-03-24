@@ -541,6 +541,52 @@ describe('ExitTriggeredEvent', () => {
       expect(event.exitType).toBe(exitType);
     }
   });
+
+  it('should default chunksCompleted and isPartial to undefined when not provided', () => {
+    const event = new ExitTriggeredEvent(
+      'pos-1',
+      'pair-1',
+      'take_profit',
+      '0.03',
+      '0.02',
+      '0.01',
+      'k',
+      'p',
+      undefined,
+      false,
+      false,
+    );
+
+    expect(event.chunksCompleted).toBeUndefined();
+    expect(event.isPartial).toBeUndefined();
+  });
+
+  it('should store chunksCompleted and isPartial when provided', () => {
+    const event = new ExitTriggeredEvent(
+      'pos-1',
+      'pair-1',
+      'edge_evaporation',
+      '0.03',
+      '0.005',
+      '0.02',
+      'k-order',
+      'p-order',
+      undefined,
+      false,
+      false,
+      3,
+      true,
+    );
+
+    expect(event.chunksCompleted).toBe(3);
+    expect(event.isPartial).toBe(true);
+  });
+
+  it('should match EVENT_NAMES.EXIT_PARTIAL_CHUNKED catalog entry', () => {
+    expect(EVENT_NAMES.EXIT_PARTIAL_CHUNKED).toBe(
+      'execution.exit.partial_chunked',
+    );
+  });
 });
 
 describe('ComplianceBlockedEvent', () => {

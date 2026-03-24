@@ -9,7 +9,9 @@ export interface PriceLevel {
 export interface NormalizedOrderBook {
   platformId: PlatformId;
   contractId: ContractId;
+  /** Sorted best-to-worst: descending by price (highest first). Connectors must maintain this invariant. */
   bids: PriceLevel[];
+  /** Sorted best-to-worst: ascending by price (lowest first). Connectors must maintain this invariant. */
   asks: PriceLevel[];
   timestamp: Date;
   sequenceNumber?: number;

@@ -263,5 +263,6 @@ export const envSchema = z.object({
   EXIT_RISK_RANK_CUTOFF: z.coerce.number().int().positive().default(1),
   EXIT_MIN_DEPTH: z.coerce.number().int().positive().default(5),
   EXIT_DEPTH_SLIPPAGE_TOLERANCE: z.coerce.number().min(0).max(1).default(0.02),
+  EXIT_MAX_CHUNK_SIZE: z.coerce.number().int().min(0).default(0),
   EXIT_PROFIT_CAPTURE_RATIO: z.coerce.number().min(0.01).max(5).default(0.5),
 });

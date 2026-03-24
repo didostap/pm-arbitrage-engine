@@ -407,6 +407,11 @@ export class UpdateSettingsDto {
   exitDepthSlippageTolerance?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  exitMaxChunkSize?: number;
+
+  @IsOptional()
   @IsNumber()
   @Min(0.01)
   @Max(5)

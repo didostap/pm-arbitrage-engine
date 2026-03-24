@@ -136,6 +136,7 @@ model EngineConfig {
   exitRiskRankCutoff      Int?    @map("exit_risk_rank_cutoff")
   exitMinDepth                 Int?    @map("exit_min_depth")
   exitDepthSlippageTolerance   Float?  @map("exit_depth_slippage_tolerance")
+  exitMaxChunkSize             Int?    @map("exit_max_chunk_size")
   exitProfitCaptureRatio       Float?  @map("exit_profit_capture_ratio")
 
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz

@@ -114,6 +114,8 @@ export class ExitTriggeredEvent extends BaseEvent {
     correlationId?: string,
     public readonly isPaper: boolean = false,
     public readonly mixedMode: boolean = false,
+    public readonly chunksCompleted?: number,
+    public readonly isPartial?: boolean,
   ) {
     super(correlationId);
   }

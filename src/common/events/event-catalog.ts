@@ -99,6 +99,9 @@ export const EVENT_NAMES = {
   /** [Story 5.4] Emitted when exit threshold is hit (take-profit, stop-loss, time-based) */
   EXIT_TRIGGERED: 'execution.exit.triggered',
 
+  /** [Story 10-7-5] Emitted when chunked exit partially completes (some chunks succeed, position not fully closed) */
+  EXIT_PARTIAL_CHUNKED: 'execution.exit.partial_chunked',
+
   // [Epic 4] Risk Events
   /** [Epic 4] Emitted when risk limit is approaching (80% of threshold) */
   LIMIT_APPROACHED: 'risk.limit.approached',
