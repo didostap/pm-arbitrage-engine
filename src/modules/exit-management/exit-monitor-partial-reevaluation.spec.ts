@@ -196,10 +196,10 @@ describe('ExitMonitorService — partial reevaluation', () => {
 
       await service.evaluatePositions();
 
-      // Should transition to CLOSED (exit fills match residual of 40)
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      // Should transition to CLOSED with realizedPnl via repository
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
         asPositionId('pos-1'),
-        'CLOSED',
+        expect.any(Decimal),
       );
       // closePosition should be called (not releasePartialCapital)
       expect(riskManager.closePosition).toHaveBeenCalled();
@@ -261,10 +261,14 @@ describe('ExitMonitorService — partial reevaluation', () => {
 
       await service.evaluatePositions();
 
-      // Should stay EXIT_PARTIAL (not full residual)
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      // Should stay EXIT_PARTIAL with accumulated PnL
+      expect(
+        positionRepository.updateStatusWithAccumulatedPnl,
+      ).toHaveBeenCalledWith(
         asPositionId('pos-1'),
         'EXIT_PARTIAL',
+        expect.any(Decimal),
+        expect.any(Decimal),
       );
       expect(riskManager.releasePartialCapital).toHaveBeenCalled();
     });
@@ -463,10 +467,10 @@ describe('ExitMonitorService — partial reevaluation', () => {
 
       await service.evaluatePositions();
 
-      // Should transition to CLOSED without submitting orders
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      // Should transition to CLOSED preserving existing PnL without submitting orders
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
         asPositionId('pos-1'),
-        'CLOSED',
+        new Decimal(0),
       );
       expect(riskManager.closePosition).toHaveBeenCalledWith(
         new Decimal(0),

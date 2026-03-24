@@ -65,10 +65,11 @@ export class DashboardService {
 
   async getOverview(): Promise<DashboardOverviewDto> {
     try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const [
         healthLogs,
         openPositionCount,
-        pnlAggregate,
+        trailingPnl7d,
         totalOrders,
         filledOrders,
         activeAlertCount,
@@ -80,15 +81,11 @@ export class DashboardService {
             status: { in: ['OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL'] },
           },
         }),
-        this.prisma.openPosition.aggregate({
-          where: {
-            status: 'CLOSED',
-            updatedAt: {
-              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-            },
-          },
-          _sum: { expectedEdge: true },
-        }),
+        this.positionRepository.sumClosedPnlByDateRange(
+          sevenDaysAgo,
+          new Date(),
+          false,
+        ),
         this.prisma.order.count(),
         this.prisma.order.count({ where: { status: 'FILLED' } }),
         this.prisma.openPosition.count({
@@ -100,9 +97,6 @@ export class DashboardService {
       ]);
 
       const systemHealth = this.computeCompositeHealth(healthLogs);
-      const trailingPnl7d = pnlAggregate._sum.expectedEdge
-        ? new Decimal(pnlAggregate._sum.expectedEdge.toString()).toString()
-        : '0';
       const executionQualityRatio =
         totalOrders > 0
           ? new Decimal(filledOrders)

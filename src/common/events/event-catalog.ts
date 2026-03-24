@@ -128,6 +128,9 @@ export const EVENT_NAMES = {
   /** [Story 9-0-2] Emitted when Prisma JSON field validation fails (data corruption) */
   DATA_CORRUPTION_DETECTED: 'system.data-corruption.detected',
 
+  /** [D3] Emitted when DB position is CLOSED but riskManager update fails */
+  RISK_STATE_DIVERGENCE: 'system.health.risk-state-divergence',
+
   // [Story 5.5] Reconciliation Events
   /** Emitted when startup reconciliation completes */
   RECONCILIATION_COMPLETE: 'system.reconciliation.complete',

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- vitest expect.any() returns any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import {
@@ -151,9 +152,13 @@ describe('ExitMonitorService — partial fills', () => {
 
       await service.evaluatePositions();
 
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      expect(
+        positionRepository.updateStatusWithAccumulatedPnl,
+      ).toHaveBeenCalledWith(
         asPositionId('pos-1'),
         'EXIT_PARTIAL',
+        expect.any(Decimal),
+        expect.any(Decimal),
       );
     });
 
@@ -249,14 +254,12 @@ describe('ExitMonitorService — partial fills', () => {
         EVENT_NAMES.SINGLE_LEG_EXPOSURE,
         expect.objectContaining({
           positionId: asPositionId('pos-1'),
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           filledLeg: expect.objectContaining({
             price: expect.any(Number) as number,
             size: expect.any(Number) as number,
             fillPrice: 0.66,
             fillSize: 300,
           }),
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           failedLeg: expect.objectContaining({
             reason: 'Partial exit — remainder contracts unexited',
             reasonCode: 2008,
@@ -299,9 +302,9 @@ describe('ExitMonitorService — partial fills', () => {
 
       await service.evaluatePositions();
 
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
         asPositionId('pos-1'),
-        'CLOSED',
+        expect.any(Decimal),
       );
       expect(riskManager.closePosition).toHaveBeenCalled();
     });
@@ -349,9 +352,13 @@ describe('ExitMonitorService — partial fills', () => {
 
       await service.evaluatePositions();
 
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      expect(
+        positionRepository.updateStatusWithAccumulatedPnl,
+      ).toHaveBeenCalledWith(
         asPositionId('pos-1'),
         'EXIT_PARTIAL',
+        expect.any(Decimal),
+        expect.any(Decimal),
       );
       expect(riskManager.releasePartialCapital).toHaveBeenCalled();
     });

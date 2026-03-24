@@ -104,7 +104,7 @@ export class DailySummaryService {
         this.orderRepository.countByDateRange(start, end, false),
         this.positionRepository.countByStatus('OPEN', false),
         this.positionRepository.countClosedByDateRange(start, end, false),
-        this.positionRepository.sumClosedEdgeByDateRange(start, end, false),
+        this.positionRepository.sumClosedPnlByDateRange(start, end, false),
       ]);
 
     const uptimeSeconds = Math.floor(process.uptime());

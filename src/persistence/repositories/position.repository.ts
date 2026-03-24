@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, Platform } from '@prisma/client';
+import Decimal from 'decimal.js';
 import { PrismaService } from '../../common/prisma.service';
 import type { PositionId, PairId } from '../../common/types/branded.type';
 import { withModeFilter } from './mode-filter.helper';
+import {
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from '../../common/errors/system-health-error';
 
 @Injectable()
 export class PositionRepository {
@@ -61,6 +66,51 @@ export class PositionRepository {
     return this.prisma.openPosition.update({
       where: { positionId },
       data: { status },
+    });
+  }
+
+  /**
+   * Transitions a position to CLOSED with realizedPnl persistence.
+   * Guards against NaN/Infinity — throws SystemHealthError(4009) if realizedPnl is not finite.
+   */
+  async closePosition(positionId: PositionId | string, realizedPnl: Decimal) {
+    if (!realizedPnl.isFinite()) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_PNL_COMPUTATION,
+        `Computed realizedPnl is not finite: ${realizedPnl.toString()}`,
+        'critical',
+        'PositionRepository',
+      );
+    }
+    return this.prisma.openPosition.update({
+      where: { positionId },
+      data: { status: 'CLOSED', realizedPnl: realizedPnl.toDecimalPlaces(8) },
+    });
+  }
+
+  /**
+   * Updates status and accumulates realizedPnl (existingPnl + pnlDelta).
+   * Used during partial exits to incrementally persist P&L.
+   * Guards against NaN/Infinity — throws SystemHealthError(4009) if pnlDelta is not finite.
+   */
+  async updateStatusWithAccumulatedPnl(
+    positionId: PositionId | string,
+    status: Prisma.OpenPositionUpdateInput['status'],
+    pnlDelta: Decimal,
+    existingPnl: Decimal,
+  ) {
+    if (!pnlDelta.isFinite()) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.INVALID_PNL_COMPUTATION,
+        `Computed pnlDelta is not finite: ${pnlDelta.toString()}`,
+        'critical',
+        'PositionRepository',
+      );
+    }
+    const accumulated = existingPnl.plus(pnlDelta).toDecimalPlaces(8);
+    return this.prisma.openPosition.update({
+      where: { positionId },
+      data: { status, realizedPnl: accumulated },
     });
   }
 
@@ -189,26 +239,24 @@ export class PositionRepository {
   }
 
   /**
-   * Sums expectedEdge for positions closed in date range, mode-scoped.
-   * NOTE: This is a proxy for realized P&L — OpenPosition has no dedicated realizedPnl
-   * Decimal column. The reconciliationContext JSON may contain actual P&L but extracting
-   * from JSON aggregates is unreliable. True realized P&L tracking requires a schema
-   * migration (deferred to Phase 1).
+   * Sums realized P&L for positions closed in date range, mode-scoped.
+   * Uses COALESCE(realized_pnl, expected_edge) to handle historic positions
+   * closed before realizedPnl was implemented.
    */
-  async sumClosedEdgeByDateRange(
+  async sumClosedPnlByDateRange(
     startDate: Date,
     endDate: Date,
     isPaper: boolean,
   ): Promise<string> {
-    const result = await this.prisma.openPosition.aggregate({
-      where: {
-        status: 'CLOSED',
-        updatedAt: { gte: startDate, lte: endDate },
-        ...withModeFilter(isPaper),
-      },
-      _sum: { expectedEdge: true },
-    });
-    return result._sum.expectedEdge?.toString() ?? '0';
+    const result = await this.prisma.$queryRaw<[{ total: string | null }]>`
+      SELECT COALESCE(SUM(COALESCE(realized_pnl, expected_edge)), 0)::text AS total
+      FROM open_positions
+      WHERE status = 'CLOSED'
+        AND updated_at >= ${startDate}
+        AND updated_at <= ${endDate}
+        AND is_paper = ${isPaper}
+    `; // -- MODE-FILTERED
+    return result[0]?.total ?? '0';
   }
 
   /**

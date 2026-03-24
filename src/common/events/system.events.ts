@@ -3,6 +3,22 @@ import { BaseEvent } from './base.event';
 import type { PairId, PositionId } from '../types/branded.type';
 
 /**
+ * Emitted when DB position update succeeds but riskManager state update fails.
+ * Indicates divergence between DB and in-memory risk state — reconciliation required.
+ */
+export class RiskStateDivergenceEvent extends BaseEvent {
+  constructor(
+    public readonly positionId: PositionId,
+    public readonly pairId: PairId,
+    public readonly operation: 'close' | 'partial_release',
+    public readonly error: string,
+    correlationId?: string,
+  ) {
+    super(correlationId);
+  }
+}
+
+/**
  * Emitted when trading is halted for any reason (time drift, risk limits, etc.)
  */
 export class TradingHaltedEvent extends BaseEvent {

@@ -146,10 +146,10 @@ describe('ExitMonitorService — core', () => {
       expect(kalshiConnector.submitOrder).toHaveBeenCalled();
       expect(polymarketConnector.submitOrder).toHaveBeenCalled();
 
-      // Position should be marked CLOSED
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      // Position should be marked CLOSED with realizedPnl via repository
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
         asPositionId('pos-1'),
-        'CLOSED',
+        expect.any(Decimal),
       );
 
       // Risk manager should release budget

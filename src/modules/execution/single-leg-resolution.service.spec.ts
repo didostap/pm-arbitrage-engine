@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- vitest expect.any() returns any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -91,6 +90,7 @@ describe('SingleLegResolutionService', () => {
       create: vi.fn(),
       updateStatus: vi.fn(),
       updateWithOrder: vi.fn(),
+      closePosition: vi.fn().mockResolvedValue({}),
     };
 
     orderRepository = {
@@ -401,10 +401,10 @@ describe('SingleLegResolutionService', () => {
 
       // Position should be updated to CLOSED with realizedPnl
 
-      expect(prisma.openPosition.update).toHaveBeenCalledWith({
-        where: { positionId: asPositionId('pos-1') },
-        data: { status: 'CLOSED', realizedPnl: expect.any(Decimal) },
-      });
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
+        asPositionId('pos-1'),
+        expect.any(Decimal),
+      );
 
       // Risk manager should be called to close position
       expect(riskManager.closePosition).toHaveBeenCalled();
@@ -636,7 +636,7 @@ describe('SingleLegResolutionService', () => {
   });
 
   describe('realizedPnl persistence', () => {
-    it('should persist realizedPnl to DB via prisma.openPosition.update on closeLeg', async () => {
+    it('should persist realizedPnl to DB via positionRepository.closePosition on closeLeg', async () => {
       const position = createMockPosition();
       positionRepository.findByIdWithPair?.mockResolvedValue(position);
       orderRepository.findById?.mockResolvedValue(createMockOrder());
@@ -664,18 +664,15 @@ describe('SingleLegResolutionService', () => {
       expect(result.success).toBe(true);
       expect(result.realizedPnl).toBeDefined();
 
-      expect(prisma.openPosition.update).toHaveBeenCalledWith({
-        where: { positionId: asPositionId('pos-1') },
-        data: {
-          status: 'CLOSED',
-          realizedPnl: expect.any(Decimal),
-        },
-      });
-      // Verify decimal precision
-      const callArgs = prisma.openPosition.update.mock.calls[0]![0] as {
-        data: { realizedPnl: Decimal };
-      };
-      expect(callArgs.data.realizedPnl.decimalPlaces()).toBeLessThanOrEqual(8);
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
+        asPositionId('pos-1'),
+        expect.any(Decimal),
+      );
+      // Verify realizedPnl is a valid finite Decimal
+      const callArgs = (
+        positionRepository.closePosition as ReturnType<typeof vi.fn>
+      ).mock.calls[0] as [string, Decimal];
+      expect(callArgs[1].isFinite()).toBe(true);
     });
   });
 });

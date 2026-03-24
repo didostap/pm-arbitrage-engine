@@ -201,7 +201,7 @@ export class TradeExportController {
       for (const q of quarters) {
         // Tax reports cover live trades only (paper trades are not taxable events)
         const kalshiEdge =
-          await this.positionRepository.sumClosedEdgeByDateRange(
+          await this.positionRepository.sumClosedPnlByDateRange(
             q.start,
             q.end,
             false,

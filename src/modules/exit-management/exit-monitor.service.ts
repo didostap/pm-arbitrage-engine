@@ -32,6 +32,7 @@ import {
   ShadowComparisonEvent,
 } from '../../common/events/execution.events';
 import { PlatformDataFallbackEvent } from '../../common/events/platform.events';
+import { RiskStateDivergenceEvent } from '../../common/events/system.events';
 import { EXECUTION_ERROR_CODES } from '../../common/errors/execution-error';
 import {
   PlatformId,
@@ -421,16 +422,44 @@ export class ExitMonitorService implements OnModuleInit {
             'EXIT_PARTIAL position has zero residual on both legs — transitioning to CLOSED',
           data: { positionId: position.positionId },
         });
-        await this.positionRepository.updateStatus(
+        const existingPnl = new Decimal(
+          position.realizedPnl?.toString() ?? '0',
+        );
+        await this.positionRepository.closePosition(
           position.positionId,
-          'CLOSED',
+          existingPnl,
         );
-        await this.riskManager.closePosition(
-          new Decimal(0),
-          new Decimal(0),
-          asPairId(position.pairId),
-          isPaper,
-        );
+        try {
+          await this.riskManager.closePosition(
+            new Decimal(0),
+            new Decimal(0),
+            asPairId(position.pairId),
+            isPaper,
+          );
+        } catch (riskError) {
+          this.logger.error({
+            message:
+              'CRITICAL: Position CLOSED in DB but risk state update failed — divergence detected',
+            data: {
+              positionId: position.positionId,
+              error:
+                riskError instanceof Error
+                  ? riskError.message
+                  : String(riskError),
+            },
+          });
+          this.eventEmitter.emit(
+            EVENT_NAMES.RISK_STATE_DIVERGENCE,
+            new RiskStateDivergenceEvent(
+              asPositionId(position.positionId),
+              asPairId(position.pairId),
+              'close',
+              riskError instanceof Error
+                ? riskError.message
+                : String(riskError),
+            ),
+          );
+        }
         return;
       }
 
@@ -1129,15 +1158,42 @@ export class ExitMonitorService implements OnModuleInit {
     );
 
     if (isFullExit) {
-      // Full exit → CLOSED
-      await this.positionRepository.updateStatus(position.positionId, 'CLOSED');
-      const capitalReturned = exitedEntryCapital.plus(realizedPnl);
-      await this.riskManager.closePosition(
-        capitalReturned,
-        realizedPnl,
-        asPairId(position.pairId),
-        isPaper,
+      // Full exit → CLOSED with realizedPnl (add to any accumulated partial PnL)
+      const existingPnl = new Decimal(position.realizedPnl?.toString() ?? '0');
+      await this.positionRepository.closePosition(
+        position.positionId,
+        existingPnl.plus(realizedPnl),
       );
+      const capitalReturned = exitedEntryCapital.plus(realizedPnl);
+      try {
+        await this.riskManager.closePosition(
+          capitalReturned,
+          realizedPnl,
+          asPairId(position.pairId),
+          isPaper,
+        );
+      } catch (riskError) {
+        this.logger.error({
+          message:
+            'CRITICAL: Position CLOSED in DB but risk state update failed — divergence detected',
+          data: {
+            positionId: position.positionId,
+            error:
+              riskError instanceof Error
+                ? riskError.message
+                : String(riskError),
+          },
+        });
+        this.eventEmitter.emit(
+          EVENT_NAMES.RISK_STATE_DIVERGENCE,
+          new RiskStateDivergenceEvent(
+            asPositionId(position.positionId),
+            asPairId(position.pairId),
+            'close',
+            riskError instanceof Error ? riskError.message : String(riskError),
+          ),
+        );
+      }
 
       this.eventEmitter.emit(
         EVENT_NAMES.EXIT_TRIGGERED,
@@ -1169,17 +1225,43 @@ export class ExitMonitorService implements OnModuleInit {
         },
       });
     } else {
-      // Partial exit → EXIT_PARTIAL with proportional capital release
-      await this.positionRepository.updateStatus(
+      // Partial exit → EXIT_PARTIAL with accumulated PnL persistence
+      const existingPnl = new Decimal(position.realizedPnl?.toString() ?? '0');
+      await this.positionRepository.updateStatusWithAccumulatedPnl(
         position.positionId,
         'EXIT_PARTIAL',
-      );
-      await this.riskManager.releasePartialCapital(
-        exitedEntryCapital.plus(realizedPnl),
         realizedPnl,
-        asPairId(position.pairId),
-        isPaper,
+        existingPnl,
       );
+      try {
+        await this.riskManager.releasePartialCapital(
+          exitedEntryCapital.plus(realizedPnl),
+          realizedPnl,
+          asPairId(position.pairId),
+          isPaper,
+        );
+      } catch (riskError) {
+        this.logger.error({
+          message:
+            'CRITICAL: Position EXIT_PARTIAL in DB but risk state update failed — divergence detected',
+          data: {
+            positionId: position.positionId,
+            error:
+              riskError instanceof Error
+                ? riskError.message
+                : String(riskError),
+          },
+        });
+        this.eventEmitter.emit(
+          EVENT_NAMES.RISK_STATE_DIVERGENCE,
+          new RiskStateDivergenceEvent(
+            asPositionId(position.positionId),
+            asPairId(position.pairId),
+            'partial_release',
+            riskError instanceof Error ? riskError.message : String(riskError),
+          ),
+        );
+      }
 
       // Overloaded: partial exit remainder, not single-leg failure
       const primaryExitFillSize = new Decimal(primaryResult.filledQuantity);

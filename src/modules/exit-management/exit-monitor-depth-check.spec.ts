@@ -196,10 +196,14 @@ describe('ExitMonitorService — depth check', () => {
         expect.objectContaining({ quantity: 80 }),
       );
 
-      // 80 < 200 entry → EXIT_PARTIAL
-      expect(positionRepository.updateStatus).toHaveBeenCalledWith(
+      // 80 < 200 entry → EXIT_PARTIAL with accumulated PnL
+      expect(
+        positionRepository.updateStatusWithAccumulatedPnl,
+      ).toHaveBeenCalledWith(
         asPositionId('pos-1'),
         'EXIT_PARTIAL',
+        expect.any(Decimal),
+        expect.any(Decimal),
       );
     });
 

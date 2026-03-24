@@ -32,7 +32,7 @@ describe('DailySummaryService', () => {
   let mockPositionRepo: {
     countByStatus: ReturnType<typeof vi.fn>;
     countClosedByDateRange: ReturnType<typeof vi.fn>;
-    sumClosedEdgeByDateRange: ReturnType<typeof vi.fn>;
+    sumClosedPnlByDateRange: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
@@ -70,7 +70,7 @@ describe('DailySummaryService', () => {
     mockPositionRepo = {
       countByStatus: vi.fn().mockResolvedValue(2),
       countClosedByDateRange: vi.fn().mockResolvedValue(3),
-      sumClosedEdgeByDateRange: vi.fn().mockResolvedValue('15.50'),
+      sumClosedPnlByDateRange: vi.fn().mockResolvedValue('15.50'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -97,7 +97,7 @@ describe('DailySummaryService', () => {
         false,
       );
       expect(mockPositionRepo.countClosedByDateRange).toHaveBeenCalled();
-      expect(mockPositionRepo.sumClosedEdgeByDateRange).toHaveBeenCalled();
+      expect(mockPositionRepo.sumClosedPnlByDateRange).toHaveBeenCalled();
     });
 
     it('should write summary CSV row to daily-summaries.csv', async () => {
@@ -140,7 +140,7 @@ describe('DailySummaryService', () => {
       mockOrderRepo.countByDateRange.mockResolvedValue(0);
       mockPositionRepo.countByStatus.mockResolvedValue(0);
       mockPositionRepo.countClosedByDateRange.mockResolvedValue(0);
-      mockPositionRepo.sumClosedEdgeByDateRange.mockResolvedValue('0');
+      mockPositionRepo.sumClosedPnlByDateRange.mockResolvedValue('0');
       mockEventConsumer.getMetrics.mockReturnValue({
         totalEventsProcessed: 0,
         eventCounts: {},

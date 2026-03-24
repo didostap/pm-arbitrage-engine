@@ -71,7 +71,7 @@ The codebase has **24 paper/live boundary points** across **9 architectural laye
 | 18 | `OrderRepository` 2 query methods | `src/persistence/repositories/order.repository.ts` | `isPaper` parameter — required (no default) with `withModeFilter` convention | (a) 2 tests |
 | 21 | `PositionRepository.countByStatus()` | `src/persistence/repositories/position.repository.ts` | `isPaper` parameter — required (no default) with `withModeFilter` convention | (a) compiler-enforced |
 | 22 | `PositionRepository.countClosedByDateRange()` | `src/persistence/repositories/position.repository.ts` | `isPaper` parameter — required (no default) with `withModeFilter` convention | (a) compiler-enforced |
-| 23 | `PositionRepository.sumClosedEdgeByDateRange()` | `src/persistence/repositories/position.repository.ts` | `isPaper` parameter — required (no default) with `withModeFilter` convention | (a) compiler-enforced |
+| 23 | `PositionRepository.sumClosedPnlByDateRange()` | `src/persistence/repositories/position.repository.ts` | `isPaper` parameter — required (no default), raw SQL with `is_paper = ${isPaper}` | (a) compiler-enforced |
 | 24 | `OrderRepository.countByDateRange()` | `src/persistence/repositories/order.repository.ts` | `isPaper` parameter — required (no default) with `withModeFilter` convention | (a) compiler-enforced |
 
 ### Layer 9: Reconciliation (dual-mode recalculation)

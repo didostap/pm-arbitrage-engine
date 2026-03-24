@@ -89,6 +89,8 @@ export async function createExitMonitorTestModule(): Promise<ExitMonitorTestCont
     findByStatusWithOrders: vi.fn().mockResolvedValue([]),
     findByIdWithOrders: vi.fn().mockResolvedValue(createMockPosition()),
     updateStatus: vi.fn().mockResolvedValue({}),
+    closePosition: vi.fn().mockResolvedValue({}),
+    updateStatusWithAccumulatedPnl: vi.fn().mockResolvedValue({}),
   };
 
   const orderRepository: ExitMonitorTestContext['orderRepository'] = {

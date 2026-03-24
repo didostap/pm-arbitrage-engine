@@ -34,6 +34,8 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   NOT_FOUND: 4007,
   /** Match already approved — conflict */
   MATCH_ALREADY_APPROVED: 4008,
+  /** Computed realizedPnl is NaN or Infinity — critical */
+  INVALID_PNL_COMPUTATION: 4009,
   /** Prisma JSON field data corruption detected — critical */
   DATA_CORRUPTION_DETECTED: 4500,
 } as const;

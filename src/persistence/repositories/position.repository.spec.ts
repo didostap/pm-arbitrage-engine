@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import Decimal from 'decimal.js';
 import { PositionRepository } from './position.repository';
 import { PrismaService } from '../../common/prisma.service';
 import { asPositionId } from '../../common/types/branded.type';
+import { SystemHealthError } from '../../common/errors/system-health-error';
 
 describe('PositionRepository', () => {
   let repo: PositionRepository;
@@ -91,6 +93,117 @@ describe('PositionRepository', () => {
       data: { status: 'CLOSED' },
     });
     expect(result.status).toBe('CLOSED');
+  });
+
+  describe('closePosition', () => {
+    it('should update status to CLOSED with realizedPnl rounded to 8 decimal places', async () => {
+      mockPrisma.openPosition.update.mockResolvedValue({
+        positionId: 'pos-1',
+        status: 'CLOSED',
+        realizedPnl: new Decimal('5.06'),
+      });
+
+      await repo.closePosition(
+        asPositionId('pos-1'),
+        new Decimal('5.06123456789'),
+      );
+
+      expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: 'pos-1' },
+        data: { status: 'CLOSED', realizedPnl: new Decimal('5.06123457') },
+      });
+    });
+
+    it('should throw SystemHealthError when realizedPnl is NaN', async () => {
+      await expect(
+        repo.closePosition(asPositionId('pos-1'), new Decimal(NaN)),
+      ).rejects.toThrow(SystemHealthError);
+    });
+
+    it('should throw SystemHealthError when realizedPnl is Infinity', async () => {
+      await expect(
+        repo.closePosition(asPositionId('pos-1'), new Decimal(Infinity)),
+      ).rejects.toThrow(SystemHealthError);
+    });
+
+    it('should accept zero realizedPnl', async () => {
+      mockPrisma.openPosition.update.mockResolvedValue({
+        positionId: 'pos-1',
+        status: 'CLOSED',
+        realizedPnl: new Decimal('0'),
+      });
+
+      await repo.closePosition(asPositionId('pos-1'), new Decimal(0));
+
+      expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: 'pos-1' },
+        data: { status: 'CLOSED', realizedPnl: new Decimal('0') },
+      });
+    });
+
+    it('should accept negative realizedPnl', async () => {
+      mockPrisma.openPosition.update.mockResolvedValue({
+        positionId: 'pos-1',
+        status: 'CLOSED',
+        realizedPnl: new Decimal('-1.32'),
+      });
+
+      await repo.closePosition(asPositionId('pos-1'), new Decimal('-1.32'));
+
+      expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: 'pos-1' },
+        data: { status: 'CLOSED', realizedPnl: new Decimal('-1.32') },
+      });
+    });
+  });
+
+  describe('updateStatusWithAccumulatedPnl', () => {
+    it('should accumulate pnlDelta onto existingPnl', async () => {
+      mockPrisma.openPosition.update.mockResolvedValue({
+        positionId: 'pos-1',
+        status: 'EXIT_PARTIAL',
+        realizedPnl: new Decimal('8.06'),
+      });
+
+      await repo.updateStatusWithAccumulatedPnl(
+        asPositionId('pos-1'),
+        'EXIT_PARTIAL',
+        new Decimal('3.00'),
+        new Decimal('5.06'),
+      );
+
+      expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: 'pos-1' },
+        data: { status: 'EXIT_PARTIAL', realizedPnl: new Decimal('8.06') },
+      });
+    });
+
+    it('should handle zero existingPnl', async () => {
+      mockPrisma.openPosition.update.mockResolvedValue({});
+
+      await repo.updateStatusWithAccumulatedPnl(
+        asPositionId('pos-1'),
+        'EXIT_PARTIAL',
+        new Decimal('5.06'),
+        new Decimal(0),
+      );
+
+      expect(mockPrisma.openPosition.update).toHaveBeenCalledWith({
+        where: { positionId: 'pos-1' },
+        data: { status: 'EXIT_PARTIAL', realizedPnl: new Decimal('5.06') },
+      });
+    });
+
+    it('should throw SystemHealthError when pnlDelta is NaN', async () => {
+      await expect(
+        repo.updateStatusWithAccumulatedPnl(
+          asPositionId('pos-1'),
+          'EXIT_PARTIAL',
+          new Decimal(NaN),
+          new Decimal(0),
+        ),
+      ).rejects.toThrow(SystemHealthError);
+    });
   });
 
   describe('isPaper filtering', () => {

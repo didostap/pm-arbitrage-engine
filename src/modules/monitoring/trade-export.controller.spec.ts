@@ -39,7 +39,7 @@ describe('TradeExportController', () => {
     findByDateRange: ReturnType<typeof vi.fn>;
   };
   let mockPositionRepo: {
-    sumClosedEdgeByDateRange: ReturnType<typeof vi.fn>;
+    sumClosedPnlByDateRange: ReturnType<typeof vi.fn>;
     countOrdersByPlatformAndDateRange: ReturnType<typeof vi.fn>;
     findByOrderIds: ReturnType<typeof vi.fn>;
   };
@@ -51,7 +51,7 @@ describe('TradeExportController', () => {
       findByDateRange: vi.fn().mockResolvedValue([makeMockOrder()]),
     };
     mockPositionRepo = {
-      sumClosedEdgeByDateRange: vi.fn().mockResolvedValue('0'),
+      sumClosedPnlByDateRange: vi.fn().mockResolvedValue('0'),
       countOrdersByPlatformAndDateRange: vi.fn().mockResolvedValue(0),
       findByOrderIds: vi.fn().mockResolvedValue([]),
     };

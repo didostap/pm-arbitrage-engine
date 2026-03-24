@@ -21,6 +21,7 @@ function createMockPositionRepository() {
     findManyWithFilters: vi.fn().mockResolvedValue({ data: [], count: 0 }),
     findActivePositions: vi.fn().mockResolvedValue([]),
     findByStatus: vi.fn().mockResolvedValue([]),
+    sumClosedPnlByDateRange: vi.fn().mockResolvedValue('0'),
   };
 }
 

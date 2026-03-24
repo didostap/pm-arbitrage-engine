@@ -162,7 +162,12 @@ describe('ExitMonitorService — data source', () => {
 
       await service.evaluatePositions();
 
+      // 1 call: recalculated edge update (CLOSED transition now goes through positionRepository.closePosition)
       expect(prisma.openPosition.update).toHaveBeenCalledTimes(1);
+      expect(positionRepository.closePosition).toHaveBeenCalledWith(
+        asPositionId('pos-1'),
+        expect.any(Decimal),
+      );
     });
   });
 

@@ -2,7 +2,6 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import { FinancialMath } from '../../common/utils';
-import { PrismaService } from '../../common/prisma.service';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
 import {
@@ -17,7 +16,10 @@ import {
   SingleLegResolvedEvent,
   OrderFilledEvent,
 } from '../../common/events/execution.events';
-import { DataCorruptionDetectedEvent } from '../../common/events/system.events';
+import {
+  DataCorruptionDetectedEvent,
+  RiskStateDivergenceEvent,
+} from '../../common/events/system.events';
 import {
   ExecutionError,
   EXECUTION_ERROR_CODES,
@@ -71,7 +73,6 @@ export class SingleLegResolutionService {
     @Inject(RISK_MANAGER_TOKEN)
     private readonly riskManager: IRiskManager,
     private readonly eventEmitter: EventEmitter2,
-    private readonly prisma: PrismaService,
   ) {}
 
   async retryLeg(
@@ -433,19 +434,37 @@ export class SingleLegResolutionService {
     const realizedPnl = rawPnl.minus(closeFee);
 
     // Update position status to CLOSED with realizedPnl
-    await this.prisma.openPosition.update({
-      where: { positionId },
-      data: { status: 'CLOSED', realizedPnl: realizedPnl.toDecimalPlaces(8) },
-    });
+    await this.positionRepository.closePosition(positionId, realizedPnl);
 
     // Release budget via risk manager
     const entryCapital = entryFillPrice.mul(qty);
     const capitalReturned = entryCapital.plus(realizedPnl);
-    await this.riskManager.closePosition(
-      capitalReturned,
-      realizedPnl,
-      asPairId(position.pairId),
-    );
+    try {
+      await this.riskManager.closePosition(
+        capitalReturned,
+        realizedPnl,
+        asPairId(position.pairId),
+      );
+    } catch (riskError) {
+      this.logger.error({
+        message:
+          'CRITICAL: Position CLOSED in DB but risk state update failed — divergence detected',
+        data: {
+          positionId,
+          error:
+            riskError instanceof Error ? riskError.message : String(riskError),
+        },
+      });
+      this.eventEmitter.emit(
+        EVENT_NAMES.RISK_STATE_DIVERGENCE,
+        new RiskStateDivergenceEvent(
+          asPositionId(positionId),
+          asPairId(position.pairId),
+          'close',
+          riskError instanceof Error ? riskError.message : String(riskError),
+        ),
+      );
+    }
 
     this.eventEmitter.emit(
       EVENT_NAMES.SINGLE_LEG_RESOLVED,

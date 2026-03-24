@@ -37,6 +37,7 @@ function createMockPrisma() {
 function createMockPositionRepository() {
   return {
     findManyWithFilters: vi.fn(),
+    sumClosedPnlByDateRange: vi.fn().mockResolvedValue('0'),
   } as unknown as PositionRepository;
 }
 
@@ -165,10 +166,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(5)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: new Decimal('125.50') },
-      });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('125.5');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(100)
         .mockResolvedValueOnce(95);
@@ -193,8 +192,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -214,8 +213,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -232,8 +231,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -255,10 +254,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(5)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: new Decimal('10') },
-      });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('10');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(10)
         .mockResolvedValueOnce(10);
@@ -293,10 +290,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(3)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: null },
-      });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -347,8 +342,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -377,10 +372,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(5)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: new Decimal('10') },
-      });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('10');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(10)
         .mockResolvedValueOnce(10);
@@ -408,10 +401,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        _sum: { expectedEdge: new Decimal('0.1') },
-      });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0.1');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(10)
         .mockResolvedValueOnce(10);
@@ -428,8 +419,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -453,8 +444,8 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
       (
-        prisma.openPosition.aggregate as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({ _sum: { expectedEdge: null } });
+        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
+      ).mockResolvedValue('0');
       (prisma.order.count as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
