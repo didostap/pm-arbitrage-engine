@@ -24,6 +24,10 @@ import {
 } from '../connectors/connector.constants';
 import type { IPlatformConnector } from '../common/interfaces/platform-connector.interface';
 import { asOpportunityId, asPairId } from '../common/types/branded.type';
+import {
+  PAIR_CONCENTRATION_FILTER_TOKEN,
+  type IPairConcentrationFilter,
+} from '../common/interfaces';
 
 /**
  * Main trading engine service that orchestrates the polling loop.
@@ -49,6 +53,8 @@ export class TradingEngineService {
     private readonly kalshiConnector: IPlatformConnector,
     @Inject(POLYMARKET_CONNECTOR_TOKEN)
     private readonly polymarketConnector: IPlatformConnector,
+    @Inject(PAIR_CONCENTRATION_FILTER_TOKEN)
+    private readonly concentrationFilter: IPairConcentrationFilter,
   ) {}
 
   /**
@@ -158,13 +164,34 @@ export class TradingEngineService {
           data: { stage: 'edge-calculation', durationMs: edgeCalculationMs },
         });
 
-        // STEP 3: Risk Pre-filter (cheap pre-screen before execution queue)
-        const riskStart = Date.now();
+        // STEP 2.5: Pair Concentration Filter (cooldown, concurrent, diversity)
+        // isPaper: OR logic is correct — a mixed-mode trade (one paper, one live leg)
+        // is treated as paper because the arbitrage cannot be fully realized on-chain.
         const isPaper =
           this.kalshiConnector.getHealth().mode === 'paper' ||
           this.polymarketConnector.getHealth().mode === 'paper';
+        const concentrationResult =
+          await this.concentrationFilter.filterOpportunities(
+            edgeResult.opportunities,
+            isPaper,
+          );
+        if (concentrationResult.filtered.length > 0) {
+          this.logger.log({
+            message: `Concentration filter applied: ${concentrationResult.passed.length} passed, ${concentrationResult.filtered.length} filtered`,
+            correlationId: getCorrelationId(),
+            data: {
+              stage: 'concentration-filter',
+              passed: concentrationResult.passed.length,
+              filtered: concentrationResult.filtered.length,
+              reasons: concentrationResult.filtered.map((f) => f.reason),
+            },
+          });
+        }
+
+        // STEP 3: Risk Pre-filter (cheap pre-screen before execution queue)
+        const riskStart = Date.now();
         const approvedOpportunities: RankedOpportunity[] = [];
-        for (const opportunity of edgeResult.opportunities) {
+        for (const opportunity of concentrationResult.passed) {
           const decision = await this.riskManager.validatePosition(
             opportunity,
             isPaper,

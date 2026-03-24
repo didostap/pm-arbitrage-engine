@@ -77,6 +77,10 @@ export const EVENT_NAMES = {
   /** [Epic 3] Emitted when opportunity is filtered out (below threshold or insufficient liquidity) */
   OPPORTUNITY_FILTERED: 'detection.opportunity.filtered',
 
+  /** [Story 10-7-6] Emitted when opportunity is filtered by pair concentration controls */
+  OPPORTUNITY_CONCENTRATION_FILTERED:
+    'detection.opportunity.concentration_filtered',
+
   // [Epic 5] Execution Events
   /** [Epic 5] Emitted when order is filled on a platform */
   ORDER_FILLED: 'execution.order.filled',

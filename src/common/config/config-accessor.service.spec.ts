@@ -83,6 +83,9 @@ function buildMockConfig(
     exitDepthSlippageTolerance: 0.02,
     exitMaxChunkSize: 0,
     exitProfitCaptureRatio: 0.5,
+    pairCooldownMinutes: 30,
+    pairMaxConcurrentPositions: 2,
+    pairDiversityThreshold: 5,
     ...overrides,
   };
 }

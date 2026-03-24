@@ -102,6 +102,9 @@ describe('seedConfig()', () => {
     EXIT_RISK_RANK_CUTOFF: '1',
     EXIT_MIN_DEPTH: '5',
     EXIT_PROFIT_CAPTURE_RATIO: '0.5',
+    PAIR_COOLDOWN_MINUTES: '30',
+    PAIR_MAX_CONCURRENT_POSITIONS: '2',
+    PAIR_DIVERSITY_THRESHOLD: '5',
   };
 
   beforeEach(() => {
@@ -343,6 +346,7 @@ describe('seedConfig()', () => {
       exitTimeDecayHorizonH: 168, exitTimeDecaySteepness: 2.0,
       exitTimeDecayTrigger: 0.8, exitRiskBudgetPct: 85, exitRiskRankCutoff: 1,
       exitMinDepth: 5, exitDepthSlippageTolerance: 0.02, exitMaxChunkSize: 0, exitProfitCaptureRatio: 0.5,
+      pairCooldownMinutes: 30, pairMaxConcurrentPositions: 2, pairDiversityThreshold: 5,
     };
     mockPrisma.engineConfig.upsert.mockResolvedValueOnce(createdRow);
 

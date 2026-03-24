@@ -116,6 +116,11 @@ export interface EffectiveConfig {
   polymarketOrderPollTimeoutMs: number;
   polymarketOrderPollIntervalMs: number;
 
+  // --- Pair Concentration Limits ---
+  pairCooldownMinutes: number;
+  pairMaxConcurrentPositions: number;
+  pairDiversityThreshold: number;
+
   // --- Exit Mode ---
   exitMode: string;
   exitEdgeEvapMultiplier: number;

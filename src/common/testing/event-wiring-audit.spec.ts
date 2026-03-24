@@ -49,6 +49,7 @@ import {
   POLYMARKET_CONNECTOR_TOKEN,
 } from '../../connectors/connector.constants';
 import { EXECUTION_QUEUE_TOKEN } from '../../modules/execution/execution.constants';
+import { PAIR_CONCENTRATION_FILTER_TOKEN } from '../interfaces';
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -418,6 +419,7 @@ describe('Event Wiring Audit — TradingEngineService', () => {
           mock(EXECUTION_QUEUE_TOKEN),
           mock(KALSHI_CONNECTOR_TOKEN),
           mock(POLYMARKET_CONNECTOR_TOKEN),
+          mock(PAIR_CONCENTRATION_FILTER_TOKEN),
         ],
       }),
       [],
@@ -697,6 +699,7 @@ describe('Event Wiring Audit — Dead Handler Detection (expectNoDeadHandlers on
         mock(EXECUTION_QUEUE_TOKEN),
         mock(KALSHI_CONNECTOR_TOKEN),
         mock(POLYMARKET_CONNECTOR_TOKEN),
+        mock(PAIR_CONCENTRATION_FILTER_TOKEN),
       ],
     },
     {

@@ -17,6 +17,7 @@ import {
 import { createMockPlatformConnector } from '../test/mock-factories';
 import { PlatformId } from '../common/types/platform.type';
 import { asMatchId } from '../common/types/branded.type';
+import { PAIR_CONCENTRATION_FILTER_TOKEN } from '../common/interfaces';
 
 describe('TradingEngineService', () => {
   let service: TradingEngineService;
@@ -67,6 +68,14 @@ describe('TradingEngineService', () => {
     processOpportunities: vi.fn().mockResolvedValue([]),
   };
 
+  const mockConcentrationFilter = {
+    filterOpportunities: vi
+      .fn()
+      .mockImplementation((opps: unknown[]) =>
+        Promise.resolve({ passed: opps, filtered: [] }),
+      ),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -102,6 +111,10 @@ describe('TradingEngineService', () => {
         {
           provide: POLYMARKET_CONNECTOR_TOKEN,
           useValue: createMockPlatformConnector(PlatformId.POLYMARKET),
+        },
+        {
+          provide: PAIR_CONCENTRATION_FILTER_TOKEN,
+          useValue: mockConcentrationFilter,
         },
       ],
     }).compile();
@@ -395,6 +408,10 @@ describe('TradingEngineService', () => {
           { provide: 'IRiskManager', useValue: mockRiskManager },
           { provide: EXECUTION_QUEUE_TOKEN, useValue: mockExecutionQueue },
           {
+            provide: PAIR_CONCENTRATION_FILTER_TOKEN,
+            useValue: mockConcentrationFilter,
+          },
+          {
             provide: KALSHI_CONNECTOR_TOKEN,
             useValue: createMockPlatformConnector(PlatformId.KALSHI, {
               getHealth: vi.fn().mockReturnValue({
@@ -464,6 +481,10 @@ describe('TradingEngineService', () => {
           { provide: 'IRiskManager', useValue: mockRiskManager },
           { provide: EXECUTION_QUEUE_TOKEN, useValue: mockExecutionQueue },
           {
+            provide: PAIR_CONCENTRATION_FILTER_TOKEN,
+            useValue: mockConcentrationFilter,
+          },
+          {
             provide: KALSHI_CONNECTOR_TOKEN,
             useValue: createMockPlatformConnector(PlatformId.KALSHI, {
               getHealth: vi.fn().mockReturnValue({
@@ -510,6 +531,142 @@ describe('TradingEngineService', () => {
       const cyclePromise = service.executeCycle();
       expect(service.isCycleInProgress()).toBe(true);
       await cyclePromise;
+    });
+  });
+
+  describe('concentration filter integration', () => {
+    const mockOpp = {
+      dislocation: {
+        pairConfig: {
+          polymarketContractId: 'poly-1',
+          kalshiContractId: 'kalshi-1',
+          matchId: asMatchId('match-uuid-1'),
+        },
+      },
+      netEdge: new FinancialDecimal(0.05),
+    };
+
+    it('should call concentration filter before validatePosition', async () => {
+      const callOrder: string[] = [];
+      mockConcentrationFilter.filterOpportunities.mockImplementation(
+        (opps: unknown[]) => {
+          callOrder.push('concentration-filter');
+          return Promise.resolve({ passed: opps, filtered: [] });
+        },
+      );
+      mockRiskManager.validatePosition.mockImplementation(() => {
+        callOrder.push('validatePosition');
+        return Promise.resolve({
+          approved: true,
+          reason: 'OK',
+          maxPositionSizeUsd: new FinancialDecimal(300),
+          currentOpenPairs: 0,
+        });
+      });
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpp],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+
+      await service.executeCycle();
+
+      expect(callOrder).toEqual(['concentration-filter', 'validatePosition']);
+    });
+
+    it('should NOT pass filtered opportunities to validatePosition', async () => {
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpp],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+      mockConcentrationFilter.filterOpportunities.mockResolvedValueOnce({
+        passed: [],
+        filtered: [{ opportunity: mockOpp, reason: 'pair_cooldown_active' }],
+      });
+
+      await service.executeCycle();
+
+      expect(mockRiskManager.validatePosition).not.toHaveBeenCalled();
+    });
+
+    it('should pass through passed opportunities to risk validation normally', async () => {
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpp],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+      mockConcentrationFilter.filterOpportunities.mockResolvedValueOnce({
+        passed: [mockOpp],
+        filtered: [],
+      });
+
+      await service.executeCycle();
+
+      expect(mockRiskManager.validatePosition).toHaveBeenCalledTimes(1);
+    });
+
+    it('should be backward-compatible when all opportunities pass', async () => {
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpp, mockOpp],
+        filtered: [],
+        summary: {
+          totalInput: 2,
+          totalFiltered: 0,
+          totalActionable: 2,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+      mockConcentrationFilter.filterOpportunities.mockResolvedValueOnce({
+        passed: [mockOpp, mockOpp],
+        filtered: [],
+      });
+
+      await service.executeCycle();
+
+      expect(mockRiskManager.validatePosition).toHaveBeenCalledTimes(2);
+    });
+
+    it('should result in zero executions when all filtered', async () => {
+      mockEdgeCalculator.processDislocations.mockReturnValueOnce({
+        opportunities: [mockOpp],
+        filtered: [],
+        summary: {
+          totalInput: 1,
+          totalFiltered: 0,
+          totalActionable: 1,
+          skippedErrors: 0,
+          processingDurationMs: 1,
+        },
+      });
+      mockConcentrationFilter.filterOpportunities.mockResolvedValueOnce({
+        passed: [],
+        filtered: [{ opportunity: mockOpp, reason: 'pair_cooldown_active' }],
+      });
+
+      await service.executeCycle();
+
+      expect(mockRiskManager.validatePosition).not.toHaveBeenCalled();
+      expect(mockExecutionQueue.processOpportunities).not.toHaveBeenCalled();
     });
   });
 });

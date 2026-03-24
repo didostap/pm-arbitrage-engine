@@ -187,6 +187,9 @@ describe('EngineConfigRepository', () => {
       exitRiskRankCutoff: 1,
       exitMinDepth: 5,
       exitProfitCaptureRatio: 0.5,
+      pairCooldownMinutes: 30,
+      pairMaxConcurrentPositions: 2,
+      pairDiversityThreshold: 5,
       // Timestamps
       createdAt: new Date('2026-03-14T10:00:00Z'),
       updatedAt: new Date('2026-03-14T10:00:00Z'),
@@ -266,6 +269,9 @@ describe('EngineConfigRepository', () => {
       exitRiskRankCutoff: 1,
       exitMinDepth: 5,
       exitProfitCaptureRatio: 0.5,
+      pairCooldownMinutes: 30,
+      pairMaxConcurrentPositions: 2,
+      pairDiversityThreshold: 5,
     };
 
     it('[P0] should return DB values when all columns are populated', async () => {

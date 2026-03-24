@@ -30,3 +30,9 @@ export {
 } from './contract-catalog-provider.interface.js';
 export type { IClusterClassifier } from './cluster-classifier.interface.js';
 export { CLUSTER_CLASSIFIER_TOKEN } from './cluster-classifier.interface.js';
+export type {
+  IPairConcentrationFilter,
+  ConcentrationFilterResult,
+  FilteredOpportunityEntry,
+} from './pair-concentration-filter.interface.js';
+export { PAIR_CONCENTRATION_FILTER_TOKEN } from './pair-concentration-filter.interface.js';

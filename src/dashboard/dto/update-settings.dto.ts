@@ -144,6 +144,22 @@ export class UpdateSettingsDto {
   @Matches(DECIMAL_REGEX)
   riskAggregateClusterLimitPct?: string;
 
+  // ── Pair Concentration Limits ───────────────────────────────────────
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  pairCooldownMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  pairMaxConcurrentPositions?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  pairDiversityThreshold?: number;
+
   // ── Telegram ────────────────────────────────────────────────────────
   @IsOptional()
   @IsString()

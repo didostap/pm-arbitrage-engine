@@ -109,6 +109,10 @@ const CATEGORY_B_FIELDS: string[] = [
   'exitDepthSlippageTolerance',
   'exitMaxChunkSize',
   'exitProfitCaptureRatio',
+  // Pair Concentration Limits
+  'pairCooldownMinutes',
+  'pairMaxConcurrentPositions',
+  'pairDiversityThreshold',
 ];
 
 /** Env var keys that correspond to Category B fields */
@@ -188,6 +192,9 @@ const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   exitDepthSlippageTolerance: 'EXIT_DEPTH_SLIPPAGE_TOLERANCE',
   exitMaxChunkSize: 'EXIT_MAX_CHUNK_SIZE',
   exitProfitCaptureRatio: 'EXIT_PROFIT_CAPTURE_RATIO',
+  pairCooldownMinutes: 'PAIR_COOLDOWN_MINUTES',
+  pairMaxConcurrentPositions: 'PAIR_MAX_CONCURRENT_POSITIONS',
+  pairDiversityThreshold: 'PAIR_DIVERSITY_THRESHOLD',
 };
 
 describe('CONFIG_DEFAULTS', () => {
@@ -199,7 +206,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(73);
+    expect(categoryBKeys.length).toBe(76);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {
@@ -398,6 +405,9 @@ describe('CONFIG_DEFAULTS', () => {
       'exitDepthSlippageTolerance',
       'exitMaxChunkSize',
       'exitProfitCaptureRatio',
+      'pairCooldownMinutes',
+      'pairMaxConcurrentPositions',
+      'pairDiversityThreshold',
     ];
     for (const key of effectiveConfigKeys) {
       expect(

@@ -96,6 +96,9 @@ function buildMockEffectiveConfig(
     exitRiskRankCutoff: 1,
     exitMinDepth: 5,
     exitProfitCaptureRatio: 0.5,
+    pairCooldownMinutes: 30,
+    pairMaxConcurrentPositions: 2,
+    pairDiversityThreshold: 5,
     ...overrides,
   };
 }
@@ -239,8 +242,8 @@ describe('SettingsService', () => {
         expect(setting).toHaveProperty('group');
       }
 
-      // 75 settings (76 CONFIG_DEFAULTS minus bankrollUsd)
-      expect(allSettings.length).toBe(75);
+      // 78 settings (79 CONFIG_DEFAULTS minus bankrollUsd)
+      expect(allSettings.length).toBe(78);
     });
 
     it('[P0] currentValue falls back to env default when DB column is NULL', async () => {

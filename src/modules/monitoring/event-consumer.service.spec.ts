@@ -153,6 +153,7 @@ describe('EventConsumerService', () => {
         EVENT_NAMES.PLATFORM_GAS_UPDATED,
         EVENT_NAMES.RESOLUTION_POLL_COMPLETED,
         EVENT_NAMES.CALIBRATION_COMPLETED,
+        EVENT_NAMES.OPPORTUNITY_CONCENTRATION_FILTERED,
       ];
 
       for (const eventName of infoEvents) {
@@ -1050,6 +1051,26 @@ describe('EventConsumerService', () => {
         unknown
       >;
       expect(result['error']).toBe('serialization_failed');
+    });
+  });
+
+  describe('concentration filtered event (AC #6)', () => {
+    it('should handle OPPORTUNITY_CONCENTRATION_FILTERED without error', () => {
+      const event = makeBaseEvent();
+      expect(() =>
+        service.handleEvent(
+          EVENT_NAMES.OPPORTUNITY_CONCENTRATION_FILTERED,
+          event,
+        ),
+      ).not.toThrow();
+    });
+
+    it('should classify concentration filtered as info severity', () => {
+      expect(
+        service.classifyEventSeverity(
+          EVENT_NAMES.OPPORTUNITY_CONCENTRATION_FILTERED,
+        ),
+      ).toBe('info');
     });
   });
 });

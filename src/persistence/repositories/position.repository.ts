@@ -282,6 +282,55 @@ export class PositionRepository {
    * Finds positions by their associated order IDs (kalshi or polymarket leg).
    * Returns minimal projection for building orderId→positionId lookup maps.
    */
+  /**
+   * Batch-fetch latest position creation date per pair, mode-scoped.
+   * Returns Map<pairId, Date> across ALL statuses (cooldown applies regardless of status).
+   */
+  async getLatestPositionDateByPairIds(
+    pairIds: string[],
+    isPaper: boolean,
+  ): Promise<Map<string, Date>> {
+    if (pairIds.length === 0) return new Map();
+    const rows = await this.prisma.$queryRaw<
+      { pair_id: string; latest: Date }[]
+    >`
+      SELECT pair_id, MAX(created_at) AS latest
+      FROM open_positions
+      WHERE pair_id IN (${Prisma.join(pairIds)})
+        AND is_paper = ${isPaper}
+      GROUP BY pair_id -- MODE-FILTERED
+    `;
+    const map = new Map<string, Date>();
+    for (const row of rows) {
+      map.set(row.pair_id, row.latest);
+    }
+    return map;
+  }
+
+  /**
+   * Batch-fetch active position counts per pair, mode-scoped.
+   * Returns Map<pairId, count> for active positions
+   * (OPEN, SINGLE_LEG_EXPOSED, EXIT_PARTIAL, RECONCILIATION_REQUIRED).
+   */
+  async getActivePositionCountsByPair(
+    isPaper: boolean,
+  ): Promise<Map<string, number>> {
+    const rows = await this.prisma.$queryRaw<
+      { pair_id: string; count: bigint }[]
+    >`
+      SELECT pair_id, COUNT(*) AS count
+      FROM open_positions
+      WHERE status IN ('OPEN', 'SINGLE_LEG_EXPOSED', 'EXIT_PARTIAL', 'RECONCILIATION_REQUIRED')
+        AND is_paper = ${isPaper}
+      GROUP BY pair_id -- MODE-FILTERED
+    `;
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      map.set(row.pair_id, Number(row.count));
+    }
+    return map;
+  }
+
   async findByOrderIds(orderIds: string[]) {
     if (orderIds.length === 0) return [];
     return this.prisma.openPosition.findMany({

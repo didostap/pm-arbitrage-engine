@@ -16,6 +16,7 @@ describe('PositionRepository', () => {
       count: vi.fn(),
       update: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -496,6 +497,99 @@ describe('PositionRepository', () => {
           orderBy: { isPaper: 'asc' },
         }),
       );
+    });
+  });
+
+  describe('getLatestPositionDateByPairIds', () => {
+    it('should return empty map when no pairIds provided', async () => {
+      const result = await repo.getLatestPositionDateByPairIds([], true);
+      expect(result.size).toBe(0);
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('should return map of pairId→Date for single pair', async () => {
+      const date = new Date('2026-03-24T10:00:00Z');
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { pair_id: 'pair-A', latest: date },
+      ]);
+      const result = await repo.getLatestPositionDateByPairIds(
+        ['pair-A'],
+        true,
+      );
+      expect(result.size).toBe(1);
+      expect(result.get('pair-A')).toEqual(date);
+    });
+
+    it('should return map of pairId→Date for multiple pairs', async () => {
+      const dateA = new Date('2026-03-24T10:00:00Z');
+      const dateB = new Date('2026-03-24T09:00:00Z');
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { pair_id: 'pair-A', latest: dateA },
+        { pair_id: 'pair-B', latest: dateB },
+      ]);
+      const result = await repo.getLatestPositionDateByPairIds(
+        ['pair-A', 'pair-B'],
+        false,
+      );
+      expect(result.size).toBe(2);
+      expect(result.get('pair-A')).toEqual(dateA);
+      expect(result.get('pair-B')).toEqual(dateB);
+    });
+
+    it('should return empty map when no matching positions exist', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      const result = await repo.getLatestPositionDateByPairIds(
+        ['pair-X'],
+        true,
+      );
+      expect(result.size).toBe(0);
+    });
+
+    it('should scope by isPaper (mode isolation)', async () => {
+      const date = new Date('2026-03-24T10:00:00Z');
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { pair_id: 'pair-A', latest: date },
+      ]);
+      await repo.getLatestPositionDateByPairIds(['pair-A'], false);
+      // Verify the raw query was called (mode filtering in SQL)
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('getActivePositionCountsByPair', () => {
+    it('should return empty map when no open positions exist', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      const result = await repo.getActivePositionCountsByPair(true);
+      expect(result.size).toBe(0);
+    });
+
+    it('should return map of pairId→count for open positions', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { pair_id: 'pair-A', count: BigInt(3) },
+        { pair_id: 'pair-B', count: BigInt(2) },
+      ]);
+      const result = await repo.getActivePositionCountsByPair(true);
+      expect(result.size).toBe(2);
+      expect(result.get('pair-A')).toBe(3);
+      expect(result.get('pair-B')).toBe(2);
+    });
+
+    it('should return single pair count', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { pair_id: 'pair-A', count: BigInt(1) },
+      ]);
+      const result = await repo.getActivePositionCountsByPair(false);
+      expect(result.size).toBe(1);
+      expect(result.get('pair-A')).toBe(1);
+    });
+
+    it('should scope by isPaper (mode isolation)', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      await repo.getActivePositionCountsByPair(false);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+      mockPrisma.$queryRaw.mockClear();
+      await repo.getActivePositionCountsByPair(true);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
   });
 });

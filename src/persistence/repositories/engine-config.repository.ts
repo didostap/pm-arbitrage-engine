@@ -169,6 +169,10 @@ function buildEffectiveConfig(
     polymarketOrderPollIntervalMs: resolve(
       'polymarketOrderPollIntervalMs',
     ) as number,
+    // Pair Concentration Limits
+    pairCooldownMinutes: resolve('pairCooldownMinutes') as number,
+    pairMaxConcurrentPositions: resolve('pairMaxConcurrentPositions') as number,
+    pairDiversityThreshold: resolve('pairDiversityThreshold') as number,
     // Exit Mode
     exitMode: resolve('exitMode') as string,
     exitEdgeEvapMultiplier: resolve('exitEdgeEvapMultiplier') as number,

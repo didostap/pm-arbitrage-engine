@@ -295,4 +295,18 @@ export const CONFIG_DEFAULTS = {
     envKey: 'EXIT_PROFIT_CAPTURE_RATIO',
     defaultValue: 0.5,
   },
+
+  // --- Pair Concentration Limits ---
+  pairCooldownMinutes: {
+    envKey: 'PAIR_COOLDOWN_MINUTES',
+    defaultValue: 30,
+  },
+  pairMaxConcurrentPositions: {
+    envKey: 'PAIR_MAX_CONCURRENT_POSITIONS',
+    defaultValue: 2,
+  },
+  pairDiversityThreshold: {
+    envKey: 'PAIR_DIVERSITY_THRESHOLD',
+    defaultValue: 5,
+  },
 } satisfies Record<string, ConfigDefaultEntry>;

@@ -38,4 +38,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   INVALID_PNL_COMPUTATION: 4009,
   /** Prisma JSON field data corruption detected — critical */
   DATA_CORRUPTION_DETECTED: 4500,
+  /** Concentration filter repository query failed — critical, fail-open */
+  CONCENTRATION_FILTER_FAILURE: 4010,
 } as const;

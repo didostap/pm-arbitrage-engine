@@ -57,7 +57,7 @@ export interface SettingsMetadataEntry {
 }
 
 // ---------------------------------------------------------------------------
-// SETTINGS_METADATA — all 73 CONFIG_DEFAULTS keys (72 Category B + bankrollUsd reference; bankrollUsd excluded from settings UI)
+// SETTINGS_METADATA — all 76 CONFIG_DEFAULTS keys (75 Category B + bankrollUsd reference; bankrollUsd excluded from settings UI)
 // ---------------------------------------------------------------------------
 
 export const SETTINGS_METADATA: Record<
@@ -276,6 +276,33 @@ export const SETTINGS_METADATA: Record<
     description: 'Maximum aggregate exposure across all clusters (0-1).',
     type: 'decimal',
     envDefault: CONFIG_DEFAULTS.riskAggregateClusterLimitPct.defaultValue,
+  },
+  pairCooldownMinutes: {
+    group: SettingsGroup.RiskManagement,
+    label: 'Pair Cooldown',
+    description:
+      'Minutes to wait before re-entering the same pair. 0 = disabled.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.pairCooldownMinutes.defaultValue,
+    min: 0,
+    unit: 'min',
+  },
+  pairMaxConcurrentPositions: {
+    group: SettingsGroup.RiskManagement,
+    label: 'Max Concurrent Positions Per Pair',
+    description: 'Maximum open positions allowed per pair. 0 = unlimited.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.pairMaxConcurrentPositions.defaultValue,
+    min: 0,
+  },
+  pairDiversityThreshold: {
+    group: SettingsGroup.RiskManagement,
+    label: 'Diversity Threshold',
+    description:
+      'Minimum total open positions before diversity enforcement activates. 0 = disabled.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.pairDiversityThreshold.defaultValue,
+    min: 0,
   },
   auditLogRetentionDays: {
     group: SettingsGroup.LoggingCompliance,

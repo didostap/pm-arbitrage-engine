@@ -104,6 +104,11 @@ model EngineConfig {
   kalshiPollingConcurrency     Int? @map("kalshi_polling_concurrency")
   polymarketPollingConcurrency Int? @map("polymarket_polling_concurrency")
 
+  // --- Pair Concentration Limits (3) ---
+  pairCooldownMinutes        Int? @map("pair_cooldown_minutes")
+  pairMaxConcurrentPositions Int? @map("pair_max_concurrent_positions")
+  pairDiversityThreshold     Int? @map("pair_diversity_threshold")
+
   // --- Audit Log (1) ---
   auditLogRetentionDays Int? @map("audit_log_retention_days")
 
