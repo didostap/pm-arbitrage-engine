@@ -18,6 +18,8 @@ import type { EffectiveConfig } from './effective-config.types.js';
 const CATEGORY_B_FIELDS: string[] = [
   // Trading Engine
   'pollingIntervalMs',
+  'tradingWindowStartUtc',
+  'tradingWindowEndUtc',
   // Edge Detection
   'detectionMinEdgeThreshold',
   'detectionGasEstimateUsd',
@@ -122,6 +124,8 @@ const CATEGORY_B_FIELDS: string[] = [
 const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   bankrollUsd: 'RISK_BANKROLL_USD',
   pollingIntervalMs: 'POLLING_INTERVAL_MS',
+  tradingWindowStartUtc: 'TRADING_WINDOW_START_UTC',
+  tradingWindowEndUtc: 'TRADING_WINDOW_END_UTC',
   detectionMinEdgeThreshold: 'DETECTION_MIN_EDGE_THRESHOLD',
   detectionGasEstimateUsd: 'DETECTION_GAS_ESTIMATE_USD',
   detectionPositionSizeUsd: 'DETECTION_POSITION_SIZE_USD',
@@ -211,7 +215,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(78);
+    expect(categoryBKeys.length).toBe(80);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {
@@ -338,6 +342,8 @@ describe('CONFIG_DEFAULTS', () => {
     const effectiveConfigKeys: (keyof EffectiveConfig)[] = [
       'bankrollUsd',
       'pollingIntervalMs',
+      'tradingWindowStartUtc',
+      'tradingWindowEndUtc',
       'detectionMinEdgeThreshold',
       'detectionGasEstimateUsd',
       'detectionPositionSizeUsd',

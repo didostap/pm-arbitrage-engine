@@ -124,6 +124,10 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
 
   // Polling interval → SchedulerService
   pollingIntervalMs: ['polling-interval'],
+
+  // Trading Window → SchedulerService
+  tradingWindowStartUtc: ['trading-window'],
+  tradingWindowEndUtc: ['trading-window'],
 };
 
 @Injectable()
@@ -217,6 +221,14 @@ export class SettingsService implements OnModuleInit {
     // Polling interval
     this.tryRegisterHandler('polling-interval', SchedulerService, (svc, cfg) =>
       svc.reloadPollingInterval(cfg.pollingIntervalMs),
+    );
+
+    // Trading window
+    this.tryRegisterHandler('trading-window', SchedulerService, (svc, cfg) =>
+      svc.reloadTradingWindow({
+        tradingWindowStartUtc: cfg.tradingWindowStartUtc,
+        tradingWindowEndUtc: cfg.tradingWindowEndUtc,
+      }),
     );
   }
 

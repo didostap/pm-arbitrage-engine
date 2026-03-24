@@ -85,6 +85,28 @@ export const SETTINGS_METADATA: Record<
     min: 1000,
     unit: 'ms',
   },
+  tradingWindowStartUtc: {
+    group: SettingsGroup.TradingEngine,
+    label: 'Trading Window Start (UTC)',
+    description:
+      'UTC hour (0–23) when the trading window opens. Cycles outside this window are skipped.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.tradingWindowStartUtc.defaultValue,
+    min: 0,
+    max: 23,
+    unit: 'hour',
+  },
+  tradingWindowEndUtc: {
+    group: SettingsGroup.TradingEngine,
+    label: 'Trading Window End (UTC)',
+    description:
+      'UTC hour (1–24) when the trading window closes. Supports midnight-spanning windows (e.g., 22/6).',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.tradingWindowEndUtc.defaultValue,
+    min: 1,
+    max: 24,
+    unit: 'hour',
+  },
 
   // ── Detection & Edge ──────────────────────────────────────────────────
   detectionMinEdgeThreshold: {

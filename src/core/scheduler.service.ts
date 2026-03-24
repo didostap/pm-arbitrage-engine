@@ -14,6 +14,7 @@ import {
   withCorrelationId,
   getCorrelationId,
 } from '../common/services/correlation-context';
+import { ConfigValidationError } from '../common/errors';
 
 /**
  * Manages polling intervals and triggers trading cycles.
@@ -22,6 +23,9 @@ import {
 @Injectable()
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
+
+  private tradingWindowStartUtc = 0;
+  private tradingWindowEndUtc = 24;
 
   constructor(
     private readonly configService: ConfigService,
@@ -40,6 +44,19 @@ export class SchedulerService implements OnModuleInit {
       30000,
     );
 
+    this.tradingWindowStartUtc = this.configService.get<number>(
+      'TRADING_WINDOW_START_UTC',
+      0,
+    );
+    this.tradingWindowEndUtc = this.configService.get<number>(
+      'TRADING_WINDOW_END_UTC',
+      24,
+    );
+    this.validateTradingWindow(
+      this.tradingWindowStartUtc,
+      this.tradingWindowEndUtc,
+    );
+
     const interval = setInterval(() => {
       void this.handlePollingCycle();
     }, intervalMs);
@@ -50,6 +67,8 @@ export class SchedulerService implements OnModuleInit {
       timestamp: new Date().toISOString(),
       module: 'core',
       pollingIntervalMs: intervalMs,
+      tradingWindowStartUtc: this.tradingWindowStartUtc,
+      tradingWindowEndUtc: this.tradingWindowEndUtc,
     });
   }
 
@@ -92,11 +111,51 @@ export class SchedulerService implements OnModuleInit {
     });
   }
 
+  /** Hot-reload trading window values from dashboard settings. */
+  reloadTradingWindow(cfg: {
+    tradingWindowStartUtc?: number;
+    tradingWindowEndUtc?: number;
+  }): void {
+    const start = cfg.tradingWindowStartUtc ?? this.tradingWindowStartUtc;
+    const end = cfg.tradingWindowEndUtc ?? this.tradingWindowEndUtc;
+
+    const errors = this.getTradingWindowErrors(start, end);
+    if (errors.length > 0) {
+      this.logger.warn({
+        message: `Invalid trading window values (${errors.join('; ')}), keeping current window [${this.tradingWindowStartUtc}, ${this.tradingWindowEndUtc})`,
+      });
+      return;
+    }
+
+    this.tradingWindowStartUtc = start;
+    this.tradingWindowEndUtc = end;
+    this.logger.log({
+      message: 'Trading window reloaded',
+      data: {
+        tradingWindowStartUtc: this.tradingWindowStartUtc,
+        tradingWindowEndUtc: this.tradingWindowEndUtc,
+      },
+    });
+  }
+
   /**
    * Handle each polling cycle trigger.
-   * Skips if previous cycle still in progress (prevents overlaps).
+   * Skips if outside trading window or previous cycle still in progress.
    */
   private async handlePollingCycle(): Promise<void> {
+    const currentHour = new Date().getUTCHours();
+    if (!this.isWithinTradingWindow(currentHour)) {
+      this.logger.log({
+        message: 'Skipping trading cycle — outside configured trading window',
+        data: {
+          currentHour,
+          windowStart: this.tradingWindowStartUtc,
+          windowEnd: this.tradingWindowEndUtc,
+        },
+      });
+      return;
+    }
+
     if (this.tradingEngine.isCycleInProgress()) {
       this.logger.debug({
         message: 'Skipping polling interval - cycle already in progress',
@@ -119,6 +178,47 @@ export class SchedulerService implements OnModuleInit {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  private isWithinTradingWindow(currentHour: number): boolean {
+    if (this.tradingWindowStartUtc === 0 && this.tradingWindowEndUtc === 24) {
+      return true;
+    }
+    if (this.tradingWindowStartUtc < this.tradingWindowEndUtc) {
+      return (
+        currentHour >= this.tradingWindowStartUtc &&
+        currentHour < this.tradingWindowEndUtc
+      );
+    }
+    // Midnight-spanning window (e.g., 22/6)
+    return (
+      currentHour >= this.tradingWindowStartUtc ||
+      currentHour < this.tradingWindowEndUtc
+    );
+  }
+
+  private validateTradingWindow(start: number, end: number): void {
+    const errors = this.getTradingWindowErrors(start, end);
+    if (errors.length > 0) {
+      throw new ConfigValidationError(
+        `Invalid trading window configuration: ${errors.join('; ')}`,
+        errors,
+      );
+    }
+  }
+
+  private getTradingWindowErrors(start: number, end: number): string[] {
+    const errors: string[] = [];
+    if (!Number.isInteger(start) || start < 0 || start > 23) {
+      errors.push(`start must be integer 0–23 (got ${start})`);
+    }
+    if (!Number.isInteger(end) || end < 1 || end > 24) {
+      errors.push(`end must be integer 1–24 (got ${end})`);
+    }
+    if (start === end) {
+      errors.push(`start and end must differ (both are ${start})`);
+    }
+    return errors;
   }
 
   /**

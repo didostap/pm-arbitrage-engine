@@ -26,6 +26,8 @@ function buildMockEffectiveConfig(
     bankrollUsd: '10000',
     paperBankrollUsd: null,
     pollingIntervalMs: 30000,
+    tradingWindowStartUtc: 0,
+    tradingWindowEndUtc: 24,
     detectionMinEdgeThreshold: '0.008',
     detectionGasEstimateUsd: '0.30',
     detectionPositionSizeUsd: '300',
@@ -244,8 +246,8 @@ describe('SettingsService', () => {
         expect(setting).toHaveProperty('group');
       }
 
-      // 80 settings (81 CONFIG_DEFAULTS minus bankrollUsd)
-      expect(allSettings.length).toBe(80);
+      // 82 settings (83 CONFIG_DEFAULTS minus bankrollUsd)
+      expect(allSettings.length).toBe(82);
     });
 
     it('[P0] currentValue falls back to env default when DB column is NULL', async () => {

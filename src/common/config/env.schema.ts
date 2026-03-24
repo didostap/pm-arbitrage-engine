@@ -25,6 +25,8 @@ export const envSchema = z.object({
 
   // Trading Engine
   POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+  TRADING_WINDOW_START_UTC: z.coerce.number().int().min(0).max(23).default(0),
+  TRADING_WINDOW_END_UTC: z.coerce.number().int().min(1).max(24).default(24),
 
   // Kalshi
   KALSHI_API_KEY_ID: z.string().default(''),

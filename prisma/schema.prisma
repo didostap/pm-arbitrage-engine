@@ -24,8 +24,10 @@ model EngineConfig {
   bankrollUsd      Decimal  @map("bankroll_usd") @db.Decimal(20, 8)
   paperBankrollUsd Decimal? @map("paper_bankroll_usd") @db.Decimal(20, 8)
 
-  // --- Trading Engine (1) ---
-  pollingIntervalMs Int? @map("polling_interval_ms")
+  // --- Trading Engine (3) ---
+  pollingIntervalMs      Int? @map("polling_interval_ms")
+  tradingWindowStartUtc  Int? @map("trading_window_start_utc")
+  tradingWindowEndUtc    Int? @map("trading_window_end_utc")
 
   // --- Edge Detection (4) ---
   detectionMinEdgeThreshold Decimal? @map("detection_min_edge_threshold") @db.Decimal(20, 8)

@@ -16,6 +16,8 @@ export interface EffectiveConfig {
 
   // --- Trading Engine ---
   pollingIntervalMs: number;
+  tradingWindowStartUtc: number;
+  tradingWindowEndUtc: number;
 
   // --- Edge Detection ---
   detectionMinEdgeThreshold: string;

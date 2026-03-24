@@ -28,6 +28,18 @@ export class UpdateSettingsDto {
   @Min(1000)
   pollingIntervalMs?: number;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  tradingWindowStartUtc?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  tradingWindowEndUtc?: number;
+
   // ── Detection & Edge (decimal strings) ──────────────────────────────
   @IsOptional()
   @IsString()

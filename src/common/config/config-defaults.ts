@@ -25,6 +25,11 @@ export const CONFIG_DEFAULTS = {
 
   // --- Trading Engine ---
   pollingIntervalMs: { envKey: 'POLLING_INTERVAL_MS', defaultValue: 30000 },
+  tradingWindowStartUtc: {
+    envKey: 'TRADING_WINDOW_START_UTC',
+    defaultValue: 0,
+  },
+  tradingWindowEndUtc: { envKey: 'TRADING_WINDOW_END_UTC', defaultValue: 24 },
 
   // --- Edge Detection ---
   detectionMinEdgeThreshold: {

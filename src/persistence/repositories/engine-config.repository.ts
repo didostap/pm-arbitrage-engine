@@ -67,6 +67,8 @@ function buildEffectiveConfig(
     paperBankrollUsd: resolve('paperBankrollUsd') as string | null,
     // Trading Engine
     pollingIntervalMs: resolve('pollingIntervalMs') as number,
+    tradingWindowStartUtc: resolve('tradingWindowStartUtc') as number,
+    tradingWindowEndUtc: resolve('tradingWindowEndUtc') as number,
     // Edge Detection
     detectionMinEdgeThreshold: resolve('detectionMinEdgeThreshold') as string,
     detectionGasEstimateUsd: resolve('detectionGasEstimateUsd') as string,
