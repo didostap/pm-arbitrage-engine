@@ -70,6 +70,10 @@ export const envSchema = z.object({
 
   // Detection Depth (String → Decimal)
   DETECTION_MIN_FILL_RATIO: decimalString('0.25'),
+  /** Scaling factor for depth-sensitive edge threshold. 0 disables dynamic scaling. */
+  DEPTH_EDGE_SCALING_FACTOR: decimalString('10'),
+  /** Maximum dynamic edge threshold cap (decimal probability, e.g. 0.05 = 5%). */
+  MAX_DYNAMIC_EDGE_THRESHOLD: decimalString('0.05'),
 
   // Execution Depth (String → Decimal)
   EXECUTION_MIN_FILL_RATIO: decimalString('0.25'),

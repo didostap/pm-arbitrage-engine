@@ -73,6 +73,8 @@ function buildEffectiveConfig(
     detectionPositionSizeUsd: resolve('detectionPositionSizeUsd') as string,
     minAnnualizedReturn: resolve('minAnnualizedReturn') as string,
     detectionMinFillRatio: resolve('detectionMinFillRatio') as string,
+    depthEdgeScalingFactor: resolve('depthEdgeScalingFactor') as string,
+    maxDynamicEdgeThreshold: resolve('maxDynamicEdgeThreshold') as string,
     // Gas Estimation
     gasBufferPercent: resolve('gasBufferPercent') as number,
     gasPollIntervalMs: resolve('gasPollIntervalMs') as number,

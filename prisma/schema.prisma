@@ -33,6 +33,8 @@ model EngineConfig {
   detectionPositionSizeUsd  Decimal? @map("detection_position_size_usd") @db.Decimal(20, 8)
   minAnnualizedReturn       Decimal? @map("min_annualized_return") @db.Decimal(20, 8)
   detectionMinFillRatio     Decimal? @map("detection_min_fill_ratio") @db.Decimal(20, 8)
+  depthEdgeScalingFactor    Decimal? @map("depth_edge_scaling_factor") @db.Decimal(20, 8)
+  maxDynamicEdgeThreshold   Decimal? @map("max_dynamic_edge_threshold") @db.Decimal(20, 8)
 
   // --- Gas Estimation (4) ---
   gasBufferPercent             Int?     @map("gas_buffer_percent")

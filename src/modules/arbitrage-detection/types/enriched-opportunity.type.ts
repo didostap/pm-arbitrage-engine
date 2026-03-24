@@ -33,5 +33,6 @@ export interface EnrichedOpportunity {
   liquidityDepth: LiquidityDepth;
   recommendedPositionSize: null;
   annualizedReturn: Decimal | null;
+  effectiveMinEdge: Decimal;
   enrichedAt: Date;
 }

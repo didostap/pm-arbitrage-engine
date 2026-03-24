@@ -24,6 +24,8 @@ export interface EffectiveConfig {
   minAnnualizedReturn: string;
 
   detectionMinFillRatio: string;
+  depthEdgeScalingFactor: string;
+  maxDynamicEdgeThreshold: string;
 
   // --- Gas Estimation ---
   gasBufferPercent: number;

@@ -54,6 +54,16 @@ export class UpdateSettingsDto {
   @Matches(DECIMAL_REGEX)
   detectionMinFillRatio?: string;
 
+  @IsOptional()
+  @IsString()
+  @Matches(DECIMAL_REGEX)
+  depthEdgeScalingFactor?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(DECIMAL_REGEX)
+  maxDynamicEdgeThreshold?: string;
+
   // ── Gas Estimation ──────────────────────────────────────────────────
   @IsOptional()
   @IsInt()

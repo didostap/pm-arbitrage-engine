@@ -61,6 +61,14 @@ export const CONFIG_DEFAULTS = {
     envKey: 'DETECTION_MIN_FILL_RATIO',
     defaultValue: '0.25',
   },
+  depthEdgeScalingFactor: {
+    envKey: 'DEPTH_EDGE_SCALING_FACTOR',
+    defaultValue: '10',
+  },
+  maxDynamicEdgeThreshold: {
+    envKey: 'MAX_DYNAMIC_EDGE_THRESHOLD',
+    defaultValue: '0.05',
+  },
 
   // --- Execution ---
   executionMinFillRatio: {

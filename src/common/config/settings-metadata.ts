@@ -129,6 +129,27 @@ export const SETTINGS_METADATA: Record<
     envDefault: CONFIG_DEFAULTS.detectionMinFillRatio.defaultValue,
   },
 
+  depthEdgeScalingFactor: {
+    group: SettingsGroup.DetectionEdge,
+    label: 'Depth Edge Scaling Factor',
+    description:
+      'Scaling factor for depth-sensitive edge threshold. Higher values demand more edge on thin books. 0 disables dynamic scaling.',
+    type: 'decimal',
+    envDefault: CONFIG_DEFAULTS.depthEdgeScalingFactor.defaultValue,
+    min: 0,
+  },
+
+  maxDynamicEdgeThreshold: {
+    group: SettingsGroup.DetectionEdge,
+    label: 'Max Dynamic Edge Threshold',
+    description:
+      'Upper cap for the dynamically-computed edge threshold (decimal probability, e.g. 0.05 = 5%).',
+    type: 'decimal',
+    envDefault: CONFIG_DEFAULTS.maxDynamicEdgeThreshold.defaultValue,
+    min: 0.001,
+    max: 1.0,
+  },
+
   // ── Gas Estimation ────────────────────────────────────────────────────
   gasBufferPercent: {
     group: SettingsGroup.GasEstimation,

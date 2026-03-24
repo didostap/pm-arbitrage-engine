@@ -23,6 +23,9 @@ const CATEGORY_B_FIELDS: string[] = [
   'detectionGasEstimateUsd',
   'detectionPositionSizeUsd',
   'minAnnualizedReturn',
+  // Detection Depth
+  'depthEdgeScalingFactor',
+  'maxDynamicEdgeThreshold',
   // Gas Estimation
   'gasBufferPercent',
   'gasPollIntervalMs',
@@ -123,6 +126,8 @@ const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   detectionGasEstimateUsd: 'DETECTION_GAS_ESTIMATE_USD',
   detectionPositionSizeUsd: 'DETECTION_POSITION_SIZE_USD',
   minAnnualizedReturn: 'MIN_ANNUALIZED_RETURN',
+  depthEdgeScalingFactor: 'DEPTH_EDGE_SCALING_FACTOR',
+  maxDynamicEdgeThreshold: 'MAX_DYNAMIC_EDGE_THRESHOLD',
   gasBufferPercent: 'GAS_BUFFER_PERCENT',
   gasPollIntervalMs: 'GAS_POLL_INTERVAL_MS',
   gasPolPriceFallbackUsd: 'GAS_POL_PRICE_FALLBACK_USD',
@@ -206,7 +211,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(76);
+    expect(categoryBKeys.length).toBe(78);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {

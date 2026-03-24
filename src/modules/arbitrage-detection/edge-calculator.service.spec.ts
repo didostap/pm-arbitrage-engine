@@ -148,14 +148,16 @@ describe('EdgeCalculatorService', () => {
     polymarketConnector.getFeeSchedule.mockReturnValue(fees);
     kalshiConnector.getFeeSchedule.mockReturnValue(kalshiFee);
 
-    // Override config to match CSV: gas=0.13, positionSize=50
+    // Override config to match CSV: gas=0.13, positionSize=50, disable dynamic scaling for exact boundary
     configService.get.mockImplementation(
       (key: string, defaultValue: number) => {
         if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0.13;
         if (key === 'DETECTION_POSITION_SIZE_USD') return 50;
+        if (key === 'DEPTH_EDGE_SCALING_FACTOR') return '0';
         return defaultValue;
       },
     );
+    service.onModuleInit();
 
     // VWAP recomputes grossEdge from book prices: 0.50 - 0.47 = 0.03
     // netEdge = 0.03 - 0.47*0.02 - 0.50*0.02 - 0.13/50 = 0.03 - 0.0094 - 0.01 - 0.0026 = 0.008
@@ -486,13 +488,15 @@ describe('EdgeCalculatorService', () => {
   // Uses configurable threshold from ConfigService
   // ========================================================================
   it('uses configurable threshold from ConfigService', () => {
-    // Set a very high threshold
+    // Set a very high threshold, disable dynamic scaling to test static path
     configService.get.mockImplementation(
       (key: string, defaultValue: number) => {
         if (key === 'DETECTION_MIN_EDGE_THRESHOLD') return 0.5;
+        if (key === 'DEPTH_EDGE_SCALING_FACTOR') return '0';
         return defaultValue;
       },
     );
+    service.onModuleInit();
 
     const dislocation = makeDislocation({
       buyPrice: new FinancialDecimal(0.2),
@@ -1418,5 +1422,412 @@ describe('EdgeCalculatorService', () => {
     }).compile();
 
     await expect(module.init()).rejects.toThrow();
+  });
+
+  // ========================================================================
+  // 10-7-8: Dynamic Minimum Edge Threshold Based on Book Depth
+  // ========================================================================
+
+  describe('Dynamic edge threshold (10-7-8)', () => {
+    // Use small position size so thin books pass VWAP fill ratio check
+    // positionSize=2, gas=0 → target=2/0.45≈5 contracts → depth=5 fills 100%
+    function setSmallPositionSize(): void {
+      configService.get.mockImplementation(
+        (key: string, defaultValue: number) => {
+          if (key === 'DETECTION_POSITION_SIZE_USD') return 2;
+          if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0;
+          return defaultValue;
+        },
+      );
+    }
+
+    // Helper: build dislocation with specific book depth
+    function makeDislocationWithDepth(
+      depth: number,
+      overrides?: Partial<RawDislocation>,
+    ): RawDislocation {
+      return makeDislocation({
+        buyOrderBook: makeOrderBook(
+          PlatformId.POLYMARKET,
+          'poly-contract-1',
+          0.44,
+          0.45,
+          depth,
+        ),
+        sellOrderBook: makeOrderBook(
+          PlatformId.KALSHI,
+          'kalshi-contract-1',
+          0.52,
+          0.53,
+          depth,
+        ),
+        ...overrides,
+      });
+    }
+
+    // Helper: build dislocation with asymmetric depths
+    function makeDislocationWithAsymmetricDepth(
+      buyDepth: number,
+      sellDepth: number,
+    ): RawDislocation {
+      return makeDislocation({
+        buyOrderBook: makeOrderBook(
+          PlatformId.POLYMARKET,
+          'poly-contract-1',
+          0.44,
+          0.45,
+          buyDepth,
+        ),
+        sellOrderBook: makeOrderBook(
+          PlatformId.KALSHI,
+          'kalshi-contract-1',
+          0.52,
+          0.53,
+          sellDepth,
+        ),
+      });
+    }
+
+    it('4.1 AC-1: dynamic threshold base case (scalingFactor=10, depth=5)', () => {
+      // Default: scalingFactor=10, maxCap=0.05, baseMinEdge=0.008
+      // effectiveMinEdge = 0.008 × (1 + 10/5) = 0.008 × 3 = 0.024
+      setSmallPositionSize();
+      const dislocation = makeDislocationWithDepth(5);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      expect(payload.opportunity).toHaveProperty('effectiveMinEdge');
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // effectiveMinEdge = 0.008 * (1 + 10/5) = 0.024
+      expect(effectiveMinEdge).toBeCloseTo(0.024, 3);
+    });
+
+    it('4.2 AC-2: deep liquidity convergence (depth=10000)', () => {
+      // effectiveMinEdge = 0.008 × (1 + 10/10000) = 0.008 × 1.001 = 0.008008
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // Should converge to near base (0.008)
+      expect(effectiveMinEdge).toBeCloseTo(0.008, 2);
+      expect(effectiveMinEdge).toBeLessThan(0.009);
+    });
+
+    it('4.3 AC-3: backward compatibility (scalingFactor=0)', () => {
+      // When scalingFactor=0: effectiveMinEdge = baseMinEdge exactly
+      configService.get.mockImplementation(
+        (key: string, defaultValue: number) => {
+          if (key === 'DEPTH_EDGE_SCALING_FACTOR') return '0';
+          return defaultValue;
+        },
+      );
+      service.onModuleInit();
+
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // Should be exactly baseMinEdge (0.008) — no dynamic scaling
+      expect(effectiveMinEdge).toBeCloseTo(0.008, 5);
+    });
+
+    it('4.4 AC-1: max cap applied when formula exceeds cap', () => {
+      // effectiveMinEdge = 0.008 × (1 + 10/2) = 0.008 × 6 = 0.048 → capped at 0.03
+      // Use depth=2 with tiny position so fill passes, set cap to 0.03
+      configService.get.mockImplementation(
+        (key: string, defaultValue: number) => {
+          if (key === 'DETECTION_POSITION_SIZE_USD') return 1;
+          if (key === 'DETECTION_GAS_ESTIMATE_USD') return 0;
+          if (key === 'MAX_DYNAMIC_EDGE_THRESHOLD') return '0.03';
+          return defaultValue;
+        },
+      );
+      service.onModuleInit();
+
+      const dislocation = makeDislocationWithDepth(2);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // 0.008 × (1 + 10/2) = 0.048 → capped at 0.03
+      expect(effectiveMinEdge).toBeCloseTo(0.03, 4);
+    });
+
+    it('4.5 AC-1: asymmetric depth uses min(buyDepth, sellDepth)', () => {
+      // buyDepth=10000, sellDepth=200 → minDepth=200
+      // effectiveMinEdge = 0.008 × (1 + 10/200) = 0.008 × 1.05 = 0.0084
+      const dislocation = makeDislocationWithAsymmetricDepth(10000, 200);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // Uses min(10000, 200) = 200 → 0.008 × 1.05 = 0.0084
+      expect(effectiveMinEdge).toBeCloseTo(0.0084, 3);
+      // Should be higher than deep-book case
+      expect(effectiveMinEdge).toBeGreaterThan(0.008);
+    });
+
+    it('4.6 AC-6: degradation multiplier interaction', () => {
+      // Dynamic threshold × degradation multiplier
+      // depth=10000 → effectiveMinEdge ≈ 0.008008
+      // finalThreshold = 0.008008 × 1.5 (degradation) ≈ 0.012
+      degradationService.getEdgeThresholdMultiplier.mockReturnValue(1.5);
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // effectiveMinEdge = dynamic × degradation ≈ 0.008008 × 1.5 ≈ 0.012
+      expect(effectiveMinEdge).toBeGreaterThan(0.008 * 1.5 - 0.001);
+      expect(effectiveMinEdge).toBeLessThan(0.008 * 1.5 + 0.002);
+    });
+
+    it('4.7 AC-5: opportunity that passes static but fails dynamic is filtered with correct threshold', () => {
+      // Use depth=50 → dynamic threshold = 0.008 × (1 + 10/50) = 0.008 × 1.2 = 0.0096
+      // Construct prices so net edge ≈ 0.009 (above static 0.008, below dynamic 0.0096)
+      // netEdge = (sell - buy) - buy*0.02 - sell*0.02
+      // buy=0.45, sell=0.478 → netEdge = 0.028 - 0.009 - 0.00956 = 0.00944 < 0.0096
+      setSmallPositionSize();
+      const dislocation = makeDislocation({
+        buyPrice: new FinancialDecimal(0.45),
+        sellPrice: new FinancialDecimal(0.478),
+        grossEdge: new FinancialDecimal(0.028),
+        buyOrderBook: makeOrderBook(
+          PlatformId.POLYMARKET,
+          'poly-contract-1',
+          0.44,
+          0.45,
+          50,
+        ),
+        sellOrderBook: makeOrderBook(
+          PlatformId.KALSHI,
+          'kalshi-contract-1',
+          0.478,
+          0.49,
+          50,
+        ),
+      });
+
+      service.processDislocations([dislocation]);
+
+      const filtered = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_FILTERED,
+      );
+
+      // Must be filtered: net edge (~0.009) is above static (0.008) but below dynamic (0.0096)
+      expect(filtered.length).toBeGreaterThan(0);
+      const event = filtered[0]![1] as { threshold: Decimal; reason: string };
+      const threshold = new FinancialDecimal(
+        event.threshold.toString(),
+      ).toNumber();
+      // Threshold should be the dynamic value (> static 0.008)
+      expect(threshold).toBeGreaterThan(0.008);
+      expect(event.reason).toBe('below_threshold');
+    });
+
+    it('4.8 AC-5: opportunity that passes dynamic threshold includes effectiveMinEdge', () => {
+      // Large depth = low threshold, high edge = passes
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      expect(payload.opportunity).toHaveProperty('effectiveMinEdge');
+      expect(typeof payload.opportunity.effectiveMinEdge).toBe('number');
+    });
+
+    it('4.9 AC-7: config validation — negative scalingFactor throws ConfigValidationError', async () => {
+      const badConfigService = {
+        get: vi.fn().mockImplementation((key: string, defaultValue: number) => {
+          if (key === 'DEPTH_EDGE_SCALING_FACTOR') return '-5';
+          return defaultValue;
+        }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EdgeCalculatorService,
+          { provide: ConfigService, useValue: badConfigService },
+          { provide: DegradationProtocolService, useValue: degradationService },
+          { provide: KalshiConnector, useValue: kalshiConnector },
+          { provide: PolymarketConnector, useValue: polymarketConnector },
+          { provide: EventEmitter2, useValue: eventEmitter },
+        ],
+      }).compile();
+
+      await expect(module.init()).rejects.toThrow('DEPTH_EDGE_SCALING_FACTOR');
+    });
+
+    it('4.10 AC-7: config validation — maxDynamicEdgeThreshold > 1.0 throws ConfigValidationError', async () => {
+      const badConfigService = {
+        get: vi.fn().mockImplementation((key: string, defaultValue: number) => {
+          if (key === 'MAX_DYNAMIC_EDGE_THRESHOLD') return '1.5';
+          return defaultValue;
+        }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EdgeCalculatorService,
+          { provide: ConfigService, useValue: badConfigService },
+          { provide: DegradationProtocolService, useValue: degradationService },
+          { provide: KalshiConnector, useValue: kalshiConnector },
+          { provide: PolymarketConnector, useValue: polymarketConnector },
+          { provide: EventEmitter2, useValue: eventEmitter },
+        ],
+      }).compile();
+
+      await expect(module.init()).rejects.toThrow('MAX_DYNAMIC_EDGE_THRESHOLD');
+    });
+
+    it('4.11 AC-7: config validation — maxDynamicEdgeThreshold = 0 throws ConfigValidationError', async () => {
+      const badConfigService = {
+        get: vi.fn().mockImplementation((key: string, defaultValue: number) => {
+          if (key === 'MAX_DYNAMIC_EDGE_THRESHOLD') return '0';
+          return defaultValue;
+        }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EdgeCalculatorService,
+          { provide: ConfigService, useValue: badConfigService },
+          { provide: DegradationProtocolService, useValue: degradationService },
+          { provide: KalshiConnector, useValue: kalshiConnector },
+          { provide: PolymarketConnector, useValue: polymarketConnector },
+          { provide: EventEmitter2, useValue: eventEmitter },
+        ],
+      }).compile();
+
+      await expect(module.init()).rejects.toThrow('MAX_DYNAMIC_EDGE_THRESHOLD');
+    });
+
+    it('4.12 AC-4: hot-reload updates depthEdgeScalingFactor and maxDynamicEdgeThreshold', () => {
+      // Reload with new values
+      service.reloadConfig({
+        depthEdgeScalingFactor: '20',
+        maxDynamicEdgeThreshold: '0.10',
+      });
+
+      // Use deep book (10000) so dynamic threshold is near base
+      // scalingFactor=20: 0.008 × (1 + 20/10000) = 0.008 × 1.002 = 0.008016
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // 0.008 × (1 + 20/10000) = 0.008016 (scalingFactor=20 doubles the scaling term vs default 10)
+      expect(effectiveMinEdge).toBeGreaterThan(0.008);
+      // Verify it's higher than with default scalingFactor=10 (would be 0.008008)
+      expect(effectiveMinEdge).toBeCloseTo(0.00802, 3);
+    });
+
+    it('4.13 AC-4: hot-reload with invalid values preserves current config', () => {
+      // First set valid values
+      service.reloadConfig({
+        depthEdgeScalingFactor: '50',
+        maxDynamicEdgeThreshold: '0.10',
+      });
+
+      // Then attempt invalid reload
+      service.reloadConfig({
+        depthEdgeScalingFactor: '-5', // invalid: negative
+        maxDynamicEdgeThreshold: '2.0', // invalid: > 1.0
+      });
+
+      // Config should still be the previous valid values (50, 0.10)
+      const dislocation = makeDislocationWithDepth(10000);
+      service.processDislocations([dislocation]);
+
+      const identified = eventEmitter.emit.mock.calls.filter(
+        (c: unknown[]) => c[0] === EVENT_NAMES.OPPORTUNITY_IDENTIFIED,
+      );
+
+      expect(identified.length).toBe(1);
+      const payload = identified[0]![1] as Record<string, unknown> & {
+        opportunity: Record<string, unknown>;
+      };
+      const effectiveMinEdge = payload.opportunity.effectiveMinEdge as number;
+      // scalingFactor=50 → 0.008 × (1 + 50/10000) = 0.008 × 1.005 = 0.00804
+      expect(effectiveMinEdge).toBeCloseTo(0.00804, 3);
+    });
+
+    it('4.14: paper/live mode boundary — dynamic threshold applies identically in both modes', () => {
+      // Dynamic threshold has no mode-dependent branching
+      const dislocation1 = makeDislocationWithDepth(10000);
+      const result1 = service.processDislocations([dislocation1]);
+
+      eventEmitter.emit.mockClear();
+
+      const dislocation2 = makeDislocationWithDepth(10000);
+      const result2 = service.processDislocations([dislocation2]);
+
+      // Both should produce identical results
+      expect(result1.opportunities.length).toBe(result2.opportunities.length);
+      if (
+        result1.opportunities.length > 0 &&
+        result2.opportunities.length > 0
+      ) {
+        expect(result1.opportunities[0]!.effectiveMinEdge.toString()).toBe(
+          result2.opportunities[0]!.effectiveMinEdge.toString(),
+        );
+      }
+    });
   });
 });

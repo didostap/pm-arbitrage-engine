@@ -99,7 +99,10 @@ const SERVICE_RELOAD_MAP: Record<string, string[]> = {
   exitProfitCaptureRatio: ['exit-monitor'],
 
   // Detection
+  detectionMinEdgeThreshold: ['detection'],
   detectionMinFillRatio: ['detection'],
+  depthEdgeScalingFactor: ['detection'],
+  maxDynamicEdgeThreshold: ['detection'],
 
   // Execution
   executionMinFillRatio: ['execution'],
@@ -172,7 +175,10 @@ export class SettingsService implements OnModuleInit {
     );
     this.tryRegisterHandler('detection', EdgeCalculatorService, (svc, cfg) =>
       svc.reloadConfig({
+        minEdgeThreshold: cfg.detectionMinEdgeThreshold,
         detectionMinFillRatio: cfg.detectionMinFillRatio,
+        depthEdgeScalingFactor: cfg.depthEdgeScalingFactor,
+        maxDynamicEdgeThreshold: cfg.maxDynamicEdgeThreshold,
       }),
     );
     this.tryRegisterHandler('execution', EXECUTION_ENGINE_TOKEN, (svc, cfg) =>

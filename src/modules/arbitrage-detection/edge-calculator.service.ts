@@ -19,15 +19,17 @@ import {
 import { ConfigValidationError } from '../../common/errors';
 import { getCorrelationId } from '../../common/services/correlation-context';
 import { RawDislocation } from './types/raw-dislocation.type';
-import {
-  EnrichedOpportunity,
-  FeeBreakdown,
-  LiquidityDepth,
-} from './types/enriched-opportunity.type';
+import { EnrichedOpportunity } from './types/enriched-opportunity.type';
 import {
   EdgeCalculationResult,
   FilteredDislocation,
 } from './types/edge-calculation-result.type';
+import {
+  buildLiquidityDepth,
+  buildFeeBreakdown,
+  filterInsufficientVwapDepth,
+  checkCapitalEfficiency,
+} from './edge-calculator.helpers';
 
 @Injectable()
 export class EdgeCalculatorService implements OnModuleInit {
@@ -41,27 +43,38 @@ export class EdgeCalculatorService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  private minEdgeThreshold: Decimal = new FinancialDecimal(0.008);
   private detectionMinFillRatio: Decimal = new FinancialDecimal(0.25);
+  private depthEdgeScalingFactor: Decimal = new FinancialDecimal(10);
+  private maxDynamicEdgeThreshold: Decimal = new FinancialDecimal(0.05);
 
   onModuleInit(): void {
     this.validateConfig('DETECTION_MIN_EDGE_THRESHOLD', 0.008);
     this.validateConfig('DETECTION_GAS_ESTIMATE_USD', 0.3);
     this.validateConfig('DETECTION_POSITION_SIZE_USD', 300);
+    this.minEdgeThreshold = new FinancialDecimal(
+      this.configService.get<string>('DETECTION_MIN_EDGE_THRESHOLD', '0.008'),
+    );
     this.validateMinAnnualizedReturn();
     this.validateDetectionMinFillRatio();
+    this.validateDepthEdgeScalingFactor();
+    this.validateMaxDynamicEdgeThreshold();
     this.logger.log('Edge calculator configuration validated');
   }
 
   private validateConfig(key: string, defaultValue: number): void {
-    const value = this.configService.get<number>(key, defaultValue);
-    if (value === null || value === undefined || isNaN(value)) {
-      throw new Error(
+    const raw = this.configService.get<string>(key, String(defaultValue));
+    const value = Number(raw);
+    if (isNaN(value)) {
+      throw new ConfigValidationError(
         `EdgeCalculatorService: ${key} is invalid (NaN or missing)`,
+        [`${key}: ${raw} is not a valid number`],
       );
     }
     if (value < 0) {
-      throw new Error(
+      throw new ConfigValidationError(
         `EdgeCalculatorService: ${key} must not be negative, got ${value}`,
+        [`${key}: ${value} is negative`],
       );
     }
   }
@@ -108,26 +121,102 @@ export class EdgeCalculatorService implements OnModuleInit {
     this.detectionMinFillRatio = new FinancialDecimal(val);
   }
 
-  reloadConfig(settings: { detectionMinFillRatio?: string }): void {
+  private validateDepthEdgeScalingFactor(): void {
+    const raw = this.configService.get<string>(
+      'DEPTH_EDGE_SCALING_FACTOR',
+      '10',
+    );
+    const val = Number(raw);
+    if (isNaN(val) || val < 0) {
+      throw new ConfigValidationError(
+        `EdgeCalculatorService: DEPTH_EDGE_SCALING_FACTOR must be >= 0, got ${raw}`,
+        [`DEPTH_EDGE_SCALING_FACTOR: ${raw} is negative or invalid`],
+      );
+    }
+    this.depthEdgeScalingFactor = new FinancialDecimal(val);
+  }
+
+  private validateMaxDynamicEdgeThreshold(): void {
+    const raw = this.configService.get<string>(
+      'MAX_DYNAMIC_EDGE_THRESHOLD',
+      '0.05',
+    );
+    const val = Number(raw);
+    if (isNaN(val) || val <= 0 || val > 1.0) {
+      throw new ConfigValidationError(
+        `EdgeCalculatorService: MAX_DYNAMIC_EDGE_THRESHOLD must be > 0 and <= 1.0, got ${raw}`,
+        [`MAX_DYNAMIC_EDGE_THRESHOLD: ${raw} is out of range (0, 1.0]`],
+      );
+    }
+    this.maxDynamicEdgeThreshold = new FinancialDecimal(val);
+  }
+
+  reloadConfig(settings: {
+    minEdgeThreshold?: string;
+    detectionMinFillRatio?: string;
+    depthEdgeScalingFactor?: string;
+    maxDynamicEdgeThreshold?: string;
+  }): void {
+    if (settings.minEdgeThreshold !== undefined) {
+      const val = Number(settings.minEdgeThreshold);
+      if (isNaN(val) || val < 0) {
+        this.logger.warn({
+          message: `Invalid minEdgeThreshold: ${settings.minEdgeThreshold}, keeping current value`,
+        });
+      } else {
+        this.minEdgeThreshold = new FinancialDecimal(val);
+        this.logger.log(
+          `Min edge threshold updated to ${this.minEdgeThreshold.toString()}`,
+        );
+      }
+    }
     if (settings.detectionMinFillRatio !== undefined) {
       const val = Number(settings.detectionMinFillRatio);
       if (isNaN(val) || val <= 0 || val > 1.0) {
         this.logger.warn({
           message: `Invalid detectionMinFillRatio: ${settings.detectionMinFillRatio}, keeping current value`,
         });
-        return;
+      } else {
+        this.detectionMinFillRatio = new FinancialDecimal(val);
+        this.logger.log(
+          `Detection min fill ratio updated to ${this.detectionMinFillRatio.toString()}`,
+        );
       }
-      this.detectionMinFillRatio = new FinancialDecimal(val);
-      this.logger.log(
-        `Detection min fill ratio updated to ${this.detectionMinFillRatio.toString()}`,
-      );
+    }
+    if (settings.depthEdgeScalingFactor !== undefined) {
+      const val = Number(settings.depthEdgeScalingFactor);
+      if (isNaN(val) || val < 0) {
+        this.logger.warn({
+          message: `Invalid depthEdgeScalingFactor: ${settings.depthEdgeScalingFactor}, keeping current value`,
+        });
+      } else {
+        this.depthEdgeScalingFactor = new FinancialDecimal(val);
+        this.logger.log(
+          `Depth edge scaling factor updated to ${this.depthEdgeScalingFactor.toString()}`,
+        );
+      }
+    }
+    if (settings.maxDynamicEdgeThreshold !== undefined) {
+      const val = Number(settings.maxDynamicEdgeThreshold);
+      if (isNaN(val) || val <= 0 || val > 1.0) {
+        this.logger.warn({
+          message: `Invalid maxDynamicEdgeThreshold: ${settings.maxDynamicEdgeThreshold}, keeping current value`,
+        });
+      } else {
+        this.maxDynamicEdgeThreshold = new FinancialDecimal(val);
+        this.logger.log(
+          `Max dynamic edge threshold updated to ${this.maxDynamicEdgeThreshold.toString()}`,
+        );
+      }
     }
   }
 
-  private get minEdgeThreshold(): Decimal {
-    return new FinancialDecimal(
-      this.configService.get<number>('DETECTION_MIN_EDGE_THRESHOLD', 0.008),
+  private computeDynamicThreshold(minDepth: Decimal): Decimal {
+    const scalingTerm = this.depthEdgeScalingFactor.div(minDepth);
+    const dynamicBase = this.minEdgeThreshold.mul(
+      new FinancialDecimal(1).plus(scalingTerm),
     );
+    return Decimal.min(dynamicBase, this.maxDynamicEdgeThreshold);
   }
 
   private getGasEstimateUsd(...feeSchedules: FeeSchedule[]): Decimal {
@@ -220,10 +309,11 @@ export class EdgeCalculatorService implements OnModuleInit {
 
     // Guard: zero prices → cannot compute VWAP target contracts
     if (dislocation.buyPrice.isZero() || dislocation.sellPrice.isZero()) {
-      this.filterInsufficientVwapDepth(
+      filterInsufficientVwapDepth(
         pairEventDescription,
         dislocation,
         filtered,
+        this.eventEmitter,
       );
       return;
     }
@@ -252,10 +342,11 @@ export class EdgeCalculatorService implements OnModuleInit {
 
     // Null VWAP = empty book side → filter
     if (!buyVwapResult || !sellVwapResult) {
-      this.filterInsufficientVwapDepth(
+      filterInsufficientVwapDepth(
         pairEventDescription,
         dislocation,
         filtered,
+        this.eventEmitter,
       );
       return;
     }
@@ -268,10 +359,11 @@ export class EdgeCalculatorService implements OnModuleInit {
       buyFillRatio.lt(this.detectionMinFillRatio) ||
       sellFillRatio.lt(this.detectionMinFillRatio)
     ) {
-      this.filterInsufficientVwapDepth(
+      filterInsufficientVwapDepth(
         pairEventDescription,
         dislocation,
         filtered,
+        this.eventEmitter,
       );
       return;
     }
@@ -317,7 +409,31 @@ export class EdgeCalculatorService implements OnModuleInit {
     const multiplier = this.degradationService.getEdgeThresholdMultiplier(
       dislocation.buyPlatformId,
     );
-    const effectiveThreshold = this.minEdgeThreshold.mul(multiplier);
+
+    // Dynamic threshold: scale inversely with book depth
+    // Falls back to static minEdgeThreshold when scalingFactor=0 (disabled) or minDepth=0 (unreachable — VWAP null check upstream)
+    let dynamicBase = this.minEdgeThreshold;
+    if (this.depthEdgeScalingFactor.gt(0)) {
+      const minDepth = Decimal.min(
+        buyVwapResult.totalQtyAvailable,
+        sellVwapResult.totalQtyAvailable,
+      );
+      if (minDepth.gt(0)) {
+        dynamicBase = this.computeDynamicThreshold(minDepth);
+      }
+    }
+    const effectiveThreshold = dynamicBase.mul(multiplier);
+
+    this.logger.debug({
+      message: `Threshold: ${pairEventDescription}`,
+      correlationId: getCorrelationId(),
+      data: {
+        baseMinEdge: this.minEdgeThreshold.toString(),
+        dynamicBase: dynamicBase.toString(),
+        multiplier: multiplier.toString(),
+        effectiveThreshold: effectiveThreshold.toString(),
+      },
+    });
 
     if (!FinancialMath.isAboveThreshold(netEdge, effectiveThreshold)) {
       const reason = netEdge.isNegative() ? 'negative_edge' : 'below_threshold';
@@ -358,20 +474,25 @@ export class EdgeCalculatorService implements OnModuleInit {
     }
 
     // Capital efficiency gate (FR-AD-08): resolution date + annualized return
-    const { passed, annualizedReturn } = this.checkCapitalEfficiency(
+    const { passed, annualizedReturn } = checkCapitalEfficiency({
       dislocation,
       netEdge,
       pairEventDescription,
       filtered,
-    );
+      minAnnualizedReturn: this.minAnnualizedReturn,
+      logger: this.logger,
+      eventEmitter: this.eventEmitter,
+    });
     if (!passed) return;
 
-    const feeBreakdown = this.buildFeeBreakdown(
+    const feeBreakdown = buildFeeBreakdown(
       dislocation,
       buyFeeSchedule,
       sellFeeSchedule,
+      gasEstimate,
+      this.positionSizeUsd,
     );
-    const liquidityDepth = this.buildLiquidityDepth(dislocation);
+    const liquidityDepth = buildLiquidityDepth(dislocation);
 
     const enriched: EnrichedOpportunity = {
       dislocation,
@@ -386,6 +507,7 @@ export class EdgeCalculatorService implements OnModuleInit {
       liquidityDepth,
       recommendedPositionSize: null,
       annualizedReturn,
+      effectiveMinEdge: effectiveThreshold,
       enrichedAt: new Date(),
     };
 
@@ -416,197 +538,9 @@ export class EdgeCalculatorService implements OnModuleInit {
         },
         liquidityDepth,
         annualizedReturn: annualizedReturn?.toNumber() ?? null,
+        effectiveMinEdge: effectiveThreshold.toNumber(),
         enrichedAt: enriched.enrichedAt,
       }),
-    );
-  }
-
-  private checkCapitalEfficiency(
-    dislocation: RawDislocation,
-    netEdge: Decimal,
-    pairEventDescription: string,
-    filtered: FilteredDislocation[],
-  ): { passed: boolean; annualizedReturn: Decimal | null } {
-    const resolutionDate = dislocation.pairConfig.resolutionDate;
-    const threshold = this.minAnnualizedReturn;
-
-    // Gate 1: Resolution date required
-    if (!resolutionDate) {
-      const reason = 'no_resolution_date';
-      filtered.push({
-        pairEventDescription,
-        netEdge: netEdge.toString(),
-        threshold: 'N/A',
-        reason,
-      });
-      this.logger.debug({
-        message: `Opportunity filtered: ${pairEventDescription} — no resolution date`,
-        correlationId: getCorrelationId(),
-        data: { pairEventDescription, reason },
-      });
-      this.eventEmitter.emit(
-        EVENT_NAMES.OPPORTUNITY_FILTERED,
-        new OpportunityFilteredEvent(
-          pairEventDescription,
-          netEdge,
-          threshold,
-          reason,
-          undefined,
-          { matchId: dislocation.pairConfig.matchId },
-        ),
-      );
-      return { passed: false, annualizedReturn: null };
-    }
-
-    // Gate 2: Resolution date must be in the future
-    const now = new Date();
-    const daysToResolution = new FinancialDecimal(
-      resolutionDate.getTime() - now.getTime(),
-    ).div(86_400_000);
-
-    if (daysToResolution.lte(0)) {
-      const reason = 'resolution_date_passed';
-      filtered.push({
-        pairEventDescription,
-        netEdge: netEdge.toString(),
-        threshold: 'N/A',
-        reason,
-      });
-      this.logger.debug({
-        message: `Opportunity filtered: ${pairEventDescription} — resolution date in the past`,
-        correlationId: getCorrelationId(),
-        data: {
-          pairEventDescription,
-          resolutionDate: resolutionDate.toISOString(),
-          reason,
-        },
-      });
-      this.eventEmitter.emit(
-        EVENT_NAMES.OPPORTUNITY_FILTERED,
-        new OpportunityFilteredEvent(
-          pairEventDescription,
-          netEdge,
-          threshold,
-          reason,
-          undefined,
-          { matchId: dislocation.pairConfig.matchId },
-        ),
-      );
-      return { passed: false, annualizedReturn: null };
-    }
-
-    // Gate 3: Annualized return threshold
-    const annualizedReturn = netEdge.mul(
-      new FinancialDecimal(365).div(daysToResolution),
-    );
-
-    if (annualizedReturn.lt(threshold)) {
-      const reason = `annualized_return_${annualizedReturn.mul(100).toFixed(1)}%_below_${threshold.mul(100).toFixed(0)}%_minimum`;
-      filtered.push({
-        pairEventDescription,
-        netEdge: netEdge.toString(),
-        threshold: threshold.toString(),
-        reason,
-      });
-      this.logger.debug({
-        message: `Opportunity filtered: ${pairEventDescription} — annualized return below threshold`,
-        correlationId: getCorrelationId(),
-        data: {
-          pairEventDescription,
-          annualizedReturn: annualizedReturn.toString(),
-          threshold: threshold.toString(),
-          daysToResolution: daysToResolution.toFixed(1),
-          resolutionDate: resolutionDate.toISOString(),
-          reason,
-        },
-      });
-      this.eventEmitter.emit(
-        EVENT_NAMES.OPPORTUNITY_FILTERED,
-        new OpportunityFilteredEvent(
-          pairEventDescription,
-          netEdge,
-          threshold,
-          reason,
-          undefined,
-          {
-            matchId: dislocation.pairConfig.matchId,
-            annualizedReturn: annualizedReturn.toNumber(),
-          },
-        ),
-      );
-      return { passed: false, annualizedReturn };
-    }
-
-    return { passed: true, annualizedReturn };
-  }
-
-  private buildFeeBreakdown(
-    dislocation: RawDislocation,
-    buyFeeSchedule: FeeSchedule,
-    sellFeeSchedule: FeeSchedule,
-  ): FeeBreakdown {
-    const buyFeeRate = FinancialMath.calculateTakerFeeRate(
-      dislocation.buyPrice,
-      buyFeeSchedule,
-    );
-    const sellFeeRate = FinancialMath.calculateTakerFeeRate(
-      dislocation.sellPrice,
-      sellFeeSchedule,
-    );
-    const buyFeeCost = dislocation.buyPrice.mul(buyFeeRate);
-    const sellFeeCost = dislocation.sellPrice.mul(sellFeeRate);
-    const gasEstimate = this.getGasEstimateUsd(buyFeeSchedule, sellFeeSchedule);
-    const gasFraction = gasEstimate.div(this.positionSizeUsd);
-    const totalCosts = buyFeeCost.plus(sellFeeCost).plus(gasFraction);
-
-    return {
-      buyFeeCost,
-      sellFeeCost,
-      gasFraction,
-      totalCosts,
-      buyFeeSchedule,
-      sellFeeSchedule,
-    };
-  }
-
-  private buildLiquidityDepth(dislocation: RawDislocation): LiquidityDepth {
-    const buyBook = dislocation.buyOrderBook;
-    const sellBook = dislocation.sellOrderBook;
-
-    return {
-      buyBestAskSize: buyBook.asks.length > 0 ? buyBook.asks[0]!.quantity : 0,
-      sellBestAskSize:
-        sellBook.asks.length > 0 ? sellBook.asks[0]!.quantity : 0,
-      buyBestBidSize: buyBook.bids.length > 0 ? buyBook.bids[0]!.quantity : 0,
-      sellBestBidSize:
-        sellBook.bids.length > 0 ? sellBook.bids[0]!.quantity : 0,
-      // Fillable-side depth: buy leg fills against asks, sell leg fills against bids
-      buyTotalDepth: buyBook.asks.reduce((sum, l) => sum + l.quantity, 0),
-      sellTotalDepth: sellBook.bids.reduce((sum, l) => sum + l.quantity, 0),
-    };
-  }
-
-  private filterInsufficientVwapDepth(
-    pairEventDescription: string,
-    dislocation: RawDislocation,
-    filtered: FilteredDislocation[],
-  ): void {
-    filtered.push({
-      pairEventDescription,
-      netEdge: '0',
-      threshold: 'N/A',
-      reason: 'insufficient_vwap_depth',
-    });
-    this.eventEmitter.emit(
-      EVENT_NAMES.OPPORTUNITY_FILTERED,
-      new OpportunityFilteredEvent(
-        pairEventDescription,
-        new FinancialDecimal(0),
-        new FinancialDecimal(0),
-        'insufficient_vwap_depth',
-        undefined,
-        { matchId: dislocation.pairConfig.matchId },
-      ),
     );
   }
 }
