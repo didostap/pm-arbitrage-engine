@@ -7,11 +7,25 @@
  * connector mode is immutable after DI resolution.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import type { IPlatformConnector } from '../../../common/interfaces/platform-connector.interface';
 import type { PlatformHealth } from '../../../common/types/platform.type';
 import { PlatformId } from '../../../common/types/platform.type';
 import { ExecutionService } from '../../../modules/execution/execution.service';
+import { LegSequencingService } from '../../../modules/execution/leg-sequencing.service';
+import { DepthAnalysisService } from '../../../modules/execution/depth-analysis.service';
+import {
+  KALSHI_CONNECTOR_TOKEN,
+  POLYMARKET_CONNECTOR_TOKEN,
+} from '../../../connectors/connector.constants';
+import { OrderRepository } from '../../../persistence/repositories/order.repository';
+import { PositionRepository } from '../../../persistence/repositories/position.repository';
+import { ComplianceValidatorService } from '../../../modules/execution/compliance/compliance-validator.service';
+import { PlatformHealthService } from '../../../modules/data-ingestion/platform-health.service';
+import { DataDivergenceService } from '../../../modules/data-ingestion/data-divergence.service';
 import type {
   RankedOpportunity,
   BudgetReservation,
@@ -141,52 +155,63 @@ describe('Paper/Live Boundary — ExecutionService', () => {
     };
   });
 
+  async function buildService(
+    mode: 'paper' | 'live',
+  ): Promise<ExecutionService> {
+    kalshiConnector = createMockConnector(mode);
+    polymarketConnector = createMockConnector(mode);
+    const platformHealthService = {
+      getPlatformHealth: vi
+        .fn()
+        .mockImplementation((platformId: PlatformId) => ({
+          platformId,
+          status: 'healthy',
+          lastHeartbeat: new Date(),
+          latencyMs: 50,
+          mode,
+        })),
+    };
+    const dataDivergenceService = {
+      getDivergenceStatus: vi.fn().mockReturnValue('aligned'),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ExecutionService,
+        LegSequencingService,
+        DepthAnalysisService,
+        { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
+        { provide: POLYMARKET_CONNECTOR_TOKEN, useValue: polymarketConnector },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: OrderRepository, useValue: orderRepository },
+        { provide: PositionRepository, useValue: positionRepository },
+        {
+          provide: ComplianceValidatorService,
+          useValue: {
+            validate: vi
+              .fn()
+              .mockReturnValue({ approved: true, violations: [] }),
+          },
+        },
+        { provide: ConfigService, useValue: configService },
+        { provide: PlatformHealthService, useValue: platformHealthService },
+        { provide: DataDivergenceService, useValue: dataDivergenceService },
+      ],
+    }).compile();
+
+    return module.get<ExecutionService>(ExecutionService);
+  }
+
   describe.each([
     [true, 'paper'],
     [false, 'live'],
   ] as const)('when isPaper=%s (%s mode)', (isPaper, modeLabel) => {
-    beforeEach(() => {
-      const mode = modeLabel;
-      kalshiConnector = createMockConnector(mode);
-      polymarketConnector = createMockConnector(mode);
-    });
-
     it(`[P1] ${modeLabel} order creation sets isPaper=${isPaper} on order records`, async () => {
-      // ARRANGE: Build execution service with connectors in the given mode
-      // The isPaper flag is derived from connector.getHealth().mode
-      // Both connectors return mode='paper' or mode='live'
+      const service = await buildService(modeLabel);
       const { opportunity, reservation } = createMockOpportunity('pair-1');
-
-      // ACT: Execute the opportunity
-      const mode = modeLabel;
-      const service = new ExecutionService(
-        kalshiConnector,
-        polymarketConnector,
-        eventEmitter as any,
-        orderRepository as any,
-        positionRepository as any,
-        {
-          validate: vi.fn().mockReturnValue({ approved: true, violations: [] }),
-        } as any,
-        configService as any,
-        {
-          getPlatformHealth: vi
-            .fn()
-            .mockImplementation((platformId: PlatformId) => ({
-              platformId,
-              status: 'healthy',
-              lastHeartbeat: new Date(),
-              latencyMs: 50,
-              mode,
-            })),
-          getConnectorLatency: vi.fn().mockReturnValue(null),
-        } as any,
-        { getDivergenceStatus: vi.fn().mockReturnValue('aligned') } as any,
-      );
 
       await service.execute(opportunity, reservation);
 
-      // ASSERT: The order record passed to orderRepository.create has isPaper flag set correctly
       expect(orderRepository.create).toHaveBeenCalled();
       const firstCallArgs = orderRepository.create.mock.calls[0]![0];
       expect(firstCallArgs.isPaper).toBe(isPaper);
@@ -194,42 +219,12 @@ describe('Paper/Live Boundary — ExecutionService', () => {
   });
 
   it('[P1] paper execution does not trigger live halt checks', async () => {
-    // ARRANGE: Set up paper-mode connectors
-    kalshiConnector = createMockConnector('paper');
-    polymarketConnector = createMockConnector('paper');
+    const service = await buildService('paper');
     const { opportunity, reservation } =
       createMockOpportunity('pair-paper-halt');
 
-    // ACT: Execute a paper opportunity
-    const service = new ExecutionService(
-      kalshiConnector,
-      polymarketConnector,
-      eventEmitter as any,
-      orderRepository as any,
-      positionRepository as any,
-      {
-        validate: vi.fn().mockReturnValue({ approved: true, violations: [] }),
-      } as any,
-      configService as any,
-      {
-        getPlatformHealth: vi
-          .fn()
-          .mockImplementation((platformId: PlatformId) => ({
-            platformId,
-            status: 'healthy',
-            lastHeartbeat: new Date(),
-            latencyMs: 50,
-            mode: 'paper',
-          })),
-        getConnectorLatency: vi.fn().mockReturnValue(null),
-      } as any,
-      { getDivergenceStatus: vi.fn().mockReturnValue('aligned') } as any,
-    );
-
     await service.execute(opportunity, reservation);
 
-    // ASSERT: Events emitted should carry isPaper=true (paper execution
-    // path does not feed into the live halt mechanism)
     const emittedEvents = eventEmitter.emit.mock.calls
       .filter(
         ([name]: [string]) =>
@@ -241,7 +236,6 @@ describe('Paper/Live Boundary — ExecutionService', () => {
       expect((event as Record<string, unknown>).isPaper).toBe(true);
     }
 
-    // ASSERT: No halt-related events emitted for paper execution
     const haltEvents = eventEmitter.emit.mock.calls.filter(([name]: [string]) =>
       name.includes('halt'),
     );
@@ -249,42 +243,12 @@ describe('Paper/Live Boundary — ExecutionService', () => {
   });
 
   it('[P1] mode immutability — isPaper is derived from connector health at execute() time', async () => {
-    // ARRANGE: Paper-mode connectors
-    kalshiConnector = createMockConnector('paper');
-    polymarketConnector = createMockConnector('paper');
+    const service = await buildService('paper');
     const { opportunity, reservation } =
       createMockOpportunity('pair-immutable');
 
-    const service = new ExecutionService(
-      kalshiConnector,
-      polymarketConnector,
-      eventEmitter as any,
-      orderRepository as any,
-      positionRepository as any,
-      {
-        validate: vi.fn().mockReturnValue({ approved: true, violations: [] }),
-      } as any,
-      configService as any,
-      {
-        getPlatformHealth: vi
-          .fn()
-          .mockImplementation((platformId: PlatformId) => ({
-            platformId,
-            status: 'healthy',
-            lastHeartbeat: new Date(),
-            latencyMs: 50,
-            mode: 'paper',
-          })),
-        getConnectorLatency: vi.fn().mockReturnValue(null),
-      } as any,
-      { getDivergenceStatus: vi.fn().mockReturnValue('aligned') } as any,
-    );
-
-    // ACT: Execute with paper connectors
     await service.execute(opportunity, reservation);
 
-    // ASSERT: The order record created during execution carries isPaper=true
-    // proving the mode was correctly derived from connector health
     expect(orderRepository.create).toHaveBeenCalled();
     const createArgs = orderRepository.create.mock.calls[0]![0];
     expect(createArgs.isPaper).toBe(true);
@@ -300,16 +264,11 @@ describe('Paper/Live Boundary — ExecutionService', () => {
       [false, 'live'],
     ] as const)(
       'when isPaper=%s (%s mode) — dual-leg depth gate',
-      (isPaper, modeLabel) => {
-        beforeEach(() => {
-          const mode = modeLabel;
-          kalshiConnector = createMockConnector(mode);
-          polymarketConnector = createMockConnector(mode);
-        });
-
+      (_isPaper, modeLabel) => {
         it(`[P1] 5.1/5.2 — dual-leg depth gate runs in ${modeLabel} mode`, async () => {
-          // Both legs have shallow books (1 contract each) — should trigger
-          // dual-leg depth rejection regardless of paper/live mode.
+          const service = await buildService(modeLabel);
+
+          // Override order books with shallow depth AFTER service is built
           (
             kalshiConnector.getOrderBook as ReturnType<typeof vi.fn>
           ).mockResolvedValue({
@@ -326,41 +285,9 @@ describe('Paper/Live Boundary — ExecutionService', () => {
           const { opportunity, reservation } = createMockOpportunity(
             `pair-depth-${modeLabel}`,
           );
-
-          const service = new ExecutionService(
-            kalshiConnector,
-            polymarketConnector,
-            eventEmitter as any,
-            orderRepository as any,
-            positionRepository as any,
-            {
-              validate: vi
-                .fn()
-                .mockReturnValue({ approved: true, violations: [] }),
-            } as any,
-            configService as any,
-            {
-              getPlatformHealth: vi
-                .fn()
-                .mockImplementation((platformId: PlatformId) => ({
-                  platformId,
-                  status: 'healthy',
-                  lastHeartbeat: new Date(),
-                  latencyMs: 50,
-                  mode: modeLabel,
-                })),
-              getConnectorLatency: vi.fn().mockReturnValue(null),
-            } as any,
-            {
-              getDivergenceStatus: vi.fn().mockReturnValue('aligned'),
-            } as any,
-          );
-
           const result = await service.execute(opportunity, reservation);
 
-          // ASSERT: Dual-leg depth gate rejects insufficient depth in BOTH modes
           expect(result.success).toBe(false);
-          // No orders submitted — gate fires before order submission
           expect(
             (kalshiConnector.submitOrder as ReturnType<typeof vi.fn>).mock.calls
               .length,
@@ -370,7 +297,6 @@ describe('Paper/Live Boundary — ExecutionService', () => {
               .calls.length,
           ).toBe(0);
 
-          // Verify the rejection event was emitted
           const filteredCalls = eventEmitter.emit.mock.calls.filter(
             ([name]: [string]) => name === 'detection.opportunity.filtered',
           );

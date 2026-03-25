@@ -14,6 +14,8 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Decimal from 'decimal.js';
 import { ExecutionService } from './execution.service';
+import { LegSequencingService } from './leg-sequencing.service';
+import { DepthAnalysisService } from './depth-analysis.service';
 import {
   KALSHI_CONNECTOR_TOKEN,
   POLYMARKET_CONNECTOR_TOKEN,
@@ -141,6 +143,7 @@ function makeEnriched(
     sellFillRatio: 1.0,
     recommendedPositionSize: null,
     annualizedReturn: new Decimal('1.56'),
+    effectiveMinEdge: new Decimal('0.008'),
     enrichedAt: new Date(),
   };
 }
@@ -287,6 +290,8 @@ describe('ExecutionService — Dual-Leg Depth Gate (Story 10-7-1)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExecutionService,
+        LegSequencingService,
+        DepthAnalysisService,
         { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
         { provide: POLYMARKET_CONNECTOR_TOKEN, useValue: polymarketConnector },
         { provide: EventEmitter2, useValue: eventEmitter },
@@ -673,6 +678,8 @@ describe('ExecutionService — Dual-Leg Depth Gate (Story 10-7-1)', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ExecutionService,
+          LegSequencingService,
+          DepthAnalysisService,
           { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
           {
             provide: POLYMARKET_CONNECTOR_TOKEN,

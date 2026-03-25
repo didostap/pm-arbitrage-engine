@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ExecutionLockService } from './execution-lock.service';
 import { ExecutionQueueService } from './execution-queue.service';
 import { ExecutionService } from './execution.service';
+import { LegSequencingService } from './leg-sequencing.service';
+import { DepthAnalysisService } from './depth-analysis.service';
 import {
   EXECUTION_QUEUE_TOKEN,
   EXECUTION_ENGINE_TOKEN,
@@ -36,6 +38,8 @@ import { AutoUnwindService } from './auto-unwind.service';
     ComplianceConfigLoaderService,
     ComplianceValidatorService,
     AutoUnwindService,
+    LegSequencingService,
+    DepthAnalysisService,
     {
       provide: EXECUTION_ENGINE_TOKEN,
       useClass: ExecutionService,
