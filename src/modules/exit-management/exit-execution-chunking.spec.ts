@@ -92,7 +92,7 @@ const exitEvalResult = {
   capturedEdgePercent: new Decimal('16.7'),
 };
 
-describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
+describe('ExitExecutionService — Chunking (Story 10-7-5)', () => {
   let ctx: ExitMonitorTestContext;
 
   beforeEach(async () => {
@@ -133,10 +133,9 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       // Depth is 20 each time → chunks of 20, 20, 10
       setupDepthMocks(ctx, [20, 20, 20], [20, 20, 20]);
 
-      // Invoke private executeExit via the public evaluateAllPositions flow
-      // We need to trigger executeExit. Use the service's internal method access.
-      const service = ctx.service as any;
-      await service.executeExit(
+      // executeExit now lives on ExitExecutionService
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'), // kalshiClosePrice
@@ -174,8 +173,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
 
       // 500 depth both sides, 100 position → single chunk
       setupDepthMocks(ctx, [500], [500]);
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -254,8 +253,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
         },
       );
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -298,8 +297,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
         new Error('Polymarket connection failed'),
       );
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -339,8 +338,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
         new Error('Kalshi API down'),
       );
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -392,8 +391,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       ctx.positionRepository.findByIdWithOrders!.mockResolvedValue(position);
       setupDepthMocks(ctx, [20, 20, 20], [20, 20, 20]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -444,8 +443,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       // Depth: 20, 20, then 0 (exhausted)
       setupDepthMocks(ctx, [20, 20, 0], [20, 20, 0]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -479,9 +478,9 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       ctx.positionRepository.findByIdWithOrders!.mockResolvedValue(position);
       setupDepthMocks(ctx, [500], [500]);
 
-      const service = ctx.service as any;
+      const exitExec = ctx.exitExecutionService as any;
       // Pass effective sizes as residual (40 each)
-      await service.executeExit(
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -514,8 +513,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       ctx.positionRepository.findByIdWithOrders!.mockResolvedValue(position);
       setupDepthMocks(ctx, [500], [500]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -557,10 +556,10 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       setupDepthMocks(ctx, [500, 500, 500], [500, 500, 500]);
 
       // Set exitMaxChunkSize = 10 via reloadConfig
-      (ctx.service as any).exitMaxChunkSize = 10;
+      (ctx.exitExecutionService as any).exitMaxChunkSize = 10;
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -586,18 +585,18 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
     });
 
     it('should use new exitMaxChunkSize after hot-reload', () => {
-      const service = ctx.service as any;
+      const exitExec = ctx.exitExecutionService as any;
 
       // Initial value
-      expect(service.exitMaxChunkSize).toBe(0);
+      expect(exitExec.exitMaxChunkSize).toBe(0);
 
       // Simulate hot-reload
-      service.reloadConfig({ exitMaxChunkSize: 15 });
-      expect(service.exitMaxChunkSize).toBe(15);
+      exitExec.reloadConfig({ exitMaxChunkSize: 15 });
+      expect(exitExec.exitMaxChunkSize).toBe(15);
 
       // Change again
-      service.reloadConfig({ exitMaxChunkSize: 0 });
-      expect(service.exitMaxChunkSize).toBe(0);
+      exitExec.reloadConfig({ exitMaxChunkSize: 0 });
+      expect(exitExec.exitMaxChunkSize).toBe(0);
     });
   });
 
@@ -631,8 +630,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       // Decreasing depth: 30, 15, then enough for remainder
       setupDepthMocks(ctx, [30, 15, 500], [30, 15, 500]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -685,8 +684,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       // Depth: 20 for first chunk, then 0
       setupDepthMocks(ctx, [20, 0], [20, 0]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -765,8 +764,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
         timestamp: new Date(),
       });
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -836,8 +835,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
         timestamp: new Date(),
       });
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -886,8 +885,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       ctx.positionRepository.findByIdWithOrders!.mockResolvedValue(position);
       setupDepthMocks(ctx, [20, 20, 0], [20, 20, 0]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),
@@ -936,8 +935,8 @@ describe('ExitMonitorService — Chunking (Story 10-7-5)', () => {
       ctx.positionRepository.findByIdWithOrders!.mockResolvedValue(position);
       setupDepthMocks(ctx, [20, 20, 20], [20, 20, 20]);
 
-      const service = ctx.service as any;
-      await service.executeExit(
+      const exitExec = ctx.exitExecutionService as any;
+      await exitExec.executeExit(
         position,
         exitEvalResult,
         new Decimal('0.66'),

@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConnectorModule } from '../../connectors/connector.module';
 import { RiskManagementModule } from '../risk-management/risk-management.module';
 import { ExitMonitorService } from './exit-monitor.service';
+import { ExitExecutionService } from './exit-execution.service';
+import { ExitDataSourceService } from './exit-data-source.service';
 import { ThresholdEvaluatorService } from './threshold-evaluator.service';
 import { ShadowComparisonService } from './shadow-comparison.service';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
@@ -11,6 +13,8 @@ import { OrderRepository } from '../../persistence/repositories/order.repository
   imports: [ConnectorModule, RiskManagementModule],
   providers: [
     ExitMonitorService,
+    ExitExecutionService,
+    ExitDataSourceService,
     ThresholdEvaluatorService,
     ShadowComparisonService,
     PositionRepository,

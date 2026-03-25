@@ -13,7 +13,7 @@ vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
-describe('ExitMonitorService — partial fills', () => {
+describe('ExitExecutionService — partial fills', () => {
   let service: ExitMonitorTestContext['service'];
   let positionRepository: ExitMonitorTestContext['positionRepository'];
   let orderRepository: ExitMonitorTestContext['orderRepository'];

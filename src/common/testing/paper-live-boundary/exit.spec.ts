@@ -13,6 +13,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
 import { ExitMonitorService } from '../../../modules/exit-management/exit-monitor.service';
+import { ExitExecutionService } from '../../../modules/exit-management/exit-execution.service';
+import { ExitDataSourceService } from '../../../modules/exit-management/exit-data-source.service';
 import { ThresholdEvaluatorService } from '../../../modules/exit-management/threshold-evaluator.service';
 import { PositionRepository } from '../../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../../persistence/repositories/order.repository';
@@ -126,6 +128,8 @@ describe('Paper/Live Boundary — ExitMonitorService', () => {
       imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' })],
       providers: [
         ExitMonitorService,
+        ExitExecutionService,
+        ExitDataSourceService,
         { provide: PositionRepository, useValue: positionRepository },
         { provide: OrderRepository, useValue: { updateOrderStatus: vi.fn() } },
         { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },

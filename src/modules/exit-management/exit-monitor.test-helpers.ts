@@ -4,6 +4,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
 import { ExitMonitorService } from './exit-monitor.service';
+import { ExitExecutionService } from './exit-execution.service';
+import { ExitDataSourceService } from './exit-data-source.service';
 import { ThresholdEvaluatorService } from './threshold-evaluator.service';
 import { PositionRepository } from '../../persistence/repositories/position.repository';
 import { OrderRepository } from '../../persistence/repositories/order.repository';
@@ -74,6 +76,8 @@ export function createMockPosition(overrides: Record<string, unknown> = {}) {
 
 export interface ExitMonitorTestContext {
   service: ExitMonitorService;
+  exitExecutionService: ExitExecutionService;
+  exitDataSourceService: ExitDataSourceService;
   positionRepository: Record<string, ReturnType<typeof vi.fn>>;
   orderRepository: Record<string, ReturnType<typeof vi.fn>>;
   kalshiConnector: ReturnType<typeof createMockPlatformConnector>;
@@ -172,9 +176,18 @@ export async function createExitMonitorTestModule(): Promise<ExitMonitorTestCont
     },
   };
 
+  const configService = {
+    get: vi.fn().mockImplementation((key: string, defaultVal: unknown) => {
+      if (key === 'WS_STALENESS_THRESHOLD_MS') return 60000;
+      return defaultVal;
+    }),
+  };
+
   const module = await Test.createTestingModule({
     providers: [
       ExitMonitorService,
+      ExitExecutionService,
+      ExitDataSourceService,
       { provide: PositionRepository, useValue: positionRepository },
       { provide: OrderRepository, useValue: orderRepository },
       { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },
@@ -183,24 +196,18 @@ export async function createExitMonitorTestModule(): Promise<ExitMonitorTestCont
       { provide: EventEmitter2, useValue: eventEmitter },
       { provide: ThresholdEvaluatorService, useValue: thresholdEvaluator },
       { provide: PrismaService, useValue: prisma },
-      {
-        provide: ConfigService,
-        useValue: {
-          get: vi
-            .fn()
-            .mockImplementation((key: string, defaultVal: unknown) => {
-              if (key === 'WS_STALENESS_THRESHOLD_MS') return 60000;
-              return defaultVal;
-            }),
-        },
-      },
+      { provide: ConfigService, useValue: configService },
     ],
   }).compile();
 
   const service = module.get(ExitMonitorService);
+  const exitExecutionService = module.get(ExitExecutionService);
+  const exitDataSourceService = module.get(ExitDataSourceService);
 
   return {
     service,
+    exitExecutionService,
+    exitDataSourceService,
     positionRepository,
     orderRepository,
     kalshiConnector,

@@ -5,6 +5,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
 import { ExitMonitorService } from './exit-monitor.service';
+import { ExitExecutionService } from './exit-execution.service';
+import { ExitDataSourceService } from './exit-data-source.service';
 import {
   ThresholdEvaluatorService,
   ThresholdEvalInput,
@@ -249,6 +251,8 @@ describe('ExitMonitorService — Six-Criteria Integration (Story 10.2)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExitMonitorService,
+        ExitExecutionService,
+        ExitDataSourceService,
         { provide: PositionRepository, useValue: positionRepository },
         { provide: OrderRepository, useValue: orderRepository },
         { provide: KALSHI_CONNECTOR_TOKEN, useValue: kalshiConnector },

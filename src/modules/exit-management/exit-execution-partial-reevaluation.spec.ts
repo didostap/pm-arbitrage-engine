@@ -18,7 +18,7 @@ vi.mock('../../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
 }));
 
-describe('ExitMonitorService — partial reevaluation', () => {
+describe('ExitExecutionService — partial reevaluation', () => {
   let service: ExitMonitorTestContext['service'];
   let positionRepository: ExitMonitorTestContext['positionRepository'];
   let orderRepository: ExitMonitorTestContext['orderRepository'];

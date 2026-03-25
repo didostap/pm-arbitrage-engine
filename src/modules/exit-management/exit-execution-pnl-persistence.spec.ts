@@ -20,7 +20,7 @@ function getClosePositionPnl(
   return calls[0]?.[1];
 }
 
-describe('ExitMonitorService — realizedPnl persistence (Story 10-7-4)', () => {
+describe('ExitExecutionService — realizedPnl persistence (Story 10-7-4)', () => {
   let ctx: ExitMonitorTestContext;
 
   beforeEach(async () => {
