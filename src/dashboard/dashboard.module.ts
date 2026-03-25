@@ -3,6 +3,9 @@ import { DashboardGateway } from './dashboard.gateway';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
+import { DashboardOverviewService } from './dashboard-overview.service';
+import { DashboardCapitalService } from './dashboard-capital.service';
+import { DashboardAuditService } from './dashboard-audit.service';
 import { PositionEnrichmentService } from './position-enrichment.service';
 import { MatchApprovalController } from './match-approval.controller';
 import { MatchApprovalService } from './match-approval.service';
@@ -39,6 +42,9 @@ import { ConfigAccessor } from '../common/config/config-accessor.service';
     DashboardGateway,
     DashboardEventMapperService,
     DashboardService,
+    DashboardOverviewService,
+    DashboardCapitalService,
+    DashboardAuditService,
     PositionEnrichmentService,
     MatchApprovalService,
     PerformanceService,

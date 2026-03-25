@@ -2,14 +2,17 @@
 /**
  * Story 10-5.5 — Paper/Live Mode Boundary Tests: Dashboard Module
  *
- * Verifies that dashboard service correctly filters positions by mode
- * and returns separate live/paper capital in the overview response.
+ * Verifies that dashboard services correctly filter positions by mode
+ * and return separate live/paper capital in the overview response.
  *
- * TDD RED PHASE — all tests use it()
+ * Updated Story 10-8-4: Tests now target decomposed services.
+ * - getPositions → DashboardService (facade, still owns this method)
+ * - getOverview → DashboardOverviewService (extracted)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import { DashboardService } from '../../../dashboard/dashboard.service';
+import { DashboardOverviewService } from '../../../dashboard/dashboard-overview.service';
 import type { IRiskManager } from '../../../common/interfaces/risk-manager.interface';
 
 // ──────────────────────────────────────────────────────────────
@@ -29,7 +32,6 @@ function createMockPrisma() {
   return {
     openPosition: {
       count: vi.fn().mockResolvedValue(0),
-      aggregate: vi.fn().mockResolvedValue({ _sum: { expectedEdge: null } }),
       findMany: vi.fn().mockResolvedValue([]),
     },
     order: {
@@ -47,16 +49,14 @@ function createMockPrisma() {
         {
           singletonKey: 'default',
           mode: 'live',
-          capitalDeployedUsd: new Decimal('500'),
-          capitalReservedUsd: new Decimal('100'),
-          openPositionCount: 2,
+          totalCapitalDeployed: new Decimal('500'),
+          reservedCapital: new Decimal('100'),
         },
         {
           singletonKey: 'default',
           mode: 'paper',
-          capitalDeployedUsd: new Decimal('200'),
-          capitalReservedUsd: new Decimal('50'),
-          openPositionCount: 1,
+          totalCapitalDeployed: new Decimal('200'),
+          reservedCapital: new Decimal('50'),
         },
       ]),
     },
@@ -80,25 +80,15 @@ function createMockRiskManager(): IRiskManager {
 // Tests
 // ──────────────────────────────────────────────────────────────
 
-describe('Paper/Live Boundary — DashboardService', () => {
+describe('Paper/Live Boundary — Dashboard', () => {
   let positionRepository: ReturnType<typeof createMockPositionRepository>;
   let prisma: ReturnType<typeof createMockPrisma>;
   let riskManager: IRiskManager;
-  let configService: { get: ReturnType<typeof vi.fn> };
-  let eventEmitter: { emit: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     positionRepository = createMockPositionRepository();
     prisma = createMockPrisma();
     riskManager = createMockRiskManager();
-    configService = {
-      get: vi
-        .fn()
-        .mockImplementation(
-          (_key: string, defaultValue?: unknown) => defaultValue,
-        ),
-    };
-    eventEmitter = { emit: vi.fn() };
   });
 
   describe.each([
@@ -106,7 +96,6 @@ describe('Paper/Live Boundary — DashboardService', () => {
     ['live', false],
   ] as const)('getPositions(mode=%s) filtering', (mode, expectedIsPaper) => {
     it(`[P1] getPositions(mode='${mode}') returns only ${mode} positions`, async () => {
-      // ARRANGE: Set up position data for both modes
       const makePair = (id: string) => ({
         kalshiContractId: `kalshi-${id}`,
         polymarketContractId: `poly-${id}`,
@@ -184,31 +173,37 @@ describe('Paper/Live Boundary — DashboardService', () => {
         }),
       );
 
+      // DashboardService facade: 6 constructor args
       const service = new DashboardService(
-        prisma as any,
-        configService as any,
-        { enrich: enrichMock } as any,
+        {
+          getOverview: vi.fn(),
+          getHealth: vi.fn(),
+          getAlerts: vi.fn(),
+          getShadowComparisons: vi.fn(),
+          getShadowSummary: vi.fn(),
+        } as any,
+        {
+          getBankrollConfig: vi.fn(),
+          updateBankroll: vi.fn(),
+          computeRealizedPnl: vi.fn().mockReturnValue(null),
+        } as any,
+        {
+          getPositionDetails: vi.fn(),
+          parseJsonFieldWithEvent: vi
+            .fn()
+            .mockImplementation((_s: unknown, v: unknown) => v),
+        } as any,
         positionRepository as any,
-        eventEmitter as any,
-        riskManager,
-        { findByKey: vi.fn() } as any,
-        { getActiveSubscriptionCount: vi.fn().mockReturnValue(0) } as any,
-        { getDivergenceStatus: vi.fn().mockReturnValue('aligned') } as any,
-        { getWsLastMessageTimestamp: vi.fn().mockReturnValue(null) } as any,
-        { getComparisons: vi.fn().mockReturnValue([]) } as any,
-        { append: vi.fn().mockResolvedValue(undefined) } as any,
+        { enrich: enrichMock } as any,
+        prisma as any,
       );
 
-      // ACT: Call getPositions with specific mode
       const result = await service.getPositions(mode);
 
-      // ASSERT: findManyWithFilters was called with correct isPaper boolean
       expect(positionRepository.findManyWithFilters).toHaveBeenCalled();
       const callArgs = positionRepository.findManyWithFilters.mock.calls[0]!;
-      // The second argument is isPaper: mode='paper' maps to true, mode='live' maps to false
       expect(callArgs[1]).toBe(expectedIsPaper);
 
-      // ASSERT: Returned positions match the requested mode
       const expectedCount = mode === 'paper' ? 2 : 1;
       expect(result.count).toBe(expectedCount);
       for (const pos of result.data) {
@@ -218,39 +213,37 @@ describe('Paper/Live Boundary — DashboardService', () => {
   });
 
   it('[P1] getOverview() returns separate live/paper capital in response', async () => {
-    // ARRANGE: Set up risk manager with distinct live/paper bankrolls
-    const service = new DashboardService(
+    // Test DashboardOverviewService directly (where getOverview now lives)
+    const overviewService = new DashboardOverviewService(
       prisma as any,
-      configService as any,
-      {
-        enrich: vi.fn().mockResolvedValue({ status: 'enriched', data: {} }),
-      } as any,
       positionRepository as any,
-      eventEmitter as any,
       riskManager,
-      { findByKey: vi.fn() } as any,
       { getActiveSubscriptionCount: vi.fn().mockReturnValue(0) } as any,
       { getDivergenceStatus: vi.fn().mockReturnValue('aligned') } as any,
       { getWsLastMessageTimestamp: vi.fn().mockReturnValue(null) } as any,
-      { getComparisons: vi.fn().mockReturnValue([]) } as any,
-      { append: vi.fn().mockResolvedValue(undefined) } as any,
+      {
+        getClosedPositionEntries: vi.fn().mockReturnValue([]),
+        generateDailySummary: vi.fn(),
+      } as any,
+      {
+        get: vi
+          .fn()
+          .mockImplementation(
+            (_key: string, defaultValue?: unknown) => defaultValue,
+          ),
+      } as any,
     );
 
-    // ACT: Get the overview
-    const overview = await service.getOverview();
+    const overview = await overviewService.getOverview();
 
-    // ASSERT: capitalOverview contains separate live and paper objects
     expect(overview.capitalOverview).not.toBeNull();
     expect(overview.capitalOverview!.live).toBeDefined();
     expect(overview.capitalOverview!.paper).toBeDefined();
 
-    // ASSERT: Live and paper have independent bankroll values
-    // Live bankroll: '10000', Paper bankroll: '5000'
     expect(overview.capitalOverview!.live.bankroll).not.toBe(
       overview.capitalOverview!.paper.bankroll,
     );
 
-    // ASSERT: Flat convenience fields resolve to live-mode values
     expect(overview.totalBankroll).toBe(
       overview.capitalOverview!.live.bankroll,
     );
@@ -264,10 +257,8 @@ describe('Paper/Live Boundary — DashboardService', () => {
       overview.capitalOverview!.live.reserved,
     );
 
-    // ASSERT: Paper capital values reflect the separate paper bankroll
     const paperCap = overview.capitalOverview!.paper;
     expect(paperCap.bankroll).toBeDefined();
-    // Paper deployed + available + reserved should relate to paper bankroll, not live
     expect(new Decimal(paperCap.bankroll ?? '0').toString()).not.toBe('0');
   });
 });

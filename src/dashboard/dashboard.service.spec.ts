@@ -1,35 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import Decimal from 'decimal.js';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../common/prisma.service';
 import { PositionRepository } from '../persistence/repositories/position.repository';
 import { PositionEnrichmentService } from './position-enrichment.service';
 import type { EnrichmentResult } from './position-enrichment.service';
-import type { IRiskManager } from '../common/interfaces/risk-manager.interface';
-import { EngineConfigRepository } from '../persistence/repositories/engine-config.repository';
-import Decimal from 'decimal.js';
+import { DashboardOverviewService } from './dashboard-overview.service';
+import { DashboardCapitalService } from './dashboard-capital.service';
+import { DashboardAuditService } from './dashboard-audit.service';
 
 function createMockPrisma() {
   return {
-    platformHealthLog: {
-      findMany: vi.fn(),
-    },
     openPosition: {
-      count: vi.fn(),
-      findMany: vi.fn(),
       findUnique: vi.fn(),
-      aggregate: vi.fn(),
     },
     order: {
-      count: vi.fn(),
-      findMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     auditLog: {
-      findMany: vi.fn(),
-    },
-    riskState: {
-      findMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
     },
   } as unknown as PrismaService;
 }
@@ -37,20 +26,7 @@ function createMockPrisma() {
 function createMockPositionRepository() {
   return {
     findManyWithFilters: vi.fn(),
-    sumClosedPnlByDateRange: vi.fn().mockResolvedValue('0'),
   } as unknown as PositionRepository;
-}
-
-function createMockConfigService() {
-  return {
-    get: vi.fn((key: string, defaultValue?: string) => {
-      const config: Record<string, string> = {
-        PLATFORM_MODE_KALSHI: 'paper',
-        PLATFORM_MODE_POLYMARKET: 'paper',
-      };
-      return config[key] ?? defaultValue;
-    }),
-  } as unknown as ConfigService;
 }
 
 function createMockEnrichmentService() {
@@ -59,38 +35,31 @@ function createMockEnrichmentService() {
   } as unknown as PositionEnrichmentService;
 }
 
-function createMockEventEmitter() {
+function createMockOverviewService() {
   return {
-    emit: vi.fn(),
-    emitAsync: vi.fn(),
-  } as unknown as EventEmitter2;
+    getOverview: vi.fn().mockResolvedValue({ systemHealth: 'healthy' }),
+    getHealth: vi.fn().mockResolvedValue([]),
+    getAlerts: vi.fn().mockResolvedValue([]),
+    getShadowComparisons: vi.fn().mockReturnValue([]),
+    getShadowSummary: vi.fn().mockReturnValue({}),
+  } as unknown as DashboardOverviewService;
 }
 
-function createMockRiskManager() {
+function createMockCapitalService() {
   return {
-    getBankrollConfig: vi.fn().mockResolvedValue({
-      bankrollUsd: '10000',
-      paperBankrollUsd: null,
-      updatedAt: new Date().toISOString(),
-    }),
-    getBankrollUsd: vi.fn().mockReturnValue(new Decimal('10000')),
-    reloadBankroll: vi.fn().mockResolvedValue(undefined),
-    isTradingHalted: vi.fn().mockReturnValue(false),
-    getActiveHaltReasons: vi.fn().mockReturnValue([]),
-  } as unknown as IRiskManager;
+    getBankrollConfig: vi.fn().mockResolvedValue({ bankrollUsd: '10000' }),
+    updateBankroll: vi.fn().mockResolvedValue({ bankrollUsd: '15000' }),
+    computeRealizedPnl: vi.fn().mockReturnValue(null),
+  } as unknown as DashboardCapitalService;
 }
 
-function createMockEngineConfigRepository() {
+function createMockAuditService() {
   return {
-    get: vi.fn().mockResolvedValue(null),
-    upsertBankroll: vi.fn().mockResolvedValue({
-      id: 'cfg-1',
-      singletonKey: 'default',
-      bankrollUsd: { toString: () => '10000' },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-  };
+    getPositionDetails: vi.fn().mockResolvedValue(null),
+    parseJsonFieldWithEvent: vi
+      .fn()
+      .mockImplementation((_schema: unknown, value: unknown) => value),
+  } as unknown as DashboardAuditService;
 }
 
 const mockEnrichedResult: EnrichmentResult = {
@@ -105,406 +74,104 @@ const mockEnrichedResult: EnrichmentResult = {
   },
 };
 
-describe('DashboardService', () => {
+describe('DashboardService (facade)', () => {
   let service: DashboardService;
   let prisma: ReturnType<typeof createMockPrisma>;
-  let configService: ReturnType<typeof createMockConfigService>;
   let enrichmentService: ReturnType<typeof createMockEnrichmentService>;
   let positionRepository: ReturnType<typeof createMockPositionRepository>;
-  let eventEmitter: ReturnType<typeof createMockEventEmitter>;
-  let riskManager: ReturnType<typeof createMockRiskManager>;
-  let engineConfigRepo: ReturnType<typeof createMockEngineConfigRepository>;
+  let overviewService: ReturnType<typeof createMockOverviewService>;
+  let capitalService: ReturnType<typeof createMockCapitalService>;
+  let auditService: ReturnType<typeof createMockAuditService>;
 
   beforeEach(() => {
     prisma = createMockPrisma();
-    configService = createMockConfigService();
     enrichmentService = createMockEnrichmentService();
     positionRepository = createMockPositionRepository();
-    eventEmitter = createMockEventEmitter();
-    riskManager = createMockRiskManager();
-    engineConfigRepo = createMockEngineConfigRepository();
+    overviewService = createMockOverviewService();
+    capitalService = createMockCapitalService();
+    auditService = createMockAuditService();
+
     service = new DashboardService(
-      prisma,
-      configService,
-      enrichmentService,
+      overviewService,
+      capitalService,
+      auditService,
       positionRepository,
-      eventEmitter,
-      riskManager,
-      engineConfigRepo as unknown as EngineConfigRepository,
-      {
-        getActiveSubscriptionCount: vi.fn().mockReturnValue(0),
-      } as unknown as import('../modules/data-ingestion/data-ingestion.service').DataIngestionService,
-      {
-        getDivergenceStatus: vi.fn().mockReturnValue('normal'),
-      } as unknown as import('../modules/data-ingestion/data-divergence.service').DataDivergenceService,
-      {
-        getWsLastMessageTimestamp: vi.fn().mockReturnValue(null),
-      } as unknown as import('../modules/data-ingestion/platform-health.service').PlatformHealthService,
-      {
-        getLatestComparison: vi.fn().mockReturnValue(null),
-      } as unknown as import('../modules/exit-management/shadow-comparison.service').ShadowComparisonService,
-      {
-        append: vi.fn().mockResolvedValue(undefined),
-      } as unknown as import('../modules/monitoring/audit-log.service').AuditLogService,
-    );
-
-    // Default mock for riskState (overview balance computation)
-    (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-      [],
+      enrichmentService,
+      prisma,
     );
   });
 
-  describe('getOverview', () => {
-    it('should return composite overview with all metrics', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        { platform: 'KALSHI', status: 'healthy' },
-        { platform: 'POLYMARKET', status: 'healthy' },
-      ]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(5)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('125.5');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(100)
-        .mockResolvedValueOnce(95);
+  // ── Delegation tests ──────────────────────────────────────────────
 
+  /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/unbound-method */
+  describe('delegation', () => {
+    it('should delegate getOverview to OverviewService', async () => {
+      const expected = { systemHealth: 'healthy' };
+      overviewService.getOverview.mockResolvedValue(expected);
       const result = await service.getOverview();
-
-      expect(result.systemHealth).toBe('healthy');
-      expect(result.trailingPnl7d).toBe('125.5');
-      expect(result.executionQualityRatio).toBe(0.95);
-      expect(result.openPositionCount).toBe(5);
-      expect(result.activeAlertCount).toBe(0);
+      expect(result).toBe(expected);
+      expect(overviewService.getOverview).toHaveBeenCalled();
     });
 
-    it('should return degraded health when any platform is degraded', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        { platform: 'KALSHI', status: 'healthy' },
-        { platform: 'POLYMARKET', status: 'degraded' },
-      ]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      const result = await service.getOverview();
-      expect(result.systemHealth).toBe('degraded');
+    it('should delegate getHealth to OverviewService', async () => {
+      const expected = [{ platformId: 'kalshi' }];
+      overviewService.getHealth.mockResolvedValue(expected);
+      const result = await service.getHealth();
+      expect(result).toBe(expected);
+      expect(overviewService.getHealth).toHaveBeenCalled();
     });
 
-    it('should return critical health when any platform is disconnected', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        { platform: 'KALSHI', status: 'disconnected' },
-        { platform: 'POLYMARKET', status: 'healthy' },
-      ]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      const result = await service.getOverview();
-      expect(result.systemHealth).toBe('critical');
+    it('should delegate getAlerts to OverviewService', async () => {
+      const expected = [{ type: 'single_leg_exposure' }];
+      overviewService.getAlerts.mockResolvedValue(expected);
+      const result = await service.getAlerts();
+      expect(result).toBe(expected);
+      expect(overviewService.getAlerts).toHaveBeenCalled();
     });
 
-    it('should handle zero orders without division by zero', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      const result = await service.getOverview();
-      expect(result.executionQualityRatio).toBe(0);
-      expect(result.trailingPnl7d).toBe('0');
-      expect(result.systemHealth).toBe('critical');
+    it('should delegate getShadowComparisons to OverviewService', () => {
+      const expected = [{ positionId: 'pos-1' }];
+      overviewService.getShadowComparisons.mockReturnValue(expected);
+      const result = service.getShadowComparisons();
+      expect(result).toBe(expected);
+      expect(overviewService.getShadowComparisons).toHaveBeenCalled();
     });
 
-    it('should include balance fields from risk state and config', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        { platform: 'KALSHI', status: 'healthy' },
-        { platform: 'POLYMARKET', status: 'healthy' },
-      ]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(5)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('10');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(10)
-        .mockResolvedValueOnce(10);
-
-      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [
-          {
-            mode: 'live',
-            totalCapitalDeployed: new Decimal('500'),
-            reservedCapital: new Decimal('100'),
-          },
-        ],
-      );
-
-      const result = await service.getOverview();
-
-      expect(result.capitalOverview).not.toBeNull();
-      expect(result.capitalOverview!.live.bankroll).toBe('10000');
-      expect(result.capitalOverview!.live.deployed).toBe('500');
-      expect(result.capitalOverview!.live.reserved).toBe('100');
-      expect(result.capitalOverview!.live.available).toBe('9400');
+    it('should delegate getShadowSummary to OverviewService', () => {
+      const expected = { totalEvaluations: 10 };
+      overviewService.getShadowSummary.mockReturnValue(expected);
+      const result = service.getShadowSummary();
+      expect(result).toBe(expected);
+      expect(overviewService.getShadowSummary).toHaveBeenCalled();
     });
 
-    it('should include paper capital overview from paper risk state and paperBankrollUsd', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        { platform: 'KALSHI', status: 'healthy' },
-        { platform: 'POLYMARKET', status: 'healthy' },
-      ]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(3)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [
-          {
-            mode: 'live',
-            totalCapitalDeployed: new Decimal('200'),
-            reservedCapital: new Decimal('50'),
-          },
-          {
-            mode: 'paper',
-            totalCapitalDeployed: new Decimal('300'),
-            reservedCapital: new Decimal('0'),
-          },
-        ],
-      );
-
-      (
-        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        bankrollUsd: '10000',
-        paperBankrollUsd: '5000',
-        updatedAt: new Date().toISOString(),
-      });
-
-      const result = await service.getOverview();
-
-      expect(result.capitalOverview).not.toBeNull();
-      // Live section uses live bankroll
-      expect(result.capitalOverview!.live.bankroll).toBe('10000');
-      expect(result.capitalOverview!.live.deployed).toBe('200');
-      expect(result.capitalOverview!.live.reserved).toBe('50');
-      expect(result.capitalOverview!.live.available).toBe('9750');
-      // Paper section uses paper bankroll
-      expect(result.capitalOverview!.paper.bankroll).toBe('5000');
-      expect(result.capitalOverview!.paper.deployed).toBe('300');
-      expect(result.capitalOverview!.paper.reserved).toBe('0');
-      expect(result.capitalOverview!.paper.available).toBe('4700');
+    it('should delegate getBankrollConfig to CapitalService', async () => {
+      const expected = { bankrollUsd: '10000' };
+      capitalService.getBankrollConfig.mockResolvedValue(expected);
+      const result = await service.getBankrollConfig();
+      expect(result).toBe(expected);
+      expect(capitalService.getBankrollConfig).toHaveBeenCalled();
     });
 
-    it('should return null balance fields when bankroll is zero', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [],
-      );
-
-      (
-        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        bankrollUsd: '0',
-        paperBankrollUsd: null,
-        updatedAt: new Date().toISOString(),
-      });
-
-      const result = await service.getOverview();
-
-      expect(result.capitalOverview).toBeNull();
+    it('should delegate updateBankroll to CapitalService', async () => {
+      const expected = { bankrollUsd: '15000' };
+      capitalService.updateBankroll.mockResolvedValue(expected);
+      const result = await service.updateBankroll('15000');
+      expect(result).toBe(expected);
+      expect(capitalService.updateBankroll).toHaveBeenCalledWith('15000');
     });
 
-    it('should floor availableCapital at zero when over-deployed', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([{ platform: 'KALSHI', status: 'healthy' }]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(5)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('10');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(10)
-        .mockResolvedValueOnce(10);
-      (prisma.riskState.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [
-          {
-            mode: 'live',
-            totalCapitalDeployed: new Decimal('9000'),
-            reservedCapital: new Decimal('2000'),
-          },
-        ],
-      );
-
-      const result = await service.getOverview();
-
-      expect(result.capitalOverview).not.toBeNull();
-      expect(result.capitalOverview!.live.available).toBe('0');
-    });
-
-    it('should use decimal.js for P&L calculation', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0.1');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(10)
-        .mockResolvedValueOnce(10);
-
-      const result = await service.getOverview();
-      expect(result.trailingPnl7d).toBe('0.1');
-    });
-
-    it('should return tradingHalted=false when not halted', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      const result = await service.getOverview();
-      expect(result.tradingHalted).toBe(false);
-      expect(result.haltReasons).toEqual([]);
-    });
-
-    it('should return tradingHalted=true with halt reasons when halted', async () => {
-      (riskManager.isTradingHalted as ReturnType<typeof vi.fn>).mockReturnValue(
-        true,
-      );
-      (
-        riskManager.getActiveHaltReasons as ReturnType<typeof vi.fn>
-      ).mockReturnValue(['daily_loss_limit']);
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([]);
-      (prisma.openPosition.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-      (
-        positionRepository.sumClosedPnlByDateRange as ReturnType<typeof vi.fn>
-      ).mockResolvedValue('0');
-      (prisma.order.count as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0);
-
-      const result = await service.getOverview();
-      expect(result.tradingHalted).toBe(true);
-      expect(result.haltReasons).toEqual(['daily_loss_limit']);
+    it('should delegate getPositionDetails to AuditService', async () => {
+      const expected = { id: 'pos-1', pairId: 'pair-1' };
+      auditService.getPositionDetails.mockResolvedValue(expected);
+      const result = await service.getPositionDetails('pos-1');
+      expect(result).toBe(expected);
+      expect(auditService.getPositionDetails).toHaveBeenCalledWith('pos-1');
     });
   });
+  /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/unbound-method */
 
-  describe('getHealth', () => {
-    it('should return health per platform', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          status: 'healthy',
-          created_at: new Date('2026-03-01T12:00:00Z'),
-          connection_state: 'connected',
-        },
-        {
-          platform: 'POLYMARKET',
-          status: 'degraded',
-          created_at: new Date('2026-03-01T11:59:00Z'),
-          connection_state: 'websocket_only',
-        },
-      ]);
-
-      const result = await service.getHealth();
-      expect(result).toHaveLength(2);
-      expect(result[0]!.platformId).toBe('kalshi');
-      expect(result[0]!.status).toBe('healthy');
-      expect(result[1]!.platformId).toBe('polymarket');
-      expect(result[1]!.status).toBe('degraded');
-    });
-
-    it('should populate wsSubscriptionCount, divergenceStatus, and wsLastMessageTimestamp (AC #11)', async () => {
-      (
-        prisma.platformHealthLog.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          status: 'healthy',
-          created_at: new Date('2026-03-01T12:00:00Z'),
-          connection_state: 'connected',
-        },
-      ]);
-
-      const result = await service.getHealth();
-      expect(result).toHaveLength(1);
-      expect(result[0]).toHaveProperty('wsSubscriptionCount');
-      expect(result[0]).toHaveProperty('divergenceStatus');
-      expect(result[0]).toHaveProperty('wsLastMessageTimestamp');
-      expect(result[0]!.wsSubscriptionCount).toBe(0);
-      expect(result[0]!.divergenceStatus).toBe('normal');
-      expect(result[0]!.wsLastMessageTimestamp).toBeNull();
-    });
-  });
+  // ── Owned: getPositions ─────────────────────────────────────────────
 
   describe('getPositions', () => {
     it('should return enriched positions with pagination', async () => {
@@ -754,79 +421,63 @@ describe('DashboardService', () => {
           side: 'sell',
           platform: 'POLYMARKET',
         },
+        realizedPnl: null,
       };
 
       (
         positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
       ).mockResolvedValue({ data: [mockPosition], count: 1 });
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
 
-      // Exit orders for realized P&L
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      const exitOrders = [
         {
           orderId: 'exit-k-1',
+          pairId: 'pair-1',
           platform: 'KALSHI',
           fillPrice: new Decimal('0.50'),
           fillSize: new Decimal('50'),
-          side: 'sell',
-          pairId: 'pair-1',
           createdAt: new Date('2026-03-01T11:00:00Z'),
         },
         {
           orderId: 'exit-p-1',
+          pairId: 'pair-1',
           platform: 'POLYMARKET',
           fillPrice: new Decimal('0.50'),
           fillSize: new Decimal('50'),
-          side: 'buy',
-          pairId: 'pair-1',
           createdAt: new Date('2026-03-01T11:00:00Z'),
         },
-      ]);
+      ];
 
-      // Exit type audit events
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          eventType: 'execution.exit.triggered',
-          details: { pairId: 'pair-1', type: 'take_profit' },
-          createdAt: new Date('2026-03-01T11:00:00Z'),
-        },
-      ]);
+      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        exitOrders,
+      );
+      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+        [],
+      );
+      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
+        mockEnrichedResult,
+      );
+      capitalService.computeRealizedPnl.mockReturnValue('1.50000000');
 
       const result = await service.getPositions(undefined, 1, 50, 'CLOSED');
-
-      expect(result.data[0]!.realizedPnl).toBeDefined();
-      expect(result.data[0]!.realizedPnl).not.toBeNull();
-      expect(result.data[0]!.exitType).toBe('take_profit');
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]!.realizedPnl).toBe('1.50000000');
     });
 
     it('should return null realizedPnl and exitType for OPEN positions', async () => {
       const mockPosition = {
-        positionId: 'pos-1',
+        positionId: 'pos-open-1',
         pairId: 'pair-1',
         status: 'OPEN',
-        expectedEdge: new Decimal('0.012'),
+        expectedEdge: new Decimal('0.02'),
         entryPrices: { kalshi: '0.55', polymarket: '0.45' },
-        sizes: { kalshi: '100', polymarket: '100' },
         isPaper: false,
         pair: {
           kalshiContractId: 'k-contract',
           polymarketContractId: 'p-contract',
-          kalshiDescription: 'Kalshi Yes',
-          polymarketDescription: 'Poly Yes',
-          resolutionDate: null,
+          kalshiDescription: 'Test',
+          polymarketDescription: null,
         },
-        kalshiOrder: {
-          fillPrice: new Decimal('0.55'),
-          fillSize: new Decimal('100'),
-          side: 'buy',
-        },
-        polymarketOrder: {
-          fillPrice: new Decimal('0.45'),
-          fillSize: new Decimal('100'),
-          side: 'sell',
-        },
+        createdAt: new Date(),
       };
 
       (
@@ -837,7 +488,6 @@ describe('DashboardService', () => {
       );
 
       const result = await service.getPositions();
-
       expect(result.data[0]!.realizedPnl).toBeNull();
       expect(result.data[0]!.exitType).toBeNull();
     });
@@ -854,32 +504,29 @@ describe('DashboardService', () => {
           kalshiContractId: 'k-contract',
           polymarketContractId: 'p-contract',
           kalshiDescription: 'Kalshi Yes',
-          resolutionDate: null,
+          polymarketDescription: null,
         },
-        kalshiOrder: null,
-        polymarketOrder: null,
+        createdAt: new Date(),
       };
+
       (
         positionRepository.findManyWithFilters as ReturnType<typeof vi.fn>
       ).mockResolvedValue({ data: [mockPosition], count: 1 });
       (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: 'failed',
+        status: 'partial',
         data: {
-          currentPrices: { kalshi: null, polymarket: null },
+          currentPrices: { kalshi: '0.60', polymarket: null },
           currentEdge: null,
           unrealizedPnl: null,
           exitProximity: null,
           resolutionDate: null,
           timeToResolution: null,
         },
-        errors: ['Missing order fill data'],
+        errors: ['Polymarket API timeout'],
       });
 
       const result = await service.getPositions();
-
       expect(result.data).toHaveLength(1);
-      expect(result.data[0]!.currentEdge).toBeNull();
-      expect(result.data[0]!.unrealizedPnl).toBeNull();
     });
 
     it('should pass matchId through to repository as pairId', async () => {
@@ -894,7 +541,7 @@ describe('DashboardService', () => {
         undefined,
         undefined,
         undefined,
-        'match-uuid-1',
+        'match-123',
       );
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -905,7 +552,7 @@ describe('DashboardService', () => {
         50,
         undefined,
         undefined,
-        'match-uuid-1',
+        'match-123',
       );
     });
 
@@ -916,23 +563,23 @@ describe('DashboardService', () => {
 
       await service.getPositions(
         'paper',
-        1,
-        50,
-        'OPEN,EXIT_PARTIAL',
-        undefined,
-        undefined,
-        'match-uuid-1',
+        2,
+        25,
+        'OPEN,CLOSED',
+        'expectedEdge',
+        'desc',
+        'match-456',
       );
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(positionRepository.findManyWithFilters).toHaveBeenCalledWith(
-        ['OPEN', 'EXIT_PARTIAL'],
+        ['OPEN', 'CLOSED'],
         true,
-        1,
-        50,
-        undefined,
-        undefined,
-        'match-uuid-1',
+        2,
+        25,
+        'expectedEdge',
+        'desc',
+        'match-456',
       );
     });
 
@@ -948,39 +595,28 @@ describe('DashboardService', () => {
         undefined,
         undefined,
         undefined,
-        'no-match-uuid',
+        'nonexistent-match',
       );
 
-      expect(result.data).toHaveLength(0);
+      expect(result.data).toEqual([]);
       expect(result.count).toBe(0);
     });
 
     it('should return pairId in position summary DTOs', async () => {
       const mockPosition = {
         positionId: 'pos-1',
-        pairId: 'pair-1',
+        pairId: 'pair-abc-123',
         status: 'OPEN',
         expectedEdge: new Decimal('0.012'),
         entryPrices: { kalshi: '0.55', polymarket: '0.45' },
-        sizes: { kalshi: '100', polymarket: '100' },
         isPaper: false,
         pair: {
           kalshiContractId: 'k-contract',
           polymarketContractId: 'p-contract',
           kalshiDescription: 'Kalshi Yes',
-          polymarketDescription: 'Poly Yes',
-          resolutionDate: new Date('2026-04-01'),
+          polymarketDescription: null,
         },
-        kalshiOrder: {
-          fillPrice: new Decimal('0.55'),
-          fillSize: new Decimal('100'),
-          side: 'buy',
-        },
-        polymarketOrder: {
-          fillPrice: new Decimal('0.45'),
-          fillSize: new Decimal('100'),
-          side: 'sell',
-        },
+        createdAt: new Date(),
       };
 
       (
@@ -991,10 +627,11 @@ describe('DashboardService', () => {
       );
 
       const result = await service.getPositions();
-
-      expect(result.data[0]!.pairId).toBe('pair-1');
+      expect(result.data[0]!.pairId).toBe('pair-abc-123');
     });
   });
+
+  // ── Owned: getPositionById ──────────────────────────────────────────
 
   describe('getPositionById', () => {
     it('should return enriched position by ID', async () => {
@@ -1044,392 +681,6 @@ describe('DashboardService', () => {
 
       const result = await service.getPositionById('nonexistent');
       expect(result).toBeNull();
-    });
-  });
-
-  describe('getPositionDetails', () => {
-    const mockDetailPosition = {
-      positionId: 'pos-1',
-      pairId: 'pair-1',
-      status: 'OPEN',
-      expectedEdge: new Decimal('0.02'),
-      entryPrices: { kalshi: '0.45', polymarket: '0.55' },
-      sizes: { kalshi: '50', polymarket: '50' },
-      isPaper: false,
-      kalshiSide: 'buy',
-      polymarketSide: 'sell',
-      kalshiOrderId: 'order-k-1',
-      polymarketOrderId: 'order-p-1',
-      entryKalshiFeeRate: new Decimal('0.07'),
-      entryPolymarketFeeRate: new Decimal('0.02'),
-      entryClosePriceKalshi: new Decimal('0.44'),
-      entryClosePricePolymarket: new Decimal('0.56'),
-      createdAt: new Date('2026-03-01T10:00:00Z'),
-      updatedAt: new Date('2026-03-01T12:00:00Z'),
-      pair: {
-        kalshiContractId: 'k-contract',
-        polymarketContractId: 'p-contract',
-        kalshiDescription: 'Test Pair',
-        polymarketDescription: null,
-        resolutionDate: null,
-      },
-      kalshiOrder: {
-        orderId: 'order-k-1',
-        fillPrice: new Decimal('0.45'),
-        fillSize: new Decimal('50'),
-        side: 'buy',
-        platform: 'KALSHI',
-        price: new Decimal('0.45'),
-        size: new Decimal('50'),
-        status: 'FILLED',
-        createdAt: new Date('2026-03-01T10:00:00Z'),
-        updatedAt: new Date('2026-03-01T10:01:00Z'),
-      },
-      polymarketOrder: {
-        orderId: 'order-p-1',
-        fillPrice: new Decimal('0.55'),
-        fillSize: new Decimal('50'),
-        side: 'sell',
-        platform: 'POLYMARKET',
-        price: new Decimal('0.55'),
-        size: new Decimal('50'),
-        status: 'FILLED',
-        createdAt: new Date('2026-03-01T10:00:00Z'),
-        updatedAt: new Date('2026-03-01T10:01:00Z'),
-      },
-    };
-
-    it('should assemble full position detail with orders and audit events', async () => {
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(mockDetailPosition);
-
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-        mockDetailPosition.kalshiOrder,
-        mockDetailPosition.polymarketOrder,
-      ]);
-
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: 'audit-1',
-          eventType: 'risk.budget.reserved',
-          createdAt: new Date('2026-03-01T10:00:00Z'),
-          details: { pairId: 'pair-1', reason: 'Edge sufficient' },
-        },
-      ]);
-
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      const result = await service.getPositionDetails('pos-1');
-
-      expect(result).not.toBeNull();
-      expect(result!.id).toBe('pos-1');
-      expect(result!.orders).toHaveLength(2);
-      expect(result!.auditEvents).toHaveLength(1);
-      expect(result!.auditEvents[0]!.eventType).toBe('risk.budget.reserved');
-      expect(result!.capitalBreakdown).toBeDefined();
-    });
-
-    it('should return null for non-existent position', async () => {
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(null);
-
-      const result = await service.getPositionDetails('nonexistent');
-      expect(result).toBeNull();
-    });
-
-    it('should bound orders by position lifecycle timestamps', async () => {
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(mockDetailPosition);
-
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [],
-      );
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      await service.getPositionDetails('pos-1');
-
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(prisma.order.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          where: expect.objectContaining({
-            pairId: 'pair-1',
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-            createdAt: expect.objectContaining({
-              gte: mockDetailPosition.createdAt,
-            }),
-          }),
-        }),
-      );
-    });
-
-    it('should extract entry reasoning from BUDGET_RESERVED audit event', async () => {
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(mockDetailPosition);
-
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: 'audit-1',
-          eventType: 'risk.budget.reserved',
-          createdAt: new Date('2026-03-01T10:00:00Z'),
-          details: {
-            pairId: 'pair-1',
-            reason: 'Edge 2.5% > 0.8% threshold',
-            bankrollPercentage: '2.8%',
-          },
-        },
-      ]);
-
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      const result = await service.getPositionDetails('pos-1');
-
-      expect(result!.entryReasoning).toContain('Edge 2.5%');
-    });
-  });
-
-  describe('getBankrollConfig', () => {
-    it('should delegate to riskManager.getBankrollConfig()', async () => {
-      const expected = {
-        bankrollUsd: '10000',
-        updatedAt: '2026-03-14T10:00:00.000Z',
-      };
-      (
-        riskManager.getBankrollConfig as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(expected);
-
-      const result = await service.getBankrollConfig();
-
-      expect(result).toEqual(expected);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(riskManager.getBankrollConfig).toHaveBeenCalled();
-    });
-  });
-
-  describe('updateBankroll', () => {
-    it('should upsert to DB, reload risk manager, and emit event', async () => {
-      (riskManager.getBankrollConfig as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({
-          bankrollUsd: '10000',
-          updatedAt: '2026-03-14T10:00:00.000Z',
-        })
-        .mockResolvedValueOnce({
-          bankrollUsd: '15000',
-          updatedAt: '2026-03-14T11:00:00.000Z',
-        });
-
-      const result = await service.updateBankroll('15000');
-
-      expect(engineConfigRepo.upsertBankroll).toHaveBeenCalledWith('15000');
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(riskManager.reloadBankroll).toHaveBeenCalled();
-      expect(result.bankrollUsd).toBe('15000');
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        'config.bankroll.updated',
-        expect.objectContaining({
-          previousValue: '10000',
-          newValue: '15000',
-          updatedBy: 'dashboard',
-        }),
-      );
-    });
-
-    it('should emit event with correct previous and new values', async () => {
-      (riskManager.getBankrollConfig as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({
-          bankrollUsd: '5000',
-          updatedAt: '2026-03-14T10:00:00.000Z',
-        })
-        .mockResolvedValueOnce({
-          bankrollUsd: '7500',
-          updatedAt: '2026-03-14T11:00:00.000Z',
-        });
-
-      await service.updateBankroll('7500');
-
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        'config.bankroll.updated',
-        expect.objectContaining({
-          previousValue: '5000',
-          newValue: '7500',
-        }),
-      );
-    });
-  });
-
-  describe('getAlerts', () => {
-    it('should return single-leg exposed positions as alerts', async () => {
-      (
-        prisma.openPosition.findMany as ReturnType<typeof vi.fn>
-      ).mockResolvedValue([
-        {
-          positionId: 'pos-1',
-          pairId: 'pair-1',
-          status: 'SINGLE_LEG_EXPOSED',
-          updatedAt: new Date('2026-03-01T12:00:00Z'),
-          pair: {
-            kalshiDescription: 'K-desc',
-            polymarketDescription: 'P-desc',
-          },
-        },
-      ]);
-
-      const result = await service.getAlerts();
-      expect(result).toHaveLength(1);
-      expect(result[0]!.type).toBe('single_leg_exposure');
-      expect(result[0]!.severity).toBe('critical');
-    });
-  });
-
-  describe('execution metadata in position detail (Story 10.4)', () => {
-    const mockDetailPositionWithMetadata = {
-      positionId: 'pos-meta-1',
-      pairId: 'pair-1',
-      status: 'OPEN',
-      expectedEdge: new Decimal('0.02'),
-      entryPrices: { kalshi: '0.45', polymarket: '0.55' },
-      sizes: { kalshi: '50', polymarket: '50' },
-      isPaper: false,
-      kalshiSide: 'buy',
-      polymarketSide: 'sell',
-      kalshiOrderId: 'order-k-1',
-      polymarketOrderId: 'order-p-1',
-      entryKalshiFeeRate: new Decimal('0.07'),
-      entryPolymarketFeeRate: new Decimal('0.02'),
-      entryClosePriceKalshi: new Decimal('0.44'),
-      entryClosePricePolymarket: new Decimal('0.56'),
-      createdAt: new Date('2026-03-01T10:00:00Z'),
-      updatedAt: new Date('2026-03-01T12:00:00Z'),
-      executionMetadata: {
-        primaryLeg: 'kalshi',
-        sequencingReason: 'latency_override',
-        kalshiLatencyMs: 100,
-        polymarketLatencyMs: 500,
-        kalshiDataSource: 'websocket',
-        polymarketDataSource: 'polling',
-        idealCount: 111,
-        matchedCount: 80,
-        divergenceDetected: false,
-      },
-      pair: {
-        kalshiContractId: 'k-contract',
-        polymarketContractId: 'p-contract',
-        kalshiDescription: 'Test Pair',
-        polymarketDescription: null,
-        resolutionDate: null,
-      },
-      kalshiOrder: {
-        orderId: 'order-k-1',
-        fillPrice: new Decimal('0.45'),
-        fillSize: new Decimal('50'),
-        side: 'buy',
-        platform: 'KALSHI',
-        price: new Decimal('0.45'),
-        size: new Decimal('50'),
-        status: 'FILLED',
-        createdAt: new Date('2026-03-01T10:00:00Z'),
-        updatedAt: new Date('2026-03-01T10:01:00Z'),
-      },
-      polymarketOrder: {
-        orderId: 'order-p-1',
-        fillPrice: new Decimal('0.55'),
-        fillSize: new Decimal('50'),
-        side: 'sell',
-        platform: 'POLYMARKET',
-        price: new Decimal('0.55'),
-        size: new Decimal('50'),
-        status: 'FILLED',
-        createdAt: new Date('2026-03-01T10:00:00Z'),
-        updatedAt: new Date('2026-03-01T10:01:00Z'),
-      },
-    };
-
-    it('[P0] should include execution metadata fields in PositionFullDetailDto', async () => {
-      // AC#5: dashboard DTO must surface execution metadata
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(mockDetailPositionWithMetadata);
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-        mockDetailPositionWithMetadata.kalshiOrder,
-        mockDetailPositionWithMetadata.polymarketOrder,
-      ]);
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [],
-      );
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      const result = await service.getPositionDetails('pos-meta-1');
-
-      expect(result).not.toBeNull();
-      expect(result!.executionSequencingReason).toBe('latency_override');
-      expect(result!.executionPrimaryLeg).toBe('kalshi');
-      expect(result!.executionKalshiDataSource).toBe('websocket');
-      expect(result!.executionPolymarketDataSource).toBe('polling');
-    });
-
-    it('[P0] should map JSON executionMetadata to flat DTO fields', async () => {
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(mockDetailPositionWithMetadata);
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [],
-      );
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      const result = await service.getPositionDetails('pos-meta-1');
-
-      expect(result).not.toBeNull();
-      expect(result!.executionIdealCount).toBe(111);
-      expect(result!.executionMatchedCount).toBe(80);
-      expect(result!.executionKalshiLatencyMs).toBe(100);
-      expect(result!.executionPolymarketLatencyMs).toBe(500);
-    });
-
-    it('[P1] should handle null executionMetadata gracefully (pre-Story 10.4 positions)', async () => {
-      const positionWithoutMetadata = {
-        ...mockDetailPositionWithMetadata,
-        positionId: 'pos-legacy-1',
-        executionMetadata: null,
-      };
-      (
-        prisma.openPosition.findUnique as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(positionWithoutMetadata);
-      (prisma.order.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      (prisma.auditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
-        [],
-      );
-      (enrichmentService.enrich as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockEnrichedResult,
-      );
-
-      const result = await service.getPositionDetails('pos-legacy-1');
-
-      expect(result).not.toBeNull();
-      expect(result!.executionSequencingReason).toBeNull();
-      expect(result!.executionPrimaryLeg).toBeNull();
-      expect(result!.executionKalshiDataSource).toBeNull();
-      expect(result!.executionPolymarketDataSource).toBeNull();
-      expect(result!.executionIdealCount).toBeNull();
-      expect(result!.executionMatchedCount).toBeNull();
     });
   });
 });
