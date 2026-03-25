@@ -11,7 +11,7 @@ import { withCorrelationId } from '../../common/services/correlation-context.js'
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
 import { PositionRepository } from '../../persistence/repositories/position.repository.js';
 import { MONITORING_ERROR_CODES } from './monitoring-error-codes.js';
-import { escapeHtml } from './formatters/telegram-message.formatter.js';
+import { escapeHtml } from './formatters/index.js';
 
 @Injectable()
 export class DailySummaryService {

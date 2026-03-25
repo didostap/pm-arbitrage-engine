@@ -42,7 +42,7 @@ import {
   formatDataDivergence,
   formatShadowDailySummary,
   formatAutoUnwind,
-} from './formatters/telegram-message.formatter.js';
+} from './formatters/index.js';
 import { type AlertSeverity, classifyEventSeverity } from './event-severity.js';
 import type { BaseEvent } from '../../common/events/base.event.js';
 import type { OpportunityIdentifiedEvent } from '../../common/events/detection.events.js';
