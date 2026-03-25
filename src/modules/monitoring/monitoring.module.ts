@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PersistenceModule } from '../../common/persistence.module.js';
 import { TelegramAlertService } from './telegram-alert.service.js';
+import { TelegramCircuitBreakerService } from './telegram-circuit-breaker.service.js';
 import { EventConsumerService } from './event-consumer.service.js';
 import { CsvTradeLogService } from './csv-trade-log.service.js';
 import { DailySummaryService } from './daily-summary.service.js';
@@ -17,6 +18,7 @@ import { MatchAprUpdaterService } from './match-apr-updater.service.js';
   imports: [ConfigModule, PersistenceModule],
   controllers: [TradeExportController],
   providers: [
+    TelegramCircuitBreakerService,
     TelegramAlertService,
     EventConsumerService,
     CsvTradeLogService,

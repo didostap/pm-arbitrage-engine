@@ -31,6 +31,12 @@ const WARNING_EVENTS = new Set<string>([
   EVENT_NAMES.DATA_FALLBACK,
 ]);
 
+export const SEVERITY_PRIORITY: Record<AlertSeverity, number> = {
+  critical: 3,
+  warning: 2,
+  info: 1,
+};
+
 export function classifyEventSeverity(eventName: string): AlertSeverity {
   if (CRITICAL_EVENTS.has(eventName)) return 'critical';
   if (WARNING_EVENTS.has(eventName)) return 'warning';
