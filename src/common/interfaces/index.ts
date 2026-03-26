@@ -36,3 +36,5 @@ export type {
   FilteredOpportunityEntry,
 } from './pair-concentration-filter.interface.js';
 export { PAIR_CONCENTRATION_FILTER_TOKEN } from './pair-concentration-filter.interface.js';
+export type { IHistoricalDataProvider } from './historical-data-provider.interface.js';
+export { HISTORICAL_DATA_PROVIDER_TOKEN } from './historical-data-provider.interface.js';

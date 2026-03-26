@@ -40,4 +40,10 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   DATA_CORRUPTION_DETECTED: 4500,
   /** Concentration filter repository query failed — critical, fail-open */
   CONCENTRATION_FILTER_FAILURE: 4010,
+  /** Backtest ingestion failure after all retries for a contract — error */
+  BACKTEST_INGESTION_FAILURE: 4200,
+  /** Kalshi/Polymarket/Goldsky API failure during backtesting — error */
+  BACKTEST_EXTERNAL_API_ERROR: 4206,
+  /** Data quality below threshold during backtesting — warning */
+  BACKTEST_DATA_QUALITY_ERROR: 4207,
 } as const;

@@ -237,6 +237,12 @@ export const EVENT_NAMES = {
   SHADOW_COMPARISON: 'execution.exit.shadow_comparison',
   /** Emitted once daily in shadow mode with aggregate comparison summary */
   SHADOW_DAILY_SUMMARY: 'execution.exit.shadow_daily_summary',
+
+  // [Epic 10.9] Backtesting Events
+  /** Emitted when historical data ingestion completes for a source/contract */
+  BACKTEST_DATA_INGESTED: 'backtesting.data.ingested',
+  /** Emitted when data quality issues are detected during ingestion */
+  BACKTEST_DATA_QUALITY_WARNING: 'backtesting.data.quality-warning',
 } as const;
 
 /**

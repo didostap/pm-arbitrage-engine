@@ -17,4 +17,5 @@ export * from './discovery-run-completed.event';
 export * from './resolution-poll-completed.event';
 export * from './calibration-completed.event';
 export * from './config.events';
+export * from './backtesting.events';
 export * from './event-catalog';

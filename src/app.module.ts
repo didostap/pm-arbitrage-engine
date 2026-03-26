@@ -19,6 +19,7 @@ import { ExitManagementModule } from './modules/exit-management/exit-management.
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { BacktestingModule } from './modules/backtesting/backtesting.module';
 import { SystemErrorFilter } from './common/filters/system-error.filter';
 
 @Module({
@@ -48,6 +49,7 @@ import { SystemErrorFilter } from './common/filters/system-error.filter';
     ReconciliationModule,
     MonitoringModule,
     DashboardModule,
+    BacktestingModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_FILTER, useClass: SystemErrorFilter }],

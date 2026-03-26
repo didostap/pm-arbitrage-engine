@@ -53,6 +53,14 @@ export const envSchema = z.object({
     .url()
     .default('https://gamma-api.polymarket.com'),
 
+  // Goldsky Subgraph (Polymarket on-chain data)
+  GOLDSKY_SUBGRAPH_URL: z
+    .string()
+    .url()
+    .default(
+      'https://api.goldsky.com/api/public/project_cl6mb8i9h0003e201j6li0diw/subgraphs/orderbook-subgraph/0.0.1/gn',
+    ),
+
   // Edge Calculation (String → Decimal)
   DETECTION_MIN_EDGE_THRESHOLD: decimalString('0.008'),
   DETECTION_GAS_ESTIMATE_USD: decimalString('0.30'),

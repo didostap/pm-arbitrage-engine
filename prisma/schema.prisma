@@ -449,3 +449,62 @@ model StressTestRun {
   @@index([timestamp])
   @@map("stress_test_runs")
 }
+
+// Historical data source enum for backtesting data provenance tracking
+// Includes future sources (10-9-1b) to avoid migration churn
+enum HistoricalDataSource {
+  KALSHI_API
+  POLYMARKET_API
+  GOLDSKY
+  POLY_DATA
+  PMXT_ARCHIVE
+  ODDSPIPE
+  PREDEXON
+}
+
+// Historical OHLCV price data for backtesting (Story 10-9-1a)
+model HistoricalPrice {
+  id              Int                  @id @default(autoincrement())
+  platform        Platform
+  contractId      String               @map("contract_id")
+  source          HistoricalDataSource
+  intervalMinutes Int                  @map("interval_minutes")
+  timestamp       DateTime             @db.Timestamptz
+  open            Decimal              @db.Decimal(20, 10)
+  high            Decimal              @db.Decimal(20, 10)
+  low             Decimal              @db.Decimal(20, 10)
+  close           Decimal              @db.Decimal(20, 10)
+  volume          Decimal?             @db.Decimal(20, 6)
+  openInterest    Decimal?             @map("open_interest") @db.Decimal(20, 6)
+  ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
+  qualityFlags    Json?                @map("quality_flags")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([platform, contractId, source, intervalMinutes, timestamp])
+  @@index([platform, contractId, timestamp])
+  @@index([source, timestamp])
+  @@index([timestamp])
+  @@map("historical_prices")
+}
+
+// Historical trade data for backtesting (Story 10-9-1a)
+model HistoricalTrade {
+  id              Int                  @id @default(autoincrement())
+  platform        Platform
+  contractId      String               @map("contract_id")
+  source          HistoricalDataSource
+  externalTradeId String?              @map("external_trade_id")
+  price           Decimal              @db.Decimal(20, 10)
+  size            Decimal              @db.Decimal(20, 6)
+  side            String
+  timestamp       DateTime             @db.Timestamptz
+  ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
+  qualityFlags    Json?                @map("quality_flags")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([platform, contractId, source, externalTradeId])
+  @@index([platform, contractId, timestamp])
+  @@index([source, timestamp])
+  @@index([timestamp])
+  @@map("historical_trades")
+}
