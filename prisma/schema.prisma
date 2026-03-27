@@ -616,6 +616,9 @@ model BacktestRun {
   profitFactor       Decimal?            @map("profit_factor") @db.Decimal(20, 10)
   avgHoldingHours    Decimal?            @map("avg_holding_hours") @db.Decimal(20, 6)
   capitalUtilization Decimal?            @map("capital_utilization") @db.Decimal(20, 10)
+  report             Json?               @map("report")
+  walkForwardResults Json?               @map("walk_forward_results")
+  sensitivityResults Json?               @map("sensitivity_results")
   errorMessage       String?             @map("error_message")
   createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz

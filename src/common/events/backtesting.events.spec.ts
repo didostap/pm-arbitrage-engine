@@ -334,6 +334,127 @@ describe('BacktestEngineStateChangedEvent', () => {
   });
 });
 
+// ============================================================
+// Story 10-9-4: Calibration Report Events
+// ============================================================
+
+describe('BacktestReportGeneratedEvent', () => {
+  it('[P1] should construct BacktestReportGeneratedEvent with runId and summary snapshot', async () => {
+    const { BacktestReportGeneratedEvent } =
+      await import('./backtesting.events');
+    const event = new BacktestReportGeneratedEvent({
+      runId: 'run-report-1',
+      summary: {
+        totalTrades: 42,
+        profitFactor: '1.5',
+        netPnl: '500.00',
+        sharpeRatio: '1.85',
+      },
+      correlationId: 'corr-report-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-report-1',
+        summary: expect.objectContaining({
+          totalTrades: 42,
+          profitFactor: '1.5',
+        }),
+        correlationId: 'corr-report-1',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+    expect(event.timestamp).toBeInstanceOf(Date);
+  });
+});
+
+describe('BacktestSensitivityCompletedEvent', () => {
+  it('[P1] should construct BacktestSensitivityCompletedEvent with runId, sweepCount, and recommendedParams', async () => {
+    const { BacktestSensitivityCompletedEvent } =
+      await import('./backtesting.events');
+    const event = new BacktestSensitivityCompletedEvent({
+      runId: 'run-sens-1',
+      sweepCount: 66,
+      recommendedParams: {
+        byProfitFactor: [
+          {
+            parameterName: 'edgeThresholdPct',
+            value: 0.008,
+            profitFactor: '2.5',
+          },
+        ],
+        bySharpe: [
+          {
+            parameterName: 'edgeThresholdPct',
+            value: 0.01,
+            sharpeRatio: '3.0',
+          },
+        ],
+      },
+      correlationId: 'corr-sens-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-sens-1',
+        sweepCount: 66,
+        recommendedParams: expect.objectContaining({
+          byProfitFactor: expect.arrayContaining([
+            expect.objectContaining({ parameterName: 'edgeThresholdPct' }),
+          ]),
+        }),
+        correlationId: 'corr-sens-1',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestWalkForwardCompletedEvent', () => {
+  it('[P1] should construct BacktestWalkForwardCompletedEvent with runId and overfit flag summary', async () => {
+    const { BacktestWalkForwardCompletedEvent } =
+      await import('./backtesting.events');
+    const event = new BacktestWalkForwardCompletedEvent({
+      runId: 'run-wf-1',
+      overfitFlags: ['profitFactor', 'sharpeRatio'],
+      trainPct: 0.7,
+      testPct: 0.3,
+      correlationId: 'corr-wf-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-wf-1',
+        overfitFlags: ['profitFactor', 'sharpeRatio'],
+        trainPct: 0.7,
+        testPct: 0.3,
+        correlationId: 'corr-wf-1',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('Event catalog entries (Story 10-9-4)', () => {
+  it('[P1] should register backtesting.report.generated in EVENT_NAMES catalog', () => {
+    expect(EVENT_NAMES.BACKTEST_REPORT_GENERATED).toBe(
+      'backtesting.report.generated',
+    );
+  });
+
+  it('[P1] should register backtesting.sensitivity.completed in EVENT_NAMES catalog', () => {
+    expect(EVENT_NAMES.BACKTEST_SENSITIVITY_COMPLETED).toBe(
+      'backtesting.sensitivity.completed',
+    );
+  });
+
+  it('[P1] should register backtesting.walkforward.completed in EVENT_NAMES catalog', () => {
+    expect(EVENT_NAMES.BACKTEST_WALKFORWARD_COMPLETED).toBe(
+      'backtesting.walkforward.completed',
+    );
+  });
+});
+
 describe('Event catalog entries (Story 10-9-3)', () => {
   it('[P1] should register all 7 backtesting engine events in EVENT_NAMES catalog', () => {
     expect(EVENT_NAMES.BACKTEST_RUN_STARTED).toBe('backtesting.run.started');

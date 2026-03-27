@@ -7,6 +7,8 @@ import { BacktestStateMachineService } from './backtest-state-machine.service';
 import { BacktestPortfolioService } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
+import { WalkForwardService } from '../reporting/walk-forward.service';
+import { CalibrationReportService } from '../reporting/calibration-report.service';
 
 describe('BacktestEngineService', () => {
   let service: any;
@@ -16,6 +18,8 @@ describe('BacktestEngineService', () => {
   let portfolioService: any;
   let fillModelService: any;
   let exitEvaluatorService: any;
+  let walkForwardService: any;
+  let calibrationReportService: any;
 
   const RUN_ID = 'run-1';
 
@@ -114,6 +118,27 @@ describe('BacktestEngineService', () => {
       evaluateExits: vi.fn().mockReturnValue(null),
     };
 
+    walkForwardService = {
+      splitTimeSteps: vi.fn().mockReturnValue({ train: [], test: [] }),
+      compareMetrics: vi
+        .fn()
+        .mockReturnValue({ degradation: {}, overfitFlags: [] }),
+      buildWalkForwardResults: vi.fn().mockReturnValue({
+        trainPct: 0.7,
+        testPct: 0.3,
+        trainDateRange: { start: '', end: '' },
+        testDateRange: { start: '', end: '' },
+        trainMetrics: {},
+        testMetrics: {},
+        degradation: {},
+        overfitFlags: [],
+      }),
+    };
+
+    calibrationReportService = {
+      generateReport: vi.fn().mockResolvedValue({}),
+    };
+
     const { BacktestEngineService } = await import('./backtest-engine.service');
     const module = await Test.createTestingModule({
       providers: [
@@ -124,6 +149,11 @@ describe('BacktestEngineService', () => {
         { provide: BacktestPortfolioService, useValue: portfolioService },
         { provide: FillModelService, useValue: fillModelService },
         { provide: ExitEvaluatorService, useValue: exitEvaluatorService },
+        { provide: WalkForwardService, useValue: walkForwardService },
+        {
+          provide: CalibrationReportService,
+          useValue: calibrationReportService,
+        },
       ],
     }).compile();
 
@@ -1206,6 +1236,101 @@ describe('BacktestEngineService', () => {
       // The engine should attempt to open positions using the dynamic fee model
       // If fees were flat at 1.75%, the net edge would differ from dynamic
       expect(fillModelService.modelFill).toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // Story 10-9-4: runHeadlessSimulation() tests
+  // ============================================================
+
+  describe('runHeadlessSimulation()', () => {
+    it('[P0] should run simulation loop, close remaining positions, and return AggregateMetrics without state machine', async () => {
+      const metricsResult = {
+        totalPositions: 5,
+        winCount: 3,
+        lossCount: 2,
+        totalPnl: new Decimal('100'),
+        maxDrawdown: new Decimal('0.03'),
+        sharpeRatio: new Decimal('1.5'),
+        profitFactor: new Decimal('2.0'),
+        avgHoldingHours: new Decimal('20'),
+        capitalUtilization: new Decimal('0.4'),
+      };
+      portfolioService.getAggregateMetrics.mockReturnValue(metricsResult);
+
+      const timeSteps = [
+        { timestamp: new Date('2025-01-01T00:00:00Z'), pairs: [] },
+        { timestamp: new Date('2025-01-02T00:00:00Z'), pairs: [] },
+      ];
+
+      const result = await service.runHeadlessSimulation(mockConfig, timeSteps);
+      expect(result).toEqual(metricsResult);
+      expect(portfolioService.initialize).toHaveBeenCalled();
+      // Should NOT use state machine for headless runs
+      expect(stateMachineService.transitionRun).not.toHaveBeenCalledWith(
+        expect.stringContaining('headless'),
+        expect.any(String),
+      );
+    });
+
+    it('[P0] should create temporary runId and clean up via portfolioService.destroyRun in finally block', async () => {
+      portfolioService.getAggregateMetrics.mockReturnValue({
+        totalPositions: 0,
+        winCount: 0,
+        lossCount: 0,
+        totalPnl: new Decimal('0'),
+        maxDrawdown: new Decimal('0'),
+        sharpeRatio: null,
+        profitFactor: null,
+        avgHoldingHours: new Decimal('0'),
+        capitalUtilization: new Decimal('0'),
+      });
+
+      await service.runHeadlessSimulation(mockConfig, []);
+      expect(portfolioService.destroyRun).toHaveBeenCalledWith(
+        expect.stringContaining('headless'),
+      );
+    });
+
+    it('[P1] should not emit state change events during headless run', async () => {
+      portfolioService.getAggregateMetrics.mockReturnValue({
+        totalPositions: 0,
+        winCount: 0,
+        lossCount: 0,
+        totalPnl: new Decimal('0'),
+        maxDrawdown: new Decimal('0'),
+        sharpeRatio: null,
+        profitFactor: null,
+        avgHoldingHours: new Decimal('0'),
+        capitalUtilization: new Decimal('0'),
+      });
+
+      await service.runHeadlessSimulation(mockConfig, []);
+
+      // No BACKTEST_ENGINE_STATE_CHANGED events for headless
+      const emitCalls = (eventEmitter.emit as any).mock.calls;
+      const stateChangeCalls = emitCalls.filter(
+        (call: any[]) => call[0] === 'backtesting.engine.state-changed',
+      );
+      expect(stateChangeCalls).toHaveLength(0);
+    });
+
+    it('[P1] should not persist results to DB during headless run', async () => {
+      portfolioService.getAggregateMetrics.mockReturnValue({
+        totalPositions: 0,
+        winCount: 0,
+        lossCount: 0,
+        totalPnl: new Decimal('0'),
+        maxDrawdown: new Decimal('0'),
+        sharpeRatio: null,
+        profitFactor: null,
+        avgHoldingHours: new Decimal('0'),
+        capitalUtilization: new Decimal('0'),
+      });
+
+      await service.runHeadlessSimulation(mockConfig, []);
+      expect(prismaService.backtestRun.update).not.toHaveBeenCalled();
+      expect(prismaService.backtestPosition.createMany).not.toHaveBeenCalled();
     });
   });
 });

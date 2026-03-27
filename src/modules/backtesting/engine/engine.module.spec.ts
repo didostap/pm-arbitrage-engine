@@ -9,27 +9,36 @@ import { BacktestPortfolioService } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
 import { BacktestStateMachineService } from './backtest-state-machine.service';
+import { WalkForwardService } from '../reporting/walk-forward.service';
+import { CalibrationReportService } from '../reporting/calibration-report.service';
 
 describe('EngineModule', () => {
+  const sharedProviders = [
+    BacktestEngineService,
+    {
+      provide: BACKTEST_ENGINE_TOKEN,
+      useExisting: BacktestEngineService,
+    },
+    BacktestStateMachineService,
+    BacktestPortfolioService,
+    FillModelService,
+    ExitEvaluatorService,
+    { provide: PrismaService, useValue: {} },
+    { provide: EventEmitter2, useValue: new EventEmitter2() },
+    {
+      provide: ConfigService,
+      useValue: { get: vi.fn().mockReturnValue(2) },
+    },
+    { provide: WalkForwardService, useValue: {} },
+    {
+      provide: CalibrationReportService,
+      useValue: { generateReport: vi.fn() },
+    },
+  ];
+
   it('[P1] should register all 5 engine providers', async () => {
     const module = await Test.createTestingModule({
-      providers: [
-        BacktestEngineService,
-        {
-          provide: BACKTEST_ENGINE_TOKEN,
-          useExisting: BacktestEngineService,
-        },
-        BacktestStateMachineService,
-        BacktestPortfolioService,
-        FillModelService,
-        ExitEvaluatorService,
-        { provide: PrismaService, useValue: {} },
-        { provide: EventEmitter2, useValue: new EventEmitter2() },
-        {
-          provide: ConfigService,
-          useValue: { get: vi.fn().mockReturnValue(2) },
-        },
-      ],
+      providers: sharedProviders,
     }).compile();
 
     expect(module.get(BacktestEngineService)).toBeDefined();
@@ -46,23 +55,7 @@ describe('EngineModule', () => {
 
   it('[P1] should resolve BacktestEngineService via BACKTEST_ENGINE_TOKEN', async () => {
     const module = await Test.createTestingModule({
-      providers: [
-        BacktestEngineService,
-        {
-          provide: BACKTEST_ENGINE_TOKEN,
-          useExisting: BacktestEngineService,
-        },
-        BacktestStateMachineService,
-        BacktestPortfolioService,
-        FillModelService,
-        ExitEvaluatorService,
-        { provide: PrismaService, useValue: {} },
-        { provide: EventEmitter2, useValue: new EventEmitter2() },
-        {
-          provide: ConfigService,
-          useValue: { get: vi.fn().mockReturnValue(2) },
-        },
-      ],
+      providers: sharedProviders,
     }).compile();
 
     const engine = module.get(BACKTEST_ENGINE_TOKEN);

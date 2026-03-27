@@ -261,6 +261,16 @@ export const EVENT_NAMES = {
   BACKTEST_POSITION_CLOSED: 'backtesting.position.closed',
   /** Emitted when the backtest engine state machine transitions */
   BACKTEST_ENGINE_STATE_CHANGED: 'backtesting.engine.state-changed',
+
+  // [Story 10-9-4] Calibration Report & Sensitivity Events
+  /** Emitted when calibration report is generated for a backtest run */
+  BACKTEST_REPORT_GENERATED: 'backtesting.report.generated',
+  /** Emitted when sensitivity analysis completes (full or partial) */
+  BACKTEST_SENSITIVITY_COMPLETED: 'backtesting.sensitivity.completed',
+  /** Emitted when walk-forward analysis completes */
+  BACKTEST_WALKFORWARD_COMPLETED: 'backtesting.walkforward.completed',
+  /** Emitted periodically during sensitivity sweep for dashboard progress updates */
+  BACKTEST_SENSITIVITY_PROGRESS: 'backtesting.sensitivity.progress',
 } as const;
 
 /**

@@ -201,6 +201,25 @@ describe('SystemHealthError', () => {
     expect(error.component).toBe('backtest-engine');
   });
 
+  // ============================================================
+  // Story 10-9-4: Calibration Report Error Codes
+  // ============================================================
+
+  it('[P1] should define BACKTEST_REPORT_ERROR with code 4205', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_REPORT_ERROR).toBe(4205);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_REPORT_ERROR,
+      'Report generation failed: insufficient data',
+      'error',
+      'backtest-reporting',
+    );
+
+    expect(error.code).toBe(4205);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('backtest-reporting');
+  });
+
   it('[P1] should have no duplicate error codes across all SYSTEM_HEALTH_ERROR_CODES', () => {
     const codes = Object.values(SYSTEM_HEALTH_ERROR_CODES);
     const uniqueCodes = new Set(codes);

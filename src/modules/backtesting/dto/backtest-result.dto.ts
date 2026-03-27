@@ -15,6 +15,9 @@ export class BacktestRunResponseDto {
   profitFactor!: string | null;
   avgHoldingHours!: string | null;
   capitalUtilization!: string | null;
+  report!: Record<string, unknown> | null;
+  walkForwardResults!: Record<string, unknown> | null;
+  sensitivityResults!: Record<string, unknown> | null;
   errorMessage!: string | null;
   createdAt!: string;
   updatedAt!: string;

@@ -58,6 +58,8 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   BACKTEST_VALIDATION_FAILURE: 4203,
   /** Backtest state machine invalid transition — error */
   BACKTEST_STATE_ERROR: 4204,
+  /** Backtest report generation or sensitivity analysis failure — error */
+  BACKTEST_REPORT_ERROR: 4205,
   /** Backtest simulation exceeded timeout — error */
   BACKTEST_TIMEOUT: 4210,
   /** Not enough historical data for backtest — error */

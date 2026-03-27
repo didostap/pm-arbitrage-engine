@@ -1,53 +1,62 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../common/prisma.service';
-import { SYSTEM_HEALTH_ERROR_CODES } from '../../../common/errors/system-health-error';
-import { EVENT_NAMES } from '../../../common/events/event-catalog';
-import { BacktestRunCompletedEvent } from '../../../common/events/backtesting.events';
-import { FinancialMath } from '../../../common/utils/financial-math';
 import {
-  PlatformId,
-  type FeeSchedule,
-} from '../../../common/types/platform.type';
+  SystemHealthError,
+  SYSTEM_HEALTH_ERROR_CODES,
+} from '../../../common/errors/system-health-error';
+import { EVENT_NAMES } from '../../../common/events/event-catalog';
+import {
+  BacktestRunCompletedEvent,
+  BacktestWalkForwardCompletedEvent,
+} from '../../../common/events/backtesting.events';
+import { FinancialMath } from '../../../common/utils/financial-math';
+import { PlatformId } from '../../../common/types/platform.type';
 import type { ContractId } from '../../../common/types/branded.type';
+import {
+  Prisma,
+  type ContractMatch,
+  type HistoricalPrice,
+} from '@prisma/client';
 import type {
   IBacktestEngine,
   IBacktestConfig,
   BacktestRunStatus,
 } from '../../../common/interfaces/backtest-engine.interface';
 import { createSimulatedPosition } from '../types/simulation.types';
+import type {
+  BacktestTimeStep,
+  BacktestTimeStepPair,
+  SimulatedPosition,
+} from '../types/simulation.types';
 import { BacktestStateMachineService } from './backtest-state-machine.service';
-import { BacktestPortfolioService } from './backtest-portfolio.service';
+import {
+  BacktestPortfolioService,
+  type AggregateMetrics,
+} from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
+import { WalkForwardService } from '../reporting/walk-forward.service';
+import { CalibrationReportService } from '../reporting/calibration-report.service';
+import {
+  calculateBestEdge,
+  calculateNetEdge,
+  calculateCurrentEdge,
+  isInTradingWindow,
+  inferResolutionPrice,
+} from '../utils/edge-calculation.utils';
+import { randomUUID } from 'crypto';
 
 const MINIMUM_DATA_COVERAGE_PCT = 0.5;
-
-const DEFAULT_KALSHI_FEE_SCHEDULE: FeeSchedule = {
-  platformId: PlatformId.KALSHI,
-  makerFeePercent: 0,
-  takerFeePercent: 1.75,
-  description: 'Kalshi dynamic taker fee: 0.07 × P × (1-P) per contract',
-  takerFeeForPrice: (price: number): number => {
-    if (price <= 0 || price >= 1) return 0;
-    return new Decimal(0.07).mul(new Decimal(1).minus(price)).toNumber();
-  },
-};
-
-const DEFAULT_POLYMARKET_FEE_SCHEDULE: FeeSchedule = {
-  platformId: PlatformId.POLYMARKET,
-  makerFeePercent: 0,
-  takerFeePercent: 2.0,
-  description: 'Polymarket flat 2% taker fee',
-};
 
 @Injectable()
 export class BacktestEngineService implements IBacktestEngine {
   private readonly logger = new Logger(BacktestEngineService.name);
 
-  /** 6 deps rationale: facade/orchestrator coordinating state machine, portfolio,
-   *  fill model, exit evaluator, persistence, and events */
+  /** 8 deps rationale: facade/orchestrator coordinating state machine, portfolio,
+   *  fill model, exit evaluator, persistence, events, walk-forward analysis,
+   *  and calibration report auto-generation per AC #6 and AC #9 */
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
@@ -55,6 +64,10 @@ export class BacktestEngineService implements IBacktestEngine {
     private readonly portfolioService: BacktestPortfolioService,
     private readonly fillModelService: FillModelService,
     private readonly exitEvaluatorService: ExitEvaluatorService,
+    @Inject(forwardRef(() => WalkForwardService))
+    private readonly walkForwardService: WalkForwardService,
+    @Inject(forwardRef(() => CalibrationReportService))
+    private readonly calibrationReportService: CalibrationReportService,
   ) {}
 
   async startRun(config: IBacktestConfig): Promise<string> {
@@ -64,9 +77,7 @@ export class BacktestEngineService implements IBacktestEngine {
       const error = err instanceof Error ? err : new Error(String(err));
       const code =
         'code' in (err as object) ? (err as { code: number }).code : undefined;
-      this.logger.error(
-        `Pipeline failed for run ${runId}: ${error.message}`,
-      );
+      this.logger.error(`Pipeline failed for run ${runId}: ${error.message}`);
       if (!this.stateMachine.isCancelled(runId)) {
         await this.stateMachine.failRun(
           runId,
@@ -87,6 +98,26 @@ export class BacktestEngineService implements IBacktestEngine {
 
   getRunStatus(runId: string): BacktestRunStatus | null {
     return this.stateMachine.getRunStatus(runId);
+  }
+
+  /**
+   * Run simulation without state machine, persistence, or events.
+   * Used by walk-forward and sensitivity analysis for lightweight sub-runs.
+   */
+  async runHeadlessSimulation(
+    config: IBacktestConfig,
+    timeSteps: BacktestTimeStep[],
+  ): Promise<AggregateMetrics> {
+    const tempRunId = `headless-${randomUUID()}`;
+    const bankroll = new Decimal(config.bankrollUsd);
+    this.portfolioService.initialize(bankroll, tempRunId);
+    try {
+      await this.runSimulationLoop(tempRunId, config, timeSteps, Date.now());
+      this.closeRemainingPositions(tempRunId, timeSteps);
+      return this.portfolioService.getAggregateMetrics(tempRunId);
+    } finally {
+      this.portfolioService.destroyRun(tempRunId);
+    }
   }
 
   private async executePipeline(
@@ -129,8 +160,8 @@ export class BacktestEngineService implements IBacktestEngine {
 
       const coveredMs =
         timeSteps.length > 0
-          ? (timeSteps[timeSteps.length - 1] as { timestamp: Date }).timestamp.getTime() -
-            (timeSteps[0] as { timestamp: Date }).timestamp.getTime()
+          ? timeSteps[timeSteps.length - 1]!.timestamp.getTime() -
+            timeSteps[0]!.timestamp.getTime()
           : 0;
       if (
         pairs.length > 0 &&
@@ -144,7 +175,38 @@ export class BacktestEngineService implements IBacktestEngine {
         return;
       }
 
-      // LOADING_DATA → SIMULATING
+      // Walk-forward analysis (AC #6): run before main simulation
+      let walkForwardResults:
+        | import('../types/calibration-report.types').WalkForwardResults
+        | null = null;
+      if (config.walkForwardEnabled) {
+        this.logger.log(
+          `Walk-forward enabled for run ${runId}: 3 simulation passes (~3x cost)`,
+        );
+        const trainPct = config.walkForwardTrainPct ?? 0.7;
+        const { train, test } = this.walkForwardService.splitTimeSteps(
+          timeSteps,
+          trainPct,
+        );
+
+        // Headless train pass
+        const trainMetrics = await this.runHeadlessSimulation(config, train);
+        if (this.stateMachine.isCancelled(runId)) return;
+
+        // Headless test pass
+        const testMetrics = await this.runHeadlessSimulation(config, test);
+        if (this.stateMachine.isCancelled(runId)) return;
+
+        walkForwardResults = this.walkForwardService.buildWalkForwardResults(
+          trainPct,
+          train,
+          test,
+          trainMetrics,
+          testMetrics,
+        );
+      }
+
+      // LOADING_DATA → SIMULATING (full range for canonical metrics)
       this.stateMachine.transitionRun(runId, 'SIMULATING');
 
       // Initialize portfolio
@@ -154,7 +216,7 @@ export class BacktestEngineService implements IBacktestEngine {
       // Run simulation
       await this.runSimulationLoop(runId, config, timeSteps, startTime);
 
-      // Check cancellation after loop (P-12 fix)
+      // Check cancellation after loop
       if (this.stateMachine.isCancelled(runId)) return;
 
       // Close remaining open positions (SIMULATION_END)
@@ -163,11 +225,37 @@ export class BacktestEngineService implements IBacktestEngine {
       // Check cancellation before report generation
       if (this.stateMachine.isCancelled(runId)) return;
 
-      // Transition in-memory FIRST, then persist (P-16 fix)
+      // Transition in-memory FIRST, then persist
       this.stateMachine.transitionRun(runId, 'GENERATING_REPORT');
 
       // Persist results
       await this.persistResults(runId);
+
+      // Persist walk-forward results if enabled
+      if (walkForwardResults) {
+        await this.prisma.backtestRun.update({
+          where: { id: runId },
+          data: { walkForwardResults: walkForwardResults as any },
+        });
+
+        this.eventEmitter.emit(
+          EVENT_NAMES.BACKTEST_WALKFORWARD_COMPLETED,
+          new BacktestWalkForwardCompletedEvent({
+            runId,
+            overfitFlags: walkForwardResults.overfitFlags,
+            trainPct: walkForwardResults.trainPct,
+            testPct: walkForwardResults.testPct,
+          }),
+        );
+      }
+
+      // Auto-generate calibration report (AC #9) — non-blocking
+      try {
+        await this.calibrationReportService.generateReport(runId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Report generation failed for run ${runId}: ${msg}`);
+      }
 
       this.stateMachine.transitionRun(runId, 'COMPLETE');
 
@@ -183,13 +271,17 @@ export class BacktestEngineService implements IBacktestEngine {
           },
         }),
       );
-    } catch (error: any) {
+    } catch (err: unknown) {
       if (!this.stateMachine.isCancelled(runId)) {
-        await this.stateMachine.failRun(
-          runId,
-          error.code ?? SYSTEM_HEALTH_ERROR_CODES.BACKTEST_STATE_ERROR,
-          error.message ?? 'Unknown error',
-        );
+        const error = err instanceof Error ? err : new Error(String(err));
+        const code =
+          err !== null &&
+          typeof err === 'object' &&
+          'code' in err &&
+          typeof (err as { code: unknown }).code === 'number'
+            ? (err as { code: number }).code
+            : SYSTEM_HEALTH_ERROR_CODES.BACKTEST_STATE_ERROR;
+        await this.stateMachine.failRun(runId, code, error.message);
       }
     } finally {
       this.stateMachine.cleanupRun(runId);
@@ -200,7 +292,7 @@ export class BacktestEngineService implements IBacktestEngine {
   private async runSimulationLoop(
     runId: string,
     config: IBacktestConfig,
-    timeSteps: any[],
+    timeSteps: BacktestTimeStep[],
     startTime: number,
   ): Promise<void> {
     const gasEstimate = new Decimal(config.gasEstimateUsd);
@@ -208,11 +300,21 @@ export class BacktestEngineService implements IBacktestEngine {
     const positionSizePct = new Decimal(config.positionSizePct);
     const bankroll = new Decimal(config.bankrollUsd);
 
+    const isHeadless = runId.startsWith('headless-');
+
     for (const step of timeSteps) {
-      if (this.stateMachine.isCancelled(runId)) return;
+      if (!isHeadless && this.stateMachine.isCancelled(runId)) return;
 
       // Timeout check
       if (Date.now() - startTime > config.timeoutSeconds * 1000) {
+        if (isHeadless) {
+          throw new SystemHealthError(
+            SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+            `Headless simulation exceeded ${config.timeoutSeconds}s timeout`,
+            'warning',
+            'backtest-engine',
+          );
+        }
         await this.stateMachine.failRun(
           runId,
           SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
@@ -221,7 +323,7 @@ export class BacktestEngineService implements IBacktestEngine {
         return;
       }
 
-      if (!this.isInTradingWindow(step.timestamp, config)) continue;
+      if (!isInTradingWindow(step.timestamp, config)) continue;
 
       // 1. Evaluate exits for open positions
       await this.evaluateExits(
@@ -250,19 +352,17 @@ export class BacktestEngineService implements IBacktestEngine {
 
   private async evaluateExits(
     runId: string,
-    step: any,
+    step: BacktestTimeStep,
     config: IBacktestConfig,
     gasEstimate: Decimal,
     positionSizeUsd: Decimal,
   ): Promise<void> {
     const state = this.portfolioService.getState(runId);
     for (const [positionId, position] of [...state.openPositions]) {
-      const pairData = step.pairs.find(
-        (p: any) => p.pairId === position.pairId,
-      );
+      const pairData = step.pairs.find((p) => p.pairId === position.pairId);
       if (!pairData) continue;
 
-      const currentNetEdge = this.calculateCurrentEdge(
+      const currentNetEdge = calculateCurrentEdge(
         pairData,
         gasEstimate,
         positionSizeUsd,
@@ -290,7 +390,7 @@ export class BacktestEngineService implements IBacktestEngine {
         exitProfitCapturePct: new Decimal(config.exitProfitCapturePct),
         resolutionTimestamp: pairData.resolutionTimestamp,
         resolutionPrice: pairData.resolutionTimestamp
-          ? this.inferResolutionPrice(pairData)
+          ? inferResolutionPrice(pairData)
           : null,
         hasDepth,
       });
@@ -300,7 +400,7 @@ export class BacktestEngineService implements IBacktestEngine {
         let kalshiExitPrice = pairData.kalshiClose;
         let polymarketExitPrice = pairData.polymarketClose;
         if (exitResult.reason === 'RESOLUTION_FORCE_CLOSE') {
-          const resPrice = this.inferResolutionPrice(pairData);
+          const resPrice = inferResolutionPrice(pairData);
           if (resPrice) {
             kalshiExitPrice = resPrice;
             polymarketExitPrice = new Decimal(1).minus(resPrice);
@@ -320,7 +420,7 @@ export class BacktestEngineService implements IBacktestEngine {
 
   private async detectOpportunities(
     runId: string,
-    step: any,
+    step: BacktestTimeStep,
     config: IBacktestConfig,
     gasEstimate: Decimal,
     edgeThreshold: Decimal,
@@ -332,13 +432,13 @@ export class BacktestEngineService implements IBacktestEngine {
       if (currentState.openPositions.size >= config.maxConcurrentPairs) break;
 
       const hasPosition = [...currentState.openPositions.values()].some(
-        (p: any) => p.pairId === pairData.pairId,
+        (p) => p.pairId === pairData.pairId,
       );
       if (hasPosition) continue;
 
       const positionSizeUsd = positionSizePct.mul(bankroll);
-      const { bestEdge, buySide } = this.calculateBestEdge(pairData);
-      const netEdge = this.calculateNetEdge(
+      const { bestEdge, buySide } = calculateBestEdge(pairData);
+      const netEdge = calculateNetEdge(
         bestEdge,
         pairData,
         buySide,
@@ -387,14 +487,14 @@ export class BacktestEngineService implements IBacktestEngine {
     }
   }
 
-  private updateEquity(runId: string, step: any): void {
+  private updateEquity(runId: string, step: BacktestTimeStep): void {
     const priceUpdates = new Map<
       string,
       { kalshiCurrentPrice: Decimal; polymarketCurrentPrice: Decimal }
     >();
     for (const [posId, pos] of this.portfolioService.getState(runId)
       .openPositions) {
-      const pd = step.pairs.find((p: any) => p.pairId === pos.pairId);
+      const pd = step.pairs.find((p) => p.pairId === pos.pairId);
       if (pd) {
         priceUpdates.set(posId, {
           kalshiCurrentPrice: pd.kalshiClose,
@@ -405,14 +505,17 @@ export class BacktestEngineService implements IBacktestEngine {
     this.portfolioService.updateEquity(runId, priceUpdates);
   }
 
-  private closeRemainingPositions(runId: string, timeSteps: any[]): void {
+  private closeRemainingPositions(
+    runId: string,
+    timeSteps: BacktestTimeStep[],
+  ): void {
     const finalState = this.portfolioService.getState(runId);
     const lastStep =
-      timeSteps.length > 0 ? timeSteps[timeSteps.length - 1] : null;
+      timeSteps.length > 0 ? timeSteps[timeSteps.length - 1] : undefined;
     const lastTimestamp = lastStep?.timestamp ?? new Date();
     for (const [positionId, position] of [...finalState.openPositions]) {
       const lastPair = lastStep?.pairs.find(
-        (p: any) => p.pairId === position.pairId,
+        (p) => p.pairId === position.pairId,
       );
       this.portfolioService.closePosition(runId, positionId, {
         exitTimestamp: lastTimestamp,
@@ -449,7 +552,7 @@ export class BacktestEngineService implements IBacktestEngine {
 
     if (closedPositions.length > 0) {
       await this.prisma.backtestPosition.createMany({
-        data: closedPositions.map((p: any) => ({
+        data: closedPositions.map((p: SimulatedPosition) => ({
           runId,
           pairId: p.pairId,
           kalshiContractId: p.kalshiContractId,
@@ -469,13 +572,15 @@ export class BacktestEngineService implements IBacktestEngine {
           fees: p.fees?.toFixed(6) ?? null,
           exitReason: p.exitReason,
           holdingHours: p.holdingHours?.toFixed(6) ?? null,
-          qualityFlags: p.qualityFlags,
+          qualityFlags: p.qualityFlags
+            ? (p.qualityFlags as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
         })),
       });
     }
   }
 
-  private async loadPairs(config: IBacktestConfig): Promise<any[]> {
+  async loadPairs(config: IBacktestConfig): Promise<ContractMatch[]> {
     return this.prisma.contractMatch.findMany({
       where: {
         operatorApproved: true,
@@ -484,7 +589,7 @@ export class BacktestEngineService implements IBacktestEngine {
     });
   }
 
-  private async loadPrices(config: IBacktestConfig): Promise<any[]> {
+  async loadPrices(config: IBacktestConfig): Promise<HistoricalPrice[]> {
     return this.prisma.historicalPrice.findMany({
       where: {
         timestamp: {
@@ -496,9 +601,12 @@ export class BacktestEngineService implements IBacktestEngine {
     });
   }
 
-  private alignPrices(prices: any[], pairs: any[]): any[] {
+  alignPrices(
+    prices: HistoricalPrice[],
+    pairs: ContractMatch[],
+  ): BacktestTimeStep[] {
     // Group prices by minute-truncated timestamp (P-31 fix)
-    const byTimestamp = new Map<string, Map<string, any>>();
+    const byTimestamp = new Map<string, Map<string, HistoricalPrice>>();
     for (const price of prices) {
       const tsKey = price.timestamp.toISOString().slice(0, 16) + ':00.000Z';
       if (!byTimestamp.has(tsKey)) byTimestamp.set(tsKey, new Map());
@@ -507,24 +615,25 @@ export class BacktestEngineService implements IBacktestEngine {
         .set(`${price.platform}:${price.contractId}`, price);
     }
 
-    const timeSteps: any[] = [];
+    const timeSteps: BacktestTimeStep[] = [];
 
     for (const [tsKey, priceMap] of byTimestamp) {
       const timestamp = new Date(tsKey);
-      const stepPairs: any[] = [];
+      const stepPairs: BacktestTimeStepPair[] = [];
 
       for (const pair of pairs) {
+        if (!pair.polymarketClobTokenId) continue;
+        const clobTokenId = pair.polymarketClobTokenId;
+
         const kalshiPrice = priceMap.get(`KALSHI:${pair.kalshiContractId}`);
-        const polyPrice = priceMap.get(
-          `POLYMARKET:${pair.polymarketClobTokenId}`,
-        );
+        const polyPrice = priceMap.get(`POLYMARKET:${clobTokenId}`);
 
         if (!kalshiPrice || !polyPrice) continue;
 
         stepPairs.push({
-          pairId: `${pair.kalshiContractId}:${pair.polymarketClobTokenId}`,
+          pairId: `${pair.kalshiContractId}:${clobTokenId}`,
           kalshiContractId: pair.kalshiContractId,
-          polymarketContractId: pair.polymarketClobTokenId,
+          polymarketContractId: clobTokenId,
           kalshiClose: new Decimal(String(kalshiPrice.close)),
           polymarketClose: new Decimal(String(polyPrice.close)),
           resolutionTimestamp: pair.resolutionTimestamp ?? null,
@@ -540,104 +649,4 @@ export class BacktestEngineService implements IBacktestEngine {
     return timeSteps;
   }
 
-  private isInTradingWindow(timestamp: Date, config: IBacktestConfig): boolean {
-    const hour = timestamp.getUTCHours();
-    if (config.tradingWindowStartHour <= config.tradingWindowEndHour) {
-      return (
-        hour >= config.tradingWindowStartHour &&
-        hour < config.tradingWindowEndHour
-      );
-    }
-    return (
-      hour >= config.tradingWindowStartHour ||
-      hour < config.tradingWindowEndHour
-    );
-  }
-
-  private calculateBestEdge(pairData: any): {
-    bestEdge: Decimal;
-    buySide: 'kalshi' | 'polymarket';
-  } {
-    const one = new Decimal(1);
-    const edgeA = FinancialMath.calculateGrossEdge(
-      pairData.kalshiClose,
-      one.minus(pairData.polymarketClose),
-    );
-    const edgeB = FinancialMath.calculateGrossEdge(
-      pairData.polymarketClose,
-      one.minus(pairData.kalshiClose),
-    );
-
-    if (edgeA.gt(edgeB)) {
-      return { bestEdge: edgeA, buySide: 'kalshi' };
-    }
-    return { bestEdge: edgeB, buySide: 'polymarket' };
-  }
-
-  private calculateNetEdge(
-    grossEdge: Decimal,
-    pairData: any,
-    buySide: 'kalshi' | 'polymarket',
-    gasEstimate: Decimal,
-    positionSizeUsd: Decimal,
-  ): Decimal {
-    const buyPrice =
-      buySide === 'kalshi' ? pairData.kalshiClose : pairData.polymarketClose;
-    const sellPrice =
-      buySide === 'kalshi'
-        ? new Decimal(1).minus(pairData.polymarketClose)
-        : new Decimal(1).minus(pairData.kalshiClose);
-
-    const buyFee =
-      buySide === 'kalshi'
-        ? DEFAULT_KALSHI_FEE_SCHEDULE
-        : DEFAULT_POLYMARKET_FEE_SCHEDULE;
-    const sellFee =
-      buySide === 'kalshi'
-        ? DEFAULT_POLYMARKET_FEE_SCHEDULE
-        : DEFAULT_KALSHI_FEE_SCHEDULE;
-
-    return FinancialMath.calculateNetEdge(
-      grossEdge,
-      buyPrice,
-      sellPrice,
-      buyFee,
-      sellFee,
-      gasEstimate,
-      positionSizeUsd,
-    );
-  }
-
-  private calculateCurrentEdge(
-    pairData: any,
-    gasEstimate: Decimal,
-    positionSizeUsd: Decimal,
-  ): Decimal {
-    const { bestEdge, buySide } = this.calculateBestEdge(pairData);
-    return this.calculateNetEdge(
-      bestEdge,
-      pairData,
-      buySide,
-      gasEstimate,
-      positionSizeUsd,
-    );
-  }
-
-  private inferResolutionPrice(pairData: any): Decimal | null {
-    // P-9 fix: consider both platforms for resolution inference
-    const kalshiPrice: Decimal = pairData.kalshiClose;
-    const polyPrice: Decimal = pairData.polymarketClose;
-
-    // Use the most extreme price from either platform
-    const maxPrice = Decimal.max(kalshiPrice, polyPrice);
-    const minPrice = Decimal.min(kalshiPrice, new Decimal(1).minus(polyPrice));
-
-    if (maxPrice.gte(new Decimal('0.95'))) return new Decimal('1.00');
-    if (minPrice.lte(new Decimal('0.05'))) return new Decimal('0.00');
-    // Ambiguous — exclude
-    this.logger.warn(
-      `Ambiguous resolution for ${pairData.pairId}: kalshi=${kalshiPrice}, poly=${polyPrice}`,
-    );
-    return null;
-  }
 }

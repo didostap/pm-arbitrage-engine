@@ -1,6 +1,36 @@
 import { describe, it, expect } from 'vitest';
 
 describe('BacktestRunResponseDto', () => {
+  it('[P1] should include report field as Record<string, unknown> | null', async () => {
+    const { BacktestRunResponseDto } = await import('./backtest-result.dto');
+    const dto = new BacktestRunResponseDto();
+    dto.report = null;
+    expect(dto.report).toBeNull();
+
+    dto.report = { summaryMetrics: { totalTrades: 42 } };
+    expect(dto.report).toEqual({ summaryMetrics: { totalTrades: 42 } });
+  });
+
+  it('[P1] should include walkForwardResults field as Record<string, unknown> | null', async () => {
+    const { BacktestRunResponseDto } = await import('./backtest-result.dto');
+    const dto = new BacktestRunResponseDto();
+    dto.walkForwardResults = null;
+    expect(dto.walkForwardResults).toBeNull();
+
+    dto.walkForwardResults = { trainPct: 0.7, testPct: 0.3 };
+    expect(dto.walkForwardResults).toEqual({ trainPct: 0.7, testPct: 0.3 });
+  });
+
+  it('[P1] should include sensitivityResults field as Record<string, unknown> | null', async () => {
+    const { BacktestRunResponseDto } = await import('./backtest-result.dto');
+    const dto = new BacktestRunResponseDto();
+    dto.sensitivityResults = null;
+    expect(dto.sensitivityResults).toBeNull();
+
+    dto.sensitivityResults = { sweeps: [], partial: false };
+    expect(dto.sensitivityResults).toEqual({ sweeps: [], partial: false });
+  });
+
   it('[P2] should construct with aggregate metrics fields', async () => {
     const { BacktestRunResponseDto } = await import('./backtest-result.dto');
     const dto = new BacktestRunResponseDto();

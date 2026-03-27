@@ -202,3 +202,79 @@ export class BacktestEngineStateChangedEvent extends BaseEvent {
     this.toState = payload.toState;
   }
 }
+
+// ============================================================
+// Story 10-9-4: Calibration Report & Sensitivity Events
+// ============================================================
+
+export class BacktestReportGeneratedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly summary: Record<string, unknown>;
+
+  constructor(payload: {
+    runId: string;
+    summary: Record<string, unknown>;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.summary = payload.summary;
+  }
+}
+
+export class BacktestSensitivityCompletedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly sweepCount: number;
+  public readonly recommendedParams: Record<string, unknown>;
+
+  constructor(payload: {
+    runId: string;
+    sweepCount: number;
+    recommendedParams: Record<string, unknown>;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.sweepCount = payload.sweepCount;
+    this.recommendedParams = payload.recommendedParams;
+  }
+}
+
+export class BacktestSensitivityProgressEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly completedSweeps: number;
+  public readonly totalPlannedSweeps: number;
+
+  constructor(payload: {
+    runId: string;
+    completedSweeps: number;
+    totalPlannedSweeps: number;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.completedSweeps = payload.completedSweeps;
+    this.totalPlannedSweeps = payload.totalPlannedSweeps;
+  }
+}
+
+export class BacktestWalkForwardCompletedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly overfitFlags: string[];
+  public readonly trainPct: number;
+  public readonly testPct: number;
+
+  constructor(payload: {
+    runId: string;
+    overfitFlags: string[];
+    trainPct: number;
+    testPct: number;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.overfitFlags = payload.overfitFlags;
+    this.trainPct = payload.trainPct;
+    this.testPct = payload.testPct;
+  }
+}
