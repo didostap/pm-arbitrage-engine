@@ -61,7 +61,7 @@ export class HistoricalDataController {
 
   @Get('coverage')
   async getCoverage() {
-    const [priceCoverage, tradeCoverage] = await Promise.all([
+    const [priceCoverage, tradeCoverage, depthCoverage] = await Promise.all([
       this.prisma.historicalPrice.groupBy({
         by: ['platform', 'contractId'],
         _count: { id: true },
@@ -70,6 +70,12 @@ export class HistoricalDataController {
       }),
       this.prisma.historicalTrade.groupBy({
         by: ['platform', 'contractId'],
+        _count: { id: true },
+        _min: { timestamp: true },
+        _max: { timestamp: true },
+      }),
+      this.prisma.historicalDepth.groupBy({
+        by: ['platform', 'contractId', 'source'],
         _count: { id: true },
         _min: { timestamp: true },
         _max: { timestamp: true },
@@ -93,6 +99,15 @@ export class HistoricalDataController {
         minTimestamp: t._min.timestamp,
         maxTimestamp: t._max.timestamp,
       })),
+      ...depthCoverage.map((d) => ({
+        type: 'depth',
+        platform: d.platform,
+        contractId: d.contractId,
+        source: d.source,
+        count: d._count.id,
+        minTimestamp: d._min.timestamp,
+        maxTimestamp: d._max.timestamp,
+      })),
     ];
 
     return {
@@ -104,7 +119,15 @@ export class HistoricalDataController {
 
   @Get('coverage/:contractId')
   async getContractCoverage(@Param('contractId') contractId: string) {
-    const [priceCount, priceRange, tradeCount, tradeRange] = await Promise.all([
+    const [
+      priceCount,
+      priceRange,
+      tradeCount,
+      tradeRange,
+      depthCount,
+      depthRange,
+      depthFreshness,
+    ] = await Promise.all([
       this.prisma.historicalPrice.count({
         where: { contractId },
       }),
@@ -121,7 +144,25 @@ export class HistoricalDataController {
         _min: { timestamp: true },
         _max: { timestamp: true },
       }),
+      this.prisma.historicalDepth.count({
+        where: { contractId },
+      }),
+      this.prisma.historicalDepth.aggregate({
+        where: { contractId },
+        _min: { timestamp: true },
+        _max: { timestamp: true },
+      }),
+      this.prisma.historicalDepth.groupBy({
+        by: ['source'],
+        where: { contractId },
+        _max: { timestamp: true },
+      }),
     ]);
+
+    const freshness: Record<string, Date | null> = {};
+    for (const row of depthFreshness) {
+      freshness[row.source] = row._max.timestamp;
+    }
 
     return {
       data: {
@@ -136,6 +177,12 @@ export class HistoricalDataController {
           minTimestamp: tradeRange._min.timestamp,
           maxTimestamp: tradeRange._max.timestamp,
         },
+        depth: {
+          count: depthCount,
+          minTimestamp: depthRange._min.timestamp,
+          maxTimestamp: depthRange._max.timestamp,
+        },
+        freshness,
       },
       timestamp: new Date().toISOString(),
     };

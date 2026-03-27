@@ -1,16 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import Decimal from 'decimal.js';
-import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../common/prisma.service';
 import { KalshiHistoricalService } from './kalshi-historical.service';
 import { PolymarketHistoricalService } from './polymarket-historical.service';
-import { DataQualityService } from './data-quality.service';
+import { PmxtArchiveService } from './pmxt-archive.service';
+import { OddsPipeService } from './oddspipe.service';
+import { IngestionQualityAssessorService } from './ingestion-quality-assessor.service';
 import { EVENT_NAMES } from '../../../common/events/event-catalog';
 import { BacktestDataIngestedEvent } from '../../../common/events/backtesting.events';
 import { IngestionProgressDto } from '../dto/ingestion-progress.dto';
-import type { DataQualityFlags } from '../../../common/types/historical-data.types';
 
 interface TargetContract {
   kalshiTicker: string;
@@ -18,9 +17,6 @@ interface TargetContract {
   operatorApproved: boolean;
   resolutionTimestamp: Date | null;
 }
-
-/** Max records to query back from DB for quality assessment */
-const QUALITY_SAMPLE_LIMIT = 10_000;
 
 @Injectable()
 export class IngestionOrchestratorService {
@@ -36,11 +32,14 @@ export class IngestionOrchestratorService {
     return this._isRunning;
   }
 
+  /** 7 deps rationale: Facade orchestrating 4 data sources + quality assessor + persistence + events */
   constructor(
     private readonly prisma: PrismaService,
     private readonly kalshiHistorical: KalshiHistoricalService,
     private readonly polymarketHistorical: PolymarketHistoricalService,
-    private readonly dataQuality: DataQualityService,
+    private readonly pmxtArchive: PmxtArchiveService,
+    private readonly oddsPipe: OddsPipeService,
+    private readonly qualityAssessor: IngestionQualityAssessorService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -215,8 +214,80 @@ export class IngestionOrchestratorService {
             }),
           );
 
-          // P3: Run quality assessment on ingested data with actual ContractMatch data
-          await this.runQualityAssessment(
+          // PMXT Archive depth — Polymarket only
+          try {
+            this.logger.log({
+              message: `Ingesting PMXT depth for ${target.polymarketTokenId}`,
+              correlationId,
+              matchId,
+            });
+            const pmxt = await this.pmxtArchive.ingestDepth(
+              target.polymarketTokenId,
+              dateRange,
+            );
+            totalRecords += pmxt.recordCount;
+            this.eventEmitter.emit(
+              EVENT_NAMES.BACKTEST_DATA_INGESTED,
+              new BacktestDataIngestedEvent({
+                source: 'PMXT_ARCHIVE',
+                platform: 'polymarket',
+                contractId: target.polymarketTokenId,
+                recordCount: pmxt.recordCount,
+                dateRange,
+                correlationId,
+              }),
+            );
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.warn(
+              `PMXT depth ingestion failed for ${target.polymarketTokenId}: ${msg}`,
+            );
+          }
+
+          // OddsPipe OHLCV — Polymarket only
+          try {
+            const oddsPipeMarketId = await this.oddsPipe.resolveMarketId(
+              target.polymarketTokenId,
+            );
+            if (oddsPipeMarketId !== null) {
+              this.logger.log({
+                message: `Ingesting OddsPipe OHLCV for ${target.polymarketTokenId} (market ${oddsPipeMarketId})`,
+                correlationId,
+                matchId,
+              });
+              const op = await this.oddsPipe.ingestPrices(
+                oddsPipeMarketId,
+                target.polymarketTokenId,
+                dateRange,
+              );
+              totalRecords += op.recordCount;
+              this.eventEmitter.emit(
+                EVENT_NAMES.BACKTEST_DATA_INGESTED,
+                new BacktestDataIngestedEvent({
+                  source: 'ODDSPIPE',
+                  platform: 'polymarket',
+                  contractId: target.polymarketTokenId,
+                  recordCount: op.recordCount,
+                  dateRange,
+                  correlationId,
+                }),
+              );
+            } else {
+              this.logger.log({
+                message: `Skipping OddsPipe for ${target.polymarketTokenId} — no market ID found`,
+                correlationId,
+                matchId,
+              });
+            }
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.warn(
+              `OddsPipe ingestion failed for ${target.polymarketTokenId}: ${msg}`,
+            );
+          }
+
+          // Delegate quality assessment to dedicated service
+          await this.qualityAssessor.runQualityAssessment(
             matchId,
             target,
             dateRange,
@@ -264,157 +335,5 @@ export class IngestionOrchestratorService {
 
   getProgress(): IngestionProgressDto[] {
     return Array.from(this.progressMap.values());
-  }
-
-  /**
-   * P3: Query ingested data from DB and run quality assessment.
-   * Updates records with quality flags and emits warning events.
-   */
-  private async runQualityAssessment(
-    matchId: string,
-    target: TargetContract,
-    dateRange: { start: Date; end: Date },
-    correlationId: string,
-  ): Promise<void> {
-    // Survivorship bias — use actual ContractMatch data
-    const survivorFlags = this.dataQuality.assessSurvivorshipBias(matchId, {
-      operatorApproved: target.operatorApproved,
-      resolutionTimestamp: target.resolutionTimestamp,
-    });
-
-    // Query Kalshi prices for quality assessment
-    const kalshiPrices = await this.prisma.historicalPrice.findMany({
-      where: {
-        contractId: target.kalshiTicker,
-        platform: 'KALSHI',
-        timestamp: { gte: dateRange.start, lte: dateRange.end },
-      },
-      orderBy: { timestamp: 'asc' },
-      take: QUALITY_SAMPLE_LIMIT,
-    });
-
-    const kalshiPriceFlags =
-      kalshiPrices.length > 0
-        ? this.dataQuality.assessPriceQuality(
-            kalshiPrices.map((p) => ({
-              platform: p.platform,
-              contractId: p.contractId,
-              source: p.source,
-              intervalMinutes: p.intervalMinutes,
-              timestamp: p.timestamp,
-              open: new Decimal(p.open.toString()),
-              high: new Decimal(p.high.toString()),
-              low: new Decimal(p.low.toString()),
-              close: new Decimal(p.close.toString()),
-              volume: p.volume ? new Decimal(p.volume.toString()) : null,
-              openInterest: p.openInterest
-                ? new Decimal(p.openInterest.toString())
-                : null,
-            })),
-            1,
-          )
-        : null;
-
-    // Query Kalshi trades for quality assessment
-    const kalshiTrades = await this.prisma.historicalTrade.findMany({
-      where: {
-        contractId: target.kalshiTicker,
-        platform: 'KALSHI',
-        timestamp: { gte: dateRange.start, lte: dateRange.end },
-      },
-      orderBy: { timestamp: 'asc' },
-      take: QUALITY_SAMPLE_LIMIT,
-    });
-
-    const kalshiTradeFlags =
-      kalshiTrades.length > 0
-        ? this.dataQuality.assessTradeQuality(
-            kalshiTrades.map((t) => ({
-              platform: t.platform,
-              contractId: t.contractId,
-              source: t.source,
-              externalTradeId: t.externalTradeId,
-              price: new Decimal(t.price.toString()),
-              size: new Decimal(t.size.toString()),
-              side: t.side,
-              timestamp: t.timestamp,
-            })),
-          )
-        : null;
-
-    // Merge all flags and emit warnings if any issues found
-    const allFlagSets: Array<{
-      source: string;
-      platform: string;
-      contractId: string;
-      flags: DataQualityFlags;
-    }> = [];
-
-    if (this.hasQualityIssues(survivorFlags)) {
-      allFlagSets.push({
-        source: 'survivorship',
-        platform: 'both',
-        contractId: matchId,
-        flags: survivorFlags,
-      });
-    }
-
-    if (kalshiPriceFlags && this.hasQualityIssues(kalshiPriceFlags)) {
-      allFlagSets.push({
-        source: 'KALSHI_API',
-        platform: 'kalshi',
-        contractId: target.kalshiTicker,
-        flags: kalshiPriceFlags,
-      });
-
-      // Persist quality flags on Kalshi price records
-      await this.prisma.historicalPrice.updateMany({
-        where: {
-          contractId: target.kalshiTicker,
-          platform: 'KALSHI',
-          timestamp: { gte: dateRange.start, lte: dateRange.end },
-        },
-        data: { qualityFlags: kalshiPriceFlags as unknown as Prisma.JsonValue },
-      });
-    }
-
-    if (kalshiTradeFlags && this.hasQualityIssues(kalshiTradeFlags)) {
-      allFlagSets.push({
-        source: 'KALSHI_API',
-        platform: 'kalshi',
-        contractId: target.kalshiTicker,
-        flags: kalshiTradeFlags,
-      });
-
-      // Persist quality flags on Kalshi trade records
-      await this.prisma.historicalTrade.updateMany({
-        where: {
-          contractId: target.kalshiTicker,
-          platform: 'KALSHI',
-          timestamp: { gte: dateRange.start, lte: dateRange.end },
-        },
-        data: { qualityFlags: kalshiTradeFlags as unknown as Prisma.JsonValue },
-      });
-    }
-
-    for (const entry of allFlagSets) {
-      this.dataQuality.emitQualityWarning(
-        entry.source,
-        entry.platform,
-        entry.contractId,
-        entry.flags,
-        correlationId,
-      );
-    }
-  }
-
-  private hasQualityIssues(flags: DataQualityFlags): boolean {
-    return (
-      flags.hasGaps ||
-      flags.hasSuspiciousJumps ||
-      flags.hasSurvivorshipBias ||
-      flags.hasStaleData ||
-      flags.hasLowVolume
-    );
   }
 }

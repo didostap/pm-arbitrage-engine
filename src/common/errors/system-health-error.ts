@@ -46,4 +46,10 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   BACKTEST_EXTERNAL_API_ERROR: 4206,
   /** Data quality below threshold during backtesting — warning */
   BACKTEST_DATA_QUALITY_ERROR: 4207,
+  /** PMXT Archive Parquet parse failure — error */
+  BACKTEST_PARQUET_PARSE_ERROR: 4201,
+  /** PMXT Archive depth ingestion failure after all retries — error */
+  BACKTEST_DEPTH_INGESTION_FAILURE: 4208,
+  /** OddsPipe API failure during backtesting — error */
+  BACKTEST_ODDSPIPE_API_ERROR: 4209,
 } as const;

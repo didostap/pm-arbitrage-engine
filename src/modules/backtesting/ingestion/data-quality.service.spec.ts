@@ -7,9 +7,21 @@ import type {
   NormalizedTrade,
 } from '../types/normalized-historical.types';
 
-function createDataQualityService(mockEmitter?: any) {
+function createMockPrismaForQuality() {
+  return {
+    historicalDepth: {
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
+    historicalPrice: {
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
+  } as any;
+}
+
+function createDataQualityService(mockEmitter?: any, mockPrisma?: any) {
   const emitter = mockEmitter ?? new EventEmitter2();
-  return new DataQualityService(emitter);
+  const prisma = mockPrisma ?? createMockPrismaForQuality();
+  return new DataQualityService(emitter, prisma);
 }
 
 function createNormalizedPrice(
@@ -320,6 +332,209 @@ describe('DataQualityService', () => {
           correlationId: 'test-corr',
         }),
       );
+    });
+  });
+
+  // ============================================================
+  // Story 10-9-1b: Depth Quality Assessment & Freshness Tracking
+  // ============================================================
+
+  describe('assessDepthQuality (Story 10-9-1b)', () => {
+    // NormalizedHistoricalDepth type does not exist yet — TDD red phase
+    // import type { NormalizedHistoricalDepth } from '../types/normalized-historical.types';
+
+    function createNormalizedDepth(overrides: Record<string, any> = {}) {
+      return {
+        platform: 'polymarket',
+        contractId: '0xTokenABC',
+        source: 'PMXT_ARCHIVE' as any,
+        bids: [
+          { price: new Decimal('0.55'), size: new Decimal('100') },
+          { price: new Decimal('0.54'), size: new Decimal('80') },
+        ],
+        asks: [
+          { price: new Decimal('0.57'), size: new Decimal('90') },
+          { price: new Decimal('0.58'), size: new Decimal('70') },
+        ],
+        timestamp: new Date('2025-06-01T00:00:00Z'),
+        updateType: 'snapshot' as const,
+        qualityFlags: null,
+        ...overrides,
+      };
+    }
+
+    it('[P1] should detect depth gaps >2 hours between PMXT snapshots', () => {
+      const service = createDataQualityService();
+
+      const depths = [
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T00:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T01:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T04:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T05:00:00Z') }),
+      ];
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasGaps).toBe(true);
+      expect(flags.gapDetails.length).toBeGreaterThan(0);
+      expect(flags.gapDetails[0]).toEqual(
+        expect.objectContaining({
+          from: new Date('2025-06-01T01:00:00Z'),
+          to: new Date('2025-06-01T04:00:00Z'),
+        }),
+      );
+    });
+
+    it('[P1] should detect wide spreads (>5% bid-ask spread on 0-1 scale)', () => {
+      const service = createDataQualityService();
+
+      const depths = [
+        createNormalizedDepth({
+          bids: [{ price: new Decimal('0.40'), size: new Decimal('100') }],
+          asks: [{ price: new Decimal('0.50'), size: new Decimal('100') }],
+        }),
+      ];
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasWideSpreads).toBe(true);
+      expect(flags.spreadDetails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ spreadBps: expect.any(Number) }),
+        ]),
+      );
+    });
+
+    it('[P1] should detect empty orderbooks (0 bid or 0 ask levels)', () => {
+      const service = createDataQualityService();
+
+      const depths = [
+        createNormalizedDepth({
+          bids: [],
+          asks: [{ price: new Decimal('0.60'), size: new Decimal('100') }],
+        }),
+      ];
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasGaps).toBe(true);
+    });
+
+    it('[P1] should detect imbalanced books (bid size <10% of ask size)', () => {
+      const service = createDataQualityService();
+
+      const depths = [
+        createNormalizedDepth({
+          bids: [{ price: new Decimal('0.55'), size: new Decimal('5') }],
+          asks: [{ price: new Decimal('0.60'), size: new Decimal('100') }],
+        }),
+      ];
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasLowVolume).toBe(true);
+    });
+
+    it('[P1] should return no flags for clean depth data', () => {
+      const service = createDataQualityService();
+
+      const depths = Array.from({ length: 5 }, (_, i) =>
+        createNormalizedDepth({
+          timestamp: new Date(
+            new Date('2025-06-01T00:00:00Z').getTime() + i * 60 * 60 * 1000,
+          ),
+        }),
+      );
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasGaps).toBe(false);
+      expect(flags.hasWideSpreads).toBe(false);
+    });
+
+    it('[P1] should sort unsorted depth snapshots by timestamp before analysis', () => {
+      const service = createDataQualityService();
+
+      const depths = [
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T05:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T00:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T04:00:00Z') }),
+        createNormalizedDepth({ timestamp: new Date('2025-06-01T01:00:00Z') }),
+      ];
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasGaps).toBe(true);
+    });
+  });
+
+  describe('assessFreshness (Story 10-9-1b)', () => {
+    it('[P1] should return last available timestamp per contract per source', async () => {
+      const mockPrisma = {
+        historicalDepth: {
+          groupBy: vi.fn().mockResolvedValue([
+            {
+              source: 'PMXT_ARCHIVE',
+              _max: { timestamp: new Date('2025-06-01T12:00:00Z') },
+            },
+          ]),
+        },
+        historicalPrice: {
+          groupBy: vi.fn().mockResolvedValue([
+            {
+              source: 'ODDSPIPE',
+              _max: { timestamp: new Date('2025-06-01T10:00:00Z') },
+            },
+            {
+              source: 'KALSHI_API',
+              _max: { timestamp: new Date('2025-06-01T11:00:00Z') },
+            },
+          ]),
+        },
+      } as any;
+
+      const service = createDataQualityService(undefined, mockPrisma);
+
+      const freshness = await service.assessFreshness('0xTokenABC', [
+        'PMXT_ARCHIVE',
+        'ODDSPIPE',
+        'KALSHI_API',
+      ]);
+      expect(freshness.timestamps).toEqual(
+        expect.objectContaining({
+          PMXT_ARCHIVE: new Date('2025-06-01T12:00:00Z'),
+          ODDSPIPE: new Date('2025-06-01T10:00:00Z'),
+          KALSHI_API: new Date('2025-06-01T11:00:00Z'),
+        }),
+      );
+    });
+
+    it('[P1] should flag sources with data older than 48 hours as stale', async () => {
+      const staleTimestamp = new Date(Date.now() - 72 * 60 * 60 * 1000);
+      const freshTimestamp = new Date(Date.now() - 12 * 60 * 60 * 1000);
+
+      const mockPrisma = {
+        historicalDepth: {
+          groupBy: vi.fn().mockResolvedValue([
+            {
+              source: 'PMXT_ARCHIVE',
+              _max: { timestamp: staleTimestamp },
+            },
+          ]),
+        },
+        historicalPrice: {
+          groupBy: vi.fn().mockResolvedValue([
+            {
+              source: 'ODDSPIPE',
+              _max: { timestamp: freshTimestamp },
+            },
+          ]),
+        },
+      } as any;
+
+      const service = createDataQualityService(undefined, mockPrisma);
+
+      const freshness = await service.assessFreshness('0xTokenABC', [
+        'PMXT_ARCHIVE',
+        'ODDSPIPE',
+      ]);
+
+      expect(freshness.stale).toContain('PMXT_ARCHIVE');
+      expect(freshness.stale).not.toContain('ODDSPIPE');
     });
   });
 });

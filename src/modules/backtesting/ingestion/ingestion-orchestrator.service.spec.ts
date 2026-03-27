@@ -16,11 +16,16 @@ function createMockPrisma() {
       createMany: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     historicalTrade: {
       createMany: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    historicalDepth: {
+      findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
   } as any;
 }
@@ -33,37 +38,54 @@ function createMockService() {
   };
 }
 
+function createMockPmxtArchive() {
+  return {
+    ingestDepth: vi
+      .fn()
+      .mockResolvedValue({ recordCount: 0, source: 'PMXT_ARCHIVE' }),
+  };
+}
+
+function createMockOddsPipe() {
+  return {
+    resolveMarketId: vi.fn().mockResolvedValue(42),
+    ingestPrices: vi
+      .fn()
+      .mockResolvedValue({ recordCount: 0, source: 'ODDSPIPE' }),
+  };
+}
+
+function createMockQualityAssessor() {
+  return {
+    runQualityAssessment: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function createOrchestratorService(
   prismaOverride?: any,
   kalshiOverride?: any,
   polyOverride?: any,
   emitterOverride?: any,
+  pmxtOverride?: any,
+  oddsPipeOverride?: any,
+  qualityAssessorOverride?: any,
 ) {
   const prisma = prismaOverride ?? createMockPrisma();
   const kalshi = kalshiOverride ?? createMockService();
   const poly = polyOverride ?? createMockService();
-  const emptyFlags = {
-    hasGaps: false,
-    hasSuspiciousJumps: false,
-    hasSurvivorshipBias: false,
-    hasStaleData: false,
-    hasLowVolume: false,
-    gapDetails: [],
-    jumpDetails: [],
-  };
-  const dataQuality = {
-    assessPriceQuality: vi.fn().mockReturnValue(emptyFlags),
-    assessTradeQuality: vi.fn().mockReturnValue(emptyFlags),
-    assessSurvivorshipBias: vi.fn().mockReturnValue(emptyFlags),
-    emitQualityWarning: vi.fn(),
-  } as any;
+  const pmxt = pmxtOverride ?? createMockPmxtArchive();
+  const oddsPipe = oddsPipeOverride ?? createMockOddsPipe();
+  const qualityAssessor =
+    qualityAssessorOverride ?? createMockQualityAssessor();
   const emitter = emitterOverride ?? new EventEmitter2();
 
   return new IngestionOrchestratorService(
     prisma,
     kalshi,
     poly,
-    dataQuality,
+    pmxt,
+    oddsPipe,
+    qualityAssessor,
     emitter,
   );
 }
@@ -231,7 +253,7 @@ describe('IngestionOrchestratorService', () => {
       expect(mockKalshi.ingestPrices).toHaveBeenCalledTimes(2);
     });
 
-    it('[P4] should emit BacktestDataIngestedEvent per source/contract (4 events per contract)', async () => {
+    it('[P4] should emit BacktestDataIngestedEvent per source/contract (6 events per contract)', async () => {
       const mockEmitter = { emit: vi.fn() };
       const mockKalshi = createMockService();
       const mockPoly = createMockService();
@@ -264,32 +286,44 @@ describe('IngestionOrchestratorService', () => {
         dateRangeEnd: new Date('2025-03-01'),
       });
 
-      // Should emit 4 events: Kalshi prices, Kalshi trades, Polymarket prices, Goldsky trades
+      // Should emit 6 events: Kalshi prices/trades, Poly prices, Goldsky trades, PMXT depth, OddsPipe OHLCV
       const ingestedCalls = mockEmitter.emit.mock.calls.filter(
         (c: any[]) => c[0] === 'backtesting.data.ingested',
       );
-      expect(ingestedCalls).toHaveLength(4);
+      expect(ingestedCalls).toHaveLength(6);
 
       // Verify per-source events with correct platform/source
-      expect(ingestedCalls[0][1]).toEqual(
+      expect(ingestedCalls[0]![1]).toEqual(
         expect.objectContaining({
           source: 'KALSHI_API',
           platform: 'kalshi',
           contractId: 'K1',
         }),
       );
-      expect(ingestedCalls[2][1]).toEqual(
+      expect(ingestedCalls[2]![1]).toEqual(
         expect.objectContaining({
           source: 'POLYMARKET_API',
           platform: 'polymarket',
           contractId: '0x1',
         }),
       );
-      expect(ingestedCalls[3][1]).toEqual(
+      expect(ingestedCalls[3]![1]).toEqual(
         expect.objectContaining({
           source: 'GOLDSKY',
           platform: 'polymarket',
           contractId: '0x1',
+        }),
+      );
+      expect(ingestedCalls[4]![1]).toEqual(
+        expect.objectContaining({
+          source: 'PMXT_ARCHIVE',
+          platform: 'polymarket',
+        }),
+      );
+      expect(ingestedCalls[5]![1]).toEqual(
+        expect.objectContaining({
+          source: 'ODDSPIPE',
+          platform: 'polymarket',
         }),
       );
     });
@@ -358,6 +392,48 @@ describe('IngestionOrchestratorService', () => {
       ).rejects.toThrow('DB failure');
 
       expect(service.isRunning).toBe(false);
+    });
+
+    it('[P1] should delegate quality assessment to IngestionQualityAssessorService', async () => {
+      const mockQualityAssessor = createMockQualityAssessor();
+      const mockPrisma = createMockPrisma();
+      mockPrisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'm1',
+          kalshiContractId: 'K1',
+          polymarketClobTokenId: '0x1',
+          operatorApproved: true,
+          resolutionTimestamp: null,
+        },
+      ]);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        mockQualityAssessor,
+      );
+
+      await service.runIngestion({
+        dateRangeStart: new Date('2025-01-01'),
+        dateRangeEnd: new Date('2025-03-01'),
+      });
+
+      expect(mockQualityAssessor.runQualityAssessment).toHaveBeenCalledWith(
+        'm1',
+        expect.objectContaining({
+          kalshiTicker: 'K1',
+          polymarketTokenId: '0x1',
+        }),
+        expect.objectContaining({
+          start: expect.any(Date),
+          end: expect.any(Date),
+        }),
+        expect.any(String),
+      );
     });
   });
 
@@ -436,6 +512,187 @@ describe('IngestionOrchestratorService', () => {
       const progress = service.getProgress();
       // No contracts = empty progress
       expect(progress).toHaveLength(0);
+    });
+  });
+
+  // ============================================================
+  // Story 10-9-1b: PMXT Archive + OddsPipe Source Integration
+  // ============================================================
+
+  describe('runIngestion — new sources (Story 10-9-1b)', () => {
+    const dateRange = {
+      dateRangeStart: new Date('2025-01-01'),
+      dateRangeEnd: new Date('2025-03-01'),
+    };
+
+    function setupOnePrismaContract(prisma: any) {
+      prisma.contractMatch.findMany.mockResolvedValue([
+        {
+          matchId: 'm1',
+          kalshiContractId: 'K1',
+          polymarketClobTokenId: '0x1',
+          operatorApproved: true,
+          resolutionTimestamp: null,
+        },
+      ]);
+    }
+
+    it('[P1] should call PmxtArchiveService.ingestDepth for Polymarket contracts', async () => {
+      const mockPmxt = createMockPmxtArchive();
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        undefined,
+        mockPmxt,
+      );
+
+      await service.runIngestion(dateRange);
+      expect(mockPmxt.ingestDepth).toHaveBeenCalledWith(
+        '0x1',
+        expect.objectContaining({
+          start: expect.any(Date),
+          end: expect.any(Date),
+        }),
+      );
+    });
+
+    it('[P1] should call OddsPipeService for Polymarket contracts only', async () => {
+      const mockOddsPipe = createMockOddsPipe();
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        mockOddsPipe,
+      );
+
+      await service.runIngestion(dateRange);
+      expect(mockOddsPipe.resolveMarketId).toHaveBeenCalledWith('0x1');
+      expect(mockOddsPipe.ingestPrices).toHaveBeenCalledWith(
+        42,
+        '0x1',
+        expect.objectContaining({
+          start: expect.any(Date),
+          end: expect.any(Date),
+        }),
+      );
+    });
+
+    it('[P1] should emit BacktestDataIngestedEvent with source PMXT_ARCHIVE', async () => {
+      const mockEmitter = { emit: vi.fn() };
+      const mockPmxt = createMockPmxtArchive();
+      mockPmxt.ingestDepth.mockResolvedValue({
+        recordCount: 50,
+        source: 'PMXT_ARCHIVE',
+      });
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        mockEmitter,
+        mockPmxt,
+      );
+
+      await service.runIngestion(dateRange);
+      const pmxtEvents = mockEmitter.emit.mock.calls.filter(
+        (c: any[]) =>
+          c[0] === 'backtesting.data.ingested' &&
+          c[1]?.source === 'PMXT_ARCHIVE',
+      );
+      expect(pmxtEvents).toHaveLength(1);
+      expect(pmxtEvents[0]![1]).toEqual(
+        expect.objectContaining({
+          source: 'PMXT_ARCHIVE',
+          platform: 'polymarket',
+          recordCount: 50,
+        }),
+      );
+    });
+
+    it('[P1] should emit BacktestDataIngestedEvent with source ODDSPIPE', async () => {
+      const mockEmitter = { emit: vi.fn() };
+      const mockOddsPipe = createMockOddsPipe();
+      mockOddsPipe.ingestPrices.mockResolvedValue({
+        recordCount: 30,
+        source: 'ODDSPIPE',
+      });
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        mockEmitter,
+        undefined,
+        mockOddsPipe,
+      );
+
+      await service.runIngestion(dateRange);
+      const oddsPipeEvents = mockEmitter.emit.mock.calls.filter(
+        (c: any[]) =>
+          c[0] === 'backtesting.data.ingested' && c[1]?.source === 'ODDSPIPE',
+      );
+      expect(oddsPipeEvents).toHaveLength(1);
+      expect(oddsPipeEvents[0]![1]).toEqual(
+        expect.objectContaining({
+          source: 'ODDSPIPE',
+          platform: 'polymarket',
+          recordCount: 30,
+        }),
+      );
+    });
+
+    it('[P1] should skip OddsPipe ingestion when resolveMarketId returns null', async () => {
+      const mockOddsPipe = createMockOddsPipe();
+      mockOddsPipe.resolveMarketId.mockResolvedValue(null);
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        mockOddsPipe,
+      );
+
+      await service.runIngestion(dateRange);
+      expect(mockOddsPipe.ingestPrices).not.toHaveBeenCalled();
+    });
+
+    it('[P1] should continue ingestion when PMXT source fails for a contract', async () => {
+      const mockPmxt = createMockPmxtArchive();
+      mockPmxt.ingestDepth.mockRejectedValueOnce(
+        new Error('Parquet parse failed'),
+      );
+      const mockOddsPipe = createMockOddsPipe();
+      const mockPrisma = createMockPrisma();
+      setupOnePrismaContract(mockPrisma);
+
+      const service = createOrchestratorService(
+        mockPrisma,
+        undefined,
+        undefined,
+        undefined,
+        mockPmxt,
+        mockOddsPipe,
+      );
+
+      await service.runIngestion(dateRange);
+      expect(mockOddsPipe.ingestPrices).toHaveBeenCalled();
     });
   });
 });

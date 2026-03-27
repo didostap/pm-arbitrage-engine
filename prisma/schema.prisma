@@ -508,3 +508,51 @@ model HistoricalTrade {
   @@index([timestamp])
   @@map("historical_trades")
 }
+
+// Data catalog status for tracking file download/processing lifecycle (Story 10-9-1b)
+enum DataCatalogStatus {
+  PENDING
+  PROCESSING
+  COMPLETE
+  FAILED
+}
+
+// Historical L2 orderbook depth data for backtesting (Story 10-9-1b)
+model HistoricalDepth {
+  id              Int                  @id @default(autoincrement())
+  platform        Platform
+  contractId      String               @map("contract_id")
+  source          HistoricalDataSource
+  bids            Json                 // Array<{ price: Decimal, size: Decimal }> — same as NormalizedOrderBook
+  asks            Json                 // Array<{ price: Decimal, size: Decimal }> — same as NormalizedOrderBook
+  timestamp       DateTime             @db.Timestamptz
+  updateType      String?              @map("update_type") // 'snapshot' | 'price_change' | null
+  ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
+  qualityFlags    Json?                @map("quality_flags")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([platform, contractId, source, timestamp])
+  @@index([platform, contractId, timestamp])
+  @@index([source, timestamp])
+  @@index([timestamp])
+  @@map("historical_depths")
+}
+
+// Data catalog for tracking downloaded files (Story 10-9-1b)
+model DataCatalog {
+  id             Int                  @id @default(autoincrement())
+  source         HistoricalDataSource
+  filePath       String               @map("file_path")
+  fileSize       BigInt?              @map("file_size")
+  timeRangeStart DateTime?            @map("time_range_start") @db.Timestamptz
+  timeRangeEnd   DateTime?            @map("time_range_end") @db.Timestamptz
+  recordCount    Int?                 @map("record_count")
+  status         DataCatalogStatus    @default(PENDING)
+  checksum       String?
+  metadata       Json?
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([source, filePath])
+  @@map("data_catalog")
+}

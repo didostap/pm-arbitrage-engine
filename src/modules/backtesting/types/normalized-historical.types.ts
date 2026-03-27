@@ -1,10 +1,11 @@
 import Decimal from 'decimal.js';
 import { HistoricalDataSource } from '@prisma/client';
-
-export type {
+import type {
   DataQualityFlags,
   IngestionMetadata,
 } from '../../../common/types/historical-data.types';
+
+export type { DataQualityFlags, IngestionMetadata };
 
 export interface NormalizedPrice {
   platform: string;
@@ -29,4 +30,15 @@ export interface NormalizedTrade {
   size: Decimal;
   side: string;
   timestamp: Date;
+}
+
+export interface NormalizedHistoricalDepth {
+  platform: string;
+  contractId: string;
+  source: HistoricalDataSource;
+  bids: Array<{ price: Decimal; size: Decimal }>;
+  asks: Array<{ price: Decimal; size: Decimal }>;
+  timestamp: Date;
+  updateType: 'snapshot' | 'price_change' | null;
+  qualityFlags: DataQualityFlags | null;
 }
