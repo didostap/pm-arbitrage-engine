@@ -105,4 +105,38 @@ describe('SystemHealthError', () => {
     expect(error.code).toBe(4209);
     expect(error.component).toBe('oddspipe');
   });
+
+  // ============================================================
+  // Story 10-9-2: Cross-Platform Pair Matching Validation Error Codes
+  // ============================================================
+
+  it('[P1] should define BACKTEST_PREDEXON_API_ERROR with code 4202', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_PREDEXON_API_ERROR).toBe(4202);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_PREDEXON_API_ERROR,
+      'Predexon API failed after 3 retries',
+      'error',
+      'predexon',
+    );
+
+    expect(error.code).toBe(4202);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('predexon');
+  });
+
+  it('[P1] should define BACKTEST_VALIDATION_FAILURE with code 4203', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_VALIDATION_FAILURE).toBe(4203);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_VALIDATION_FAILURE,
+      'Match validation engine failed during comparison',
+      'error',
+      'match-validation',
+    );
+
+    expect(error.code).toBe(4203);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('match-validation');
+  });
 });

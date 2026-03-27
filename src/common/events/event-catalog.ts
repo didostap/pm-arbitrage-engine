@@ -243,6 +243,8 @@ export const EVENT_NAMES = {
   BACKTEST_DATA_INGESTED: 'backtesting.data.ingested',
   /** Emitted when data quality issues are detected during ingestion */
   BACKTEST_DATA_QUALITY_WARNING: 'backtesting.data.quality-warning',
+  /** Emitted when match validation completes successfully */
+  BACKTEST_VALIDATION_COMPLETED: 'backtesting.validation.completed',
 } as const;
 
 /**

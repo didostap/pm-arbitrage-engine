@@ -52,4 +52,8 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   BACKTEST_DEPTH_INGESTION_FAILURE: 4208,
   /** OddsPipe API failure during backtesting — error */
   BACKTEST_ODDSPIPE_API_ERROR: 4209,
+  /** Predexon API failure during matching validation — error */
+  BACKTEST_PREDEXON_API_ERROR: 4202,
+  /** Match validation engine failure — error */
+  BACKTEST_VALIDATION_FAILURE: 4203,
 } as const;

@@ -7,6 +7,7 @@ vi.mock('../services/correlation-context', () => ({
 import {
   BacktestDataIngestedEvent,
   BacktestDataQualityWarningEvent,
+  BacktestValidationCompletedEvent,
 } from './backtesting.events';
 import { BaseEvent } from './base.event';
 import { EVENT_NAMES } from './event-catalog';
@@ -127,5 +128,41 @@ describe('Event catalog entries', () => {
     expect(EVENT_NAMES.BACKTEST_DATA_QUALITY_WARNING).toBe(
       'backtesting.data.quality-warning',
     );
+  });
+
+  it('[P1] should register BACKTEST_VALIDATION_COMPLETED in event catalog', () => {
+    expect(EVENT_NAMES.BACKTEST_VALIDATION_COMPLETED).toBe(
+      'backtesting.validation.completed',
+    );
+  });
+});
+
+// ============================================================
+// Story 10-9-2: Match Validation Events
+// ============================================================
+
+describe('BacktestValidationCompletedEvent', () => {
+  it('[P1] should construct BacktestValidationCompletedEvent with summary counts and reportId', () => {
+    const event = new BacktestValidationCompletedEvent({
+      reportId: 42,
+      confirmedCount: 10,
+      ourOnlyCount: 5,
+      externalOnlyCount: 3,
+      conflictCount: 2,
+      correlationId: 'val-corr-id',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        reportId: 42,
+        confirmedCount: 10,
+        ourOnlyCount: 5,
+        externalOnlyCount: 3,
+        conflictCount: 2,
+        correlationId: 'val-corr-id',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+    expect(event.timestamp).toBeInstanceOf(Date);
   });
 });

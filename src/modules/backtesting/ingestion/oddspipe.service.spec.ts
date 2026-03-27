@@ -324,6 +324,146 @@ describe('OddsPipeService', () => {
     });
   });
 
+  // ============================================================
+  // Story 10-9-2: fetchMatchedPairs — Cross-Platform Spread Pairs
+  // ============================================================
+
+  describe('fetchMatchedPairs', () => {
+    function createSpreadItem(overrides?: Record<string, unknown>) {
+      return {
+        polymarket: {
+          title: 'Will Bitcoin exceed $100k?',
+          yes_price: 0.65,
+          ...((overrides?.polymarket as Record<string, unknown>) ?? {}),
+        },
+        kalshi: {
+          title: 'Bitcoin above $100,000',
+          yes_price: 0.62,
+          ...((overrides?.kalshi as Record<string, unknown>) ?? {}),
+        },
+        spread: {
+          yes_diff: 0.03,
+          ...((overrides?.spread as Record<string, unknown>) ?? {}),
+        },
+        ...((overrides?.top as Record<string, unknown>) ?? {}),
+      };
+    }
+
+    function createSpreadsResponse(
+      items: ReturnType<typeof createSpreadItem>[],
+    ) {
+      return {
+        ok: true,
+        json: () => Promise.resolve({ items }),
+      };
+    }
+
+    it('[P0] should fetch matched pairs from GET /v1/spreads and normalize to ExternalMatchedPair', async () => {
+      const service = createService();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(createSpreadsResponse([createSpreadItem()])),
+      );
+
+      const pairs = await service.fetchMatchedPairs();
+
+      expect(pairs).toHaveLength(1);
+      expect(pairs[0]).toEqual(
+        expect.objectContaining({
+          polymarketId: null,
+          kalshiId: null,
+          polymarketTitle: 'Will Bitcoin exceed $100k?',
+          kalshiTitle: 'Bitcoin above $100,000',
+          source: 'oddspipe',
+          similarity: null,
+          spreadData: expect.objectContaining({
+            yesDiff: 0.03,
+            polyYesPrice: 0.65,
+            kalshiYesPrice: 0.62,
+          }),
+        }),
+      );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/v1/spreads'),
+        expect.any(Object),
+      );
+    });
+
+    it('[P1] should preserve spread metadata (yes_diff, polyYesPrice, kalshiYesPrice)', async () => {
+      const service = createService();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          createSpreadsResponse([
+            createSpreadItem({
+              polymarket: { title: 'Test PM', yes_price: 0.7 },
+              kalshi: { title: 'Test K', yes_price: 0.55 },
+              spread: { yes_diff: 0.15 },
+            }),
+          ]),
+        ),
+      );
+
+      const pairs = await service.fetchMatchedPairs();
+
+      expect(pairs[0]!.spreadData).toEqual({
+        yesDiff: 0.15,
+        polyYesPrice: 0.7,
+        kalshiYesPrice: 0.55,
+      });
+    });
+
+    it('[P1] should extract Polymarket and Kalshi identifiers from spread response objects', async () => {
+      // OddsPipe does NOT return platform IDs — only titles
+      // Verify polymarketId and kalshiId are null (title-based matching only)
+      const service = createService();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(createSpreadsResponse([createSpreadItem()])),
+      );
+
+      const pairs = await service.fetchMatchedPairs();
+      expect(pairs[0]!.polymarketId).toBeNull();
+      expect(pairs[0]!.kalshiId).toBeNull();
+    });
+
+    it('[P1] should reuse existing X-API-Key auth and rate limiting from fetchWithRateLimit', async () => {
+      const service = createService();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(createSpreadsResponse([])),
+      );
+
+      await service.fetchMatchedPairs();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-API-Key': 'test-api-key-123',
+          }),
+        }),
+      );
+    });
+
+    it('[P1] should handle error responses with existing error handling patterns', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+        }),
+      );
+
+      const service = createService();
+      await expect(service.fetchMatchedPairs()).rejects.toMatchObject({
+        code: 4209,
+        message: expect.stringContaining('OddsPipe'),
+      });
+    });
+  });
+
   describe('error handling', () => {
     it('[P1] should throw SystemHealthError code 4209 on OddsPipe API failure', async () => {
       vi.stubGlobal(

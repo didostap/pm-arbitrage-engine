@@ -8,6 +8,7 @@ import {
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../../../common/errors/system-health-error';
 import type { IngestionMetadata } from '../../../common/types/historical-data.types';
+import type { ExternalMatchedPair } from '../types/match-validation.types';
 
 interface OddsPipeCandlestick {
   timestamp: number;
@@ -172,6 +173,59 @@ export class OddsPipeService implements OnModuleDestroy {
     };
   }
 
+  async fetchMatchedPairs(minSpread?: number): Promise<ExternalMatchedPair[]> {
+    const params = new URLSearchParams();
+    if (minSpread !== undefined) {
+      params.set('min_spread', String(minSpread));
+    }
+
+    const queryString = params.toString();
+    const url = `${this.baseUrl}/spreads${queryString ? `?${queryString}` : ''}`;
+
+    const response = await this.fetchJsonWithRetry<{
+      items?: Array<{
+        polymarket?: { title?: string; yes_price?: number };
+        kalshi?: { title?: string; yes_price?: number };
+        spread?: { yes_diff?: number };
+      }>;
+    }>(url);
+
+    // P-13: Validate response shape
+    if (!response.items || !Array.isArray(response.items)) {
+      throw new SystemHealthError(
+        SYSTEM_HEALTH_ERROR_CODES.BACKTEST_ODDSPIPE_API_ERROR,
+        'OddsPipe /spreads returned unexpected shape: missing or non-array "items" field',
+        'error',
+        'oddspipe',
+      );
+    }
+
+    return response.items.map((item) => {
+      if (!item.polymarket || !item.kalshi || !item.spread) {
+        throw new SystemHealthError(
+          SYSTEM_HEALTH_ERROR_CODES.BACKTEST_ODDSPIPE_API_ERROR,
+          'OddsPipe spread item missing polymarket, kalshi, or spread sub-object',
+          'error',
+          'oddspipe',
+        );
+      }
+
+      return {
+        polymarketId: null,
+        kalshiId: null,
+        polymarketTitle: item.polymarket.title ?? '',
+        kalshiTitle: item.kalshi.title ?? '',
+        source: 'oddspipe' as const,
+        similarity: null,
+        spreadData: {
+          yesDiff: item.spread.yes_diff ?? 0,
+          polyYesPrice: item.polymarket.yes_price ?? 0,
+          kalshiYesPrice: item.kalshi.yes_price ?? 0,
+        },
+      };
+    });
+  }
+
   private clampDateRange(dateRange: { start: Date; end: Date }): {
     start: Date;
     end: Date;
@@ -217,7 +271,15 @@ export class OddsPipeService implements OnModuleDestroy {
     }
   }
 
+  private async fetchJsonWithRetry<T>(url: string): Promise<T> {
+    return this.fetchWithRetryRaw(url) as Promise<T>;
+  }
+
   private async fetchWithRetry(url: string): Promise<OddsPipeCandlestick[]> {
+    return this.fetchWithRetryRaw(url) as Promise<OddsPipeCandlestick[]>;
+  }
+
+  private async fetchWithRetryRaw(url: string): Promise<unknown> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -225,7 +287,7 @@ export class OddsPipeService implements OnModuleDestroy {
         const res = await this.fetchWithRateLimit(url);
 
         if (res.ok) {
-          return (await res.json()) as OddsPipeCandlestick[];
+          return await res.json();
         }
 
         if (res.status >= 400 && res.status < 500) {

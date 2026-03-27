@@ -556,3 +556,22 @@ model DataCatalog {
   @@unique([source, filePath])
   @@map("data_catalog")
 }
+
+// Match validation report for cross-platform pair matching validation (Story 10-9-2)
+model MatchValidationReport {
+  id                 Int      @id @default(autoincrement())
+  correlationId      String   @map("correlation_id")
+  runTimestamp        DateTime @map("run_timestamp") @db.Timestamptz
+  totalOurMatches    Int      @map("total_our_matches")
+  totalOddsPipePairs Int      @map("total_oddspipe_pairs")
+  totalPredexonPairs Int      @map("total_predexon_pairs")
+  confirmedCount     Int      @map("confirmed_count")
+  ourOnlyCount       Int      @map("our_only_count")
+  externalOnlyCount  Int      @map("external_only_count")
+  conflictCount      Int      @map("conflict_count")
+  reportData         Json     @map("report_data")
+  durationMs         Int      @map("duration_ms")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("match_validation_reports")
+}

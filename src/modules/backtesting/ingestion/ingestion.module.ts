@@ -19,6 +19,6 @@ import { IngestionOrchestratorService } from './ingestion-orchestrator.service';
     IngestionQualityAssessorService,
     IngestionOrchestratorService,
   ],
-  exports: [IngestionOrchestratorService],
+  exports: [IngestionOrchestratorService, OddsPipeService],
 })
 export class IngestionModule {}
