@@ -439,8 +439,14 @@ export class MatchValidationService implements OnModuleDestroy {
     }
 
     // Second pass: cross-check across buckets by normalized Polymarket title
-    const oddsPipeByTitle = new Map<string, { key: string; agg: PairAggregation }>();
-    const predexonByTitle = new Map<string, { key: string; agg: PairAggregation }>();
+    const oddsPipeByTitle = new Map<
+      string,
+      { key: string; agg: PairAggregation }
+    >();
+    const predexonByTitle = new Map<
+      string,
+      { key: string; agg: PairAggregation }
+    >();
 
     for (const [key, agg] of aggregations) {
       if (agg.ourMatch) continue;
@@ -488,8 +494,7 @@ export class MatchValidationService implements OnModuleDestroy {
         const merged: PairAggregation & { _crossExternalConflict?: string } = {
           oddsPipe: opPair,
           predexon: pdPair,
-          _crossExternalConflict:
-            `OddsPipe pairs PM "${opPair.polymarketTitle}" with K "${opKalshiLabel}", but Predexon pairs it with K "${pdKalshiLabel}"`,
+          _crossExternalConflict: `OddsPipe pairs PM "${opPair.polymarketTitle}" with K "${opKalshiLabel}", but Predexon pairs it with K "${pdKalshiLabel}"`,
         };
         aggregations.delete(opEntry.key);
         aggregations.delete(pdEntry.key);

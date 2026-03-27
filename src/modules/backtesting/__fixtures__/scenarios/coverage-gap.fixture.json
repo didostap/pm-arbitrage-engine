@@ -1,0 +1,27 @@
+{
+  "description": "6-hour price gap mid-simulation — position held through gap, quality flag set",
+  "config": {
+    "dateRangeStart": "2025-02-01T14:00:00Z",
+    "dateRangeEnd": "2025-02-02T00:00:00Z",
+    "edgeThresholdPct": 0.008,
+    "positionSizePct": 0.03,
+    "bankrollUsd": "10000"
+  },
+  "pairs": [
+    {
+      "kalshiContractId": "K-GAP",
+      "polymarketClobTokenId": "P-GAP",
+      "resolutionTimestamp": null
+    }
+  ],
+  "priceData": [
+    { "timestamp": "2025-02-01T14:00:00Z", "kalshiClose": "0.40", "polymarketClose": "0.55" },
+    { "timestamp": "2025-02-01T20:00:00Z", "kalshiClose": "0.42", "polymarketClose": "0.53" },
+    { "timestamp": "2025-02-01T23:00:00Z", "kalshiClose": "0.44", "polymarketClose": "0.51" }
+  ],
+  "gapHours": 6,
+  "expected": {
+    "totalPositions": 1,
+    "positionHeldThroughGap": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "Gross edge 1%, fees 1.2% — position NOT opened (below threshold after fees)",
+  "config": {
+    "dateRangeStart": "2025-02-01T14:00:00Z",
+    "dateRangeEnd": "2025-02-01T16:00:00Z",
+    "edgeThresholdPct": 0.008,
+    "positionSizePct": 0.03,
+    "bankrollUsd": "10000"
+  },
+  "pairs": [
+    {
+      "kalshiContractId": "K-FEE",
+      "polymarketClobTokenId": "P-FEE",
+      "resolutionTimestamp": null
+    }
+  ],
+  "priceData": [
+    { "timestamp": "2025-02-01T14:00:00Z", "kalshiClose": "0.495", "polymarketClose": "0.500" },
+    { "timestamp": "2025-02-01T15:00:00Z", "kalshiClose": "0.496", "polymarketClose": "0.499" }
+  ],
+  "expected": {
+    "totalPositions": 0,
+    "pnlPositive": false,
+    "exitReason": null
+  }
+}

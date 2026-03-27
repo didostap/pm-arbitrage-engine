@@ -72,3 +72,133 @@ export class BacktestValidationCompletedEvent extends BaseEvent {
     this.conflictCount = payload.conflictCount;
   }
 }
+
+// ============================================================
+// Story 10-9-3: Backtest Simulation Engine Events
+// ============================================================
+
+export class BacktestRunStartedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly config: Record<string, unknown>;
+
+  constructor(payload: {
+    runId: string;
+    config: Record<string, unknown>;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.config = payload.config;
+  }
+}
+
+export class BacktestRunCompletedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly metrics: Record<string, unknown>;
+
+  constructor(payload: {
+    runId: string;
+    metrics: Record<string, unknown>;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.metrics = payload.metrics;
+  }
+}
+
+export class BacktestRunFailedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly errorCode: number;
+  public readonly message: string;
+
+  constructor(payload: {
+    runId: string;
+    errorCode: number;
+    message: string;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.errorCode = payload.errorCode;
+    this.message = payload.message;
+  }
+}
+
+export class BacktestRunCancelledEvent extends BaseEvent {
+  public readonly runId: string;
+
+  constructor(payload: { runId: string; correlationId?: string }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+  }
+}
+
+export class BacktestPositionOpenedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly positionId: string;
+  public readonly pairId: string;
+  public readonly entryEdge: string;
+  public readonly positionSizeUsd: string;
+
+  constructor(payload: {
+    runId: string;
+    positionId: string;
+    pairId: string;
+    entryEdge: string;
+    positionSizeUsd: string;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.positionId = payload.positionId;
+    this.pairId = payload.pairId;
+    this.entryEdge = payload.entryEdge;
+    this.positionSizeUsd = payload.positionSizeUsd;
+  }
+}
+
+export class BacktestPositionClosedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly positionId: string;
+  public readonly pairId: string;
+  public readonly exitReason: string;
+  public readonly realizedPnl: string;
+  public readonly holdingHours: string;
+
+  constructor(payload: {
+    runId: string;
+    positionId: string;
+    pairId: string;
+    exitReason: string;
+    realizedPnl: string;
+    holdingHours: string;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.positionId = payload.positionId;
+    this.pairId = payload.pairId;
+    this.exitReason = payload.exitReason;
+    this.realizedPnl = payload.realizedPnl;
+    this.holdingHours = payload.holdingHours;
+  }
+}
+
+export class BacktestEngineStateChangedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly fromState: string;
+  public readonly toState: string;
+
+  constructor(payload: {
+    runId: string;
+    fromState: string;
+    toState: string;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.fromState = payload.fromState;
+    this.toState = payload.toState;
+  }
+}

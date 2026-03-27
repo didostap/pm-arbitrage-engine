@@ -1,0 +1,29 @@
+{
+  "description": "Kalshi YES 0.45, Poly NO 0.48, 3% gross edge, 1.5% net. Exits via profit capture",
+  "config": {
+    "dateRangeStart": "2025-02-01T14:00:00Z",
+    "dateRangeEnd": "2025-02-01T16:00:00Z",
+    "edgeThresholdPct": 0.008,
+    "positionSizePct": 0.03,
+    "bankrollUsd": "10000",
+    "tradingWindowStartHour": 14,
+    "tradingWindowEndHour": 23
+  },
+  "pairs": [
+    {
+      "kalshiContractId": "KXBTC-24DEC31",
+      "polymarketClobTokenId": "0xABC123",
+      "resolutionTimestamp": null
+    }
+  ],
+  "priceData": [
+    { "timestamp": "2025-02-01T14:00:00Z", "kalshiClose": "0.45", "polymarketClose": "0.52" },
+    { "timestamp": "2025-02-01T14:30:00Z", "kalshiClose": "0.48", "polymarketClose": "0.50" },
+    { "timestamp": "2025-02-01T15:00:00Z", "kalshiClose": "0.49", "polymarketClose": "0.49" }
+  ],
+  "expected": {
+    "totalPositions": 1,
+    "pnlPositive": true,
+    "exitReason": "PROFIT_CAPTURE"
+  }
+}

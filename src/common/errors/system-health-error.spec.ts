@@ -51,7 +51,6 @@ describe('SystemHealthError', () => {
   // ============================================================
 
   it('[P1] should define BACKTEST_PARQUET_PARSE_ERROR with code 4201', () => {
-    // Error code for Parquet parse failures during PMXT Archive ingestion
     expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_PARQUET_PARSE_ERROR).toBe(4201);
 
     const error = new SystemHealthError(
@@ -67,7 +66,6 @@ describe('SystemHealthError', () => {
   });
 
   it('[P1] should define BACKTEST_DEPTH_INGESTION_FAILURE with code 4208', () => {
-    // Error code for PMXT Archive download/ingestion failures
     expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_DEPTH_INGESTION_FAILURE).toBe(
       4208,
     );
@@ -92,7 +90,6 @@ describe('SystemHealthError', () => {
   });
 
   it('[P1] should define BACKTEST_ODDSPIPE_API_ERROR with code 4209', () => {
-    // Error code for OddsPipe API failures
     expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_ODDSPIPE_API_ERROR).toBe(4209);
 
     const error = new SystemHealthError(
@@ -138,5 +135,75 @@ describe('SystemHealthError', () => {
     expect(error.code).toBe(4203);
     expect(error.severity).toBe('error');
     expect(error.component).toBe('match-validation');
+  });
+
+  // ============================================================
+  // Story 10-9-3: Backtest Simulation Engine Error Codes
+  // ============================================================
+
+  it('[P1] should define BACKTEST_STATE_ERROR with code 4204', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_STATE_ERROR).toBe(4204);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_STATE_ERROR,
+      'Invalid state transition: idle → simulating',
+      'error',
+      'backtest-engine',
+    );
+
+    expect(error.code).toBe(4204);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('backtest-engine');
+  });
+
+  it('[P1] should define BACKTEST_TIMEOUT with code 4210', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT).toBe(4210);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+      'Backtest simulation exceeded 300s timeout',
+      'error',
+      'backtest-engine',
+    );
+
+    expect(error.code).toBe(4210);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('backtest-engine');
+  });
+
+  it('[P1] should define BACKTEST_INSUFFICIENT_DATA with code 4211', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA).toBe(4211);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA,
+      'Data coverage below 50% minimum threshold',
+      'error',
+      'backtest-engine',
+    );
+
+    expect(error.code).toBe(4211);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('backtest-engine');
+  });
+
+  it('[P1] should define BACKTEST_INVALID_CONFIGURATION with code 4212', () => {
+    expect(SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INVALID_CONFIGURATION).toBe(4212);
+
+    const error = new SystemHealthError(
+      SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INVALID_CONFIGURATION,
+      'Invalid backtest configuration: dateRangeStart >= dateRangeEnd',
+      'error',
+      'backtest-engine',
+    );
+
+    expect(error.code).toBe(4212);
+    expect(error.severity).toBe('error');
+    expect(error.component).toBe('backtest-engine');
+  });
+
+  it('[P1] should have no duplicate error codes across all SYSTEM_HEALTH_ERROR_CODES', () => {
+    const codes = Object.values(SYSTEM_HEALTH_ERROR_CODES);
+    const uniqueCodes = new Set(codes);
+    expect(uniqueCodes.size).toBe(codes.length);
   });
 });

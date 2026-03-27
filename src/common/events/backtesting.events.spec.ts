@@ -8,6 +8,13 @@ import {
   BacktestDataIngestedEvent,
   BacktestDataQualityWarningEvent,
   BacktestValidationCompletedEvent,
+  BacktestRunStartedEvent,
+  BacktestRunCompletedEvent,
+  BacktestRunFailedEvent,
+  BacktestRunCancelledEvent,
+  BacktestPositionOpenedEvent,
+  BacktestPositionClosedEvent,
+  BacktestEngineStateChangedEvent,
 } from './backtesting.events';
 import { BaseEvent } from './base.event';
 import { EVENT_NAMES } from './event-catalog';
@@ -164,5 +171,187 @@ describe('BacktestValidationCompletedEvent', () => {
     );
     expect(event).toBeInstanceOf(BaseEvent);
     expect(event.timestamp).toBeInstanceOf(Date);
+  });
+});
+
+// ============================================================
+// Story 10-9-3: Backtest Simulation Engine Events
+// ============================================================
+
+describe('BacktestRunStartedEvent', () => {
+  it('[P1] should construct with runId and config snapshot', () => {
+    const config = { edgeThresholdPct: 0.008, positionSizePct: 0.03 };
+    const event = new BacktestRunStartedEvent({
+      runId: 'run-1',
+      config,
+      correlationId: 'corr-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-1',
+        config,
+        correlationId: 'corr-1',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+    expect(event.timestamp).toBeInstanceOf(Date);
+  });
+});
+
+describe('BacktestRunCompletedEvent', () => {
+  it('[P1] should construct with runId and aggregate metrics', () => {
+    const metrics = {
+      totalPositions: 10,
+      winCount: 7,
+      totalPnl: '150.50',
+      sharpeRatio: '1.85',
+    };
+    const event = new BacktestRunCompletedEvent({
+      runId: 'run-2',
+      metrics,
+      correlationId: 'corr-2',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-2',
+        metrics,
+        correlationId: 'corr-2',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestRunFailedEvent', () => {
+  it('[P1] should construct with runId, error code, and message', () => {
+    const event = new BacktestRunFailedEvent({
+      runId: 'run-3',
+      errorCode: 4210,
+      message: 'Simulation exceeded timeout',
+      correlationId: 'corr-3',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-3',
+        errorCode: 4210,
+        message: 'Simulation exceeded timeout',
+        correlationId: 'corr-3',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestRunCancelledEvent', () => {
+  it('[P2] should construct with runId', () => {
+    const event = new BacktestRunCancelledEvent({
+      runId: 'run-4',
+      correlationId: 'corr-4',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-4',
+        correlationId: 'corr-4',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestPositionOpenedEvent', () => {
+  it('[P1] should construct with position details and entry edge', () => {
+    const event = new BacktestPositionOpenedEvent({
+      runId: 'run-1',
+      positionId: 'pos-1',
+      pairId: 'pair-1',
+      entryEdge: '0.015',
+      positionSizeUsd: '300',
+      correlationId: 'corr-5',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-1',
+        positionId: 'pos-1',
+        pairId: 'pair-1',
+        entryEdge: '0.015',
+        positionSizeUsd: '300',
+        correlationId: 'corr-5',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestPositionClosedEvent', () => {
+  it('[P1] should construct with exit reason, realized P&L, and holding hours', () => {
+    const event = new BacktestPositionClosedEvent({
+      runId: 'run-1',
+      positionId: 'pos-1',
+      pairId: 'pair-1',
+      exitReason: 'PROFIT_CAPTURE',
+      realizedPnl: '25.00',
+      holdingHours: '12.5',
+      correlationId: 'corr-6',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-1',
+        positionId: 'pos-1',
+        exitReason: 'PROFIT_CAPTURE',
+        realizedPnl: '25.00',
+        holdingHours: '12.5',
+        correlationId: 'corr-6',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('BacktestEngineStateChangedEvent', () => {
+  it('[P1] should construct with runId, fromState, and toState', () => {
+    const event = new BacktestEngineStateChangedEvent({
+      runId: 'run-1',
+      fromState: 'IDLE',
+      toState: 'CONFIGURING',
+      correlationId: 'corr-7',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        runId: 'run-1',
+        fromState: 'IDLE',
+        toState: 'CONFIGURING',
+        correlationId: 'corr-7',
+      }),
+    );
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('Event catalog entries (Story 10-9-3)', () => {
+  it('[P1] should register all 7 backtesting engine events in EVENT_NAMES catalog', () => {
+    expect(EVENT_NAMES.BACKTEST_RUN_STARTED).toBe('backtesting.run.started');
+    expect(EVENT_NAMES.BACKTEST_RUN_COMPLETED).toBe(
+      'backtesting.run.completed',
+    );
+    expect(EVENT_NAMES.BACKTEST_RUN_FAILED).toBe('backtesting.run.failed');
+    expect(EVENT_NAMES.BACKTEST_RUN_CANCELLED).toBe(
+      'backtesting.run.cancelled',
+    );
+    expect(EVENT_NAMES.BACKTEST_POSITION_OPENED).toBe(
+      'backtesting.position.opened',
+    );
+    expect(EVENT_NAMES.BACKTEST_POSITION_CLOSED).toBe(
+      'backtesting.position.closed',
+    );
+    expect(EVENT_NAMES.BACKTEST_ENGINE_STATE_CHANGED).toBe(
+      'backtesting.engine.state-changed',
+    );
   });
 });

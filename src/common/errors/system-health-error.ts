@@ -56,4 +56,12 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   BACKTEST_PREDEXON_API_ERROR: 4202,
   /** Match validation engine failure — error */
   BACKTEST_VALIDATION_FAILURE: 4203,
+  /** Backtest state machine invalid transition — error */
+  BACKTEST_STATE_ERROR: 4204,
+  /** Backtest simulation exceeded timeout — error */
+  BACKTEST_TIMEOUT: 4210,
+  /** Not enough historical data for backtest — error */
+  BACKTEST_INSUFFICIENT_DATA: 4211,
+  /** Invalid backtest configuration parameters — error */
+  BACKTEST_INVALID_CONFIGURATION: 4212,
 } as const;

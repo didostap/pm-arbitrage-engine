@@ -245,6 +245,22 @@ export const EVENT_NAMES = {
   BACKTEST_DATA_QUALITY_WARNING: 'backtesting.data.quality-warning',
   /** Emitted when match validation completes successfully */
   BACKTEST_VALIDATION_COMPLETED: 'backtesting.validation.completed',
+
+  // [Story 10-9-3] Backtest Simulation Engine Events
+  /** Emitted when a backtest run starts */
+  BACKTEST_RUN_STARTED: 'backtesting.run.started',
+  /** Emitted when a backtest run completes successfully */
+  BACKTEST_RUN_COMPLETED: 'backtesting.run.completed',
+  /** Emitted when a backtest run fails */
+  BACKTEST_RUN_FAILED: 'backtesting.run.failed',
+  /** Emitted when a backtest run is cancelled */
+  BACKTEST_RUN_CANCELLED: 'backtesting.run.cancelled',
+  /** Emitted when a simulated position is opened */
+  BACKTEST_POSITION_OPENED: 'backtesting.position.opened',
+  /** Emitted when a simulated position is closed */
+  BACKTEST_POSITION_CLOSED: 'backtesting.position.closed',
+  /** Emitted when the backtest engine state machine transitions */
+  BACKTEST_ENGINE_STATE_CHANGED: 'backtesting.engine.state-changed',
 } as const;
 
 /**

@@ -575,3 +575,84 @@ model MatchValidationReport {
 
   @@map("match_validation_reports")
 }
+
+// Backtest run status lifecycle (Story 10-9-3)
+enum BacktestStatus {
+  IDLE
+  CONFIGURING
+  LOADING_DATA
+  SIMULATING
+  GENERATING_REPORT
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+
+// Backtest position exit reasons (Story 10-9-3)
+enum BacktestExitReason {
+  EDGE_EVAPORATION
+  TIME_DECAY
+  PROFIT_CAPTURE
+  RESOLUTION_FORCE_CLOSE
+  INSUFFICIENT_DEPTH
+  SIMULATION_END
+}
+
+// Backtest run tracking with parameterized config and aggregate metrics (Story 10-9-3)
+model BacktestRun {
+  id                 String              @id @default(uuid())
+  status             BacktestStatus      @default(IDLE)
+  config             Json                // Serialized BacktestConfigDto
+  dateRangeStart     DateTime            @map("date_range_start") @db.Timestamptz
+  dateRangeEnd       DateTime            @map("date_range_end") @db.Timestamptz
+  startedAt          DateTime            @map("started_at") @db.Timestamptz
+  completedAt        DateTime?           @map("completed_at") @db.Timestamptz
+  totalPositions     Int?                @map("total_positions")
+  winCount           Int?                @map("win_count")
+  lossCount          Int?                @map("loss_count")
+  totalPnl           Decimal?            @map("total_pnl") @db.Decimal(20, 10)
+  maxDrawdown        Decimal?            @map("max_drawdown") @db.Decimal(20, 10)
+  sharpeRatio        Decimal?            @map("sharpe_ratio") @db.Decimal(20, 10)
+  profitFactor       Decimal?            @map("profit_factor") @db.Decimal(20, 10)
+  avgHoldingHours    Decimal?            @map("avg_holding_hours") @db.Decimal(20, 6)
+  capitalUtilization Decimal?            @map("capital_utilization") @db.Decimal(20, 10)
+  errorMessage       String?             @map("error_message")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  positions          BacktestPosition[]
+
+  @@index([status])
+  @@index([startedAt])
+  @@map("backtest_runs")
+}
+
+// Individual backtest position with entry/exit details and P&L (Story 10-9-3)
+model BacktestPosition {
+  id                    Int                  @id @default(autoincrement())
+  runId                 String               @map("run_id")
+  pairId                String               @map("pair_id")
+  kalshiContractId      String               @map("kalshi_contract_id")
+  polymarketContractId  String               @map("polymarket_contract_id")
+  kalshiSide            String               @map("kalshi_side")
+  polymarketSide        String               @map("polymarket_side")
+  entryTimestamp        DateTime             @map("entry_timestamp") @db.Timestamptz
+  exitTimestamp         DateTime?            @map("exit_timestamp") @db.Timestamptz
+  kalshiEntryPrice      Decimal              @map("kalshi_entry_price") @db.Decimal(20, 10)
+  polymarketEntryPrice  Decimal              @map("polymarket_entry_price") @db.Decimal(20, 10)
+  kalshiExitPrice       Decimal?             @map("kalshi_exit_price") @db.Decimal(20, 10)
+  polymarketExitPrice   Decimal?             @map("polymarket_exit_price") @db.Decimal(20, 10)
+  positionSizeUsd       Decimal              @map("position_size_usd") @db.Decimal(20, 6)
+  entryEdge             Decimal              @map("entry_edge") @db.Decimal(20, 10)
+  exitEdge              Decimal?             @map("exit_edge") @db.Decimal(20, 10)
+  realizedPnl           Decimal?             @map("realized_pnl") @db.Decimal(20, 10)
+  fees                  Decimal?             @map("fees") @db.Decimal(20, 6)
+  exitReason            BacktestExitReason?  @map("exit_reason")
+  holdingHours          Decimal?             @map("holding_hours") @db.Decimal(20, 6)
+  qualityFlags          Json?                @map("quality_flags")
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  run                   BacktestRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([exitReason])
+  @@map("backtest_positions")
+}

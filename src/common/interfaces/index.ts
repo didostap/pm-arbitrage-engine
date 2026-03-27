@@ -38,3 +38,9 @@ export type {
 export { PAIR_CONCENTRATION_FILTER_TOKEN } from './pair-concentration-filter.interface.js';
 export type { IHistoricalDataProvider } from './historical-data-provider.interface.js';
 export { HISTORICAL_DATA_PROVIDER_TOKEN } from './historical-data-provider.interface.js';
+export type {
+  IBacktestEngine,
+  IBacktestConfig,
+  BacktestRunStatus,
+} from './backtest-engine.interface.js';
+export { BACKTEST_ENGINE_TOKEN } from './backtest-engine.interface.js';

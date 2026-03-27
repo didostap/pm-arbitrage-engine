@@ -1,0 +1,26 @@
+{
+  "description": "Edge detected but depth < position size — position NOT opened",
+  "config": {
+    "dateRangeStart": "2025-02-01T14:00:00Z",
+    "dateRangeEnd": "2025-02-01T16:00:00Z",
+    "edgeThresholdPct": 0.008,
+    "positionSizePct": 0.03,
+    "bankrollUsd": "10000"
+  },
+  "pairs": [
+    {
+      "kalshiContractId": "K-NODEPTH",
+      "polymarketClobTokenId": "P-NODEPTH",
+      "resolutionTimestamp": null
+    }
+  ],
+  "priceData": [
+    { "timestamp": "2025-02-01T14:00:00Z", "kalshiClose": "0.40", "polymarketClose": "0.55" },
+    { "timestamp": "2025-02-01T15:00:00Z", "kalshiClose": "0.42", "polymarketClose": "0.53" }
+  ],
+  "depthAvailable": false,
+  "expected": {
+    "totalPositions": 0,
+    "exitReason": null
+  }
+}
