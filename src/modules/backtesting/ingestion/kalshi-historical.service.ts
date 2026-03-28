@@ -16,6 +16,7 @@ const EFFECTIVE_RATE = 14; // 70% of Basic tier 20 req/s
 const MIN_INTERVAL_MS = 1000 / EFFECTIVE_RATE; // ~71ms
 const MAX_RETRIES = 3;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const LIVE_CHUNK_MS = 6 * 24 * 60 * 60 * 1000; // 6 days — 8,640 1-min candles, under 10K cap
 
 interface KalshiCandlestick {
   end_period_ts: number;
@@ -37,6 +38,25 @@ interface KalshiTrade {
   count_fp?: string;
   count?: string;
   created_time: string;
+}
+
+interface KalshiLiveCandlestick {
+  end_period_ts: number;
+  price?: {
+    open_dollars?: string;
+    high_dollars?: string;
+    low_dollars?: string;
+    close_dollars?: string;
+  };
+  volume_fp?: string;
+  open_interest_fp?: string;
+}
+
+interface KalshiLiveCandlestickBatchResponse {
+  markets: Array<{
+    market_ticker: string;
+    candlesticks: KalshiLiveCandlestick[];
+  }>;
 }
 
 interface KalshiCutoff {
@@ -93,88 +113,90 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
     const startMs = Date.now();
     const cutoff = await this.fetchCutoff();
 
-    // P2: Validate date range against cutoff — warn if beyond historical partition
-    const endTs = Math.floor(dateRange.end.getTime() / 1000);
-    const cutoffTs = Math.floor(cutoff.market_settled_ts.getTime() / 1000);
-    if (endTs > cutoffTs) {
-      this.logger.warn(
-        `Requested end_ts ${endTs} exceeds cutoff ${cutoffTs} for ${contractId} — data beyond cutoff not available in historical partition`,
+    const cutoffTs = cutoff.market_settled_ts;
+    const hasHistorical = dateRange.start < cutoffTs;
+    const hasLive = dateRange.end > cutoffTs;
+
+    if (hasHistorical && hasLive) {
+      this.logger.debug(
+        `Routing prices: historical=true, live=true for ${contractId}`,
       );
     }
 
-    // Clamp end to cutoff boundary for historical endpoint
-    const effectiveEnd = new Date(
-      Math.min(dateRange.end.getTime(), cutoff.market_settled_ts.getTime()),
-    );
-    if (effectiveEnd <= dateRange.start) {
-      return {
-        source: HistoricalDataSource.KALSHI_API,
-        platform: 'kalshi',
-        contractId,
-        recordCount: 0,
-        dateRange,
-        durationMs: Date.now() - startMs,
-      };
-    }
+    let historicalCount = 0;
+    let liveCount = 0;
 
-    // IG-1: Chunk date range into 7-day windows. Kalshi candlestick endpoints have
-    // undocumented server-side limits (batch endpoint caps at 10K candles; single-market
-    // endpoint likely similar via maxAggregateCandidates). 7 days × 1-min = ~10K candles,
-    // which is borderline. Safe for 1-min resolution; reduce to 5 days if truncation observed.
-    const chunks = this.chunkDateRange(dateRange.start, effectiveEnd);
-    let totalRecords = 0;
+    // Historical partition — fetch up to cutoff
+    if (hasHistorical) {
+      // When spanning both partitions, exclude the cutoff second from historical
+      // (live partition owns records at cutoffTs). When purely historical, use full range.
+      const effectiveEnd = hasLive
+        ? new Date(cutoffTs.getTime() - 1000)
+        : dateRange.end;
+      const chunks = this.chunkDateRange(dateRange.start, effectiveEnd);
 
-    for (const chunk of chunks) {
-      const url = new URL(
-        `${this.baseUrl}/historical/markets/${contractId}/candlesticks`,
-      );
-      url.searchParams.set('period_interval', '1');
-      url.searchParams.set(
-        'start_ts',
-        String(Math.floor(chunk.start.getTime() / 1000)),
-      );
-      url.searchParams.set(
-        'end_ts',
-        String(Math.floor(chunk.end.getTime() / 1000)),
-      );
+      for (const chunk of chunks) {
+        const url = new URL(
+          `${this.baseUrl}/historical/markets/${contractId}/candlesticks`,
+        );
+        url.searchParams.set('period_interval', '1');
+        url.searchParams.set(
+          'start_ts',
+          String(Math.floor(chunk.start.getTime() / 1000)),
+        );
+        url.searchParams.set(
+          'end_ts',
+          String(Math.floor(chunk.end.getTime() / 1000)),
+        );
 
-      const res = await this.fetchWithRetry(url.toString());
-      const data = (await res.json()) as {
-        candlesticks?: KalshiCandlestick[];
-      };
-      const candlesticks = data.candlesticks ?? [];
+        const res = await this.fetchWithRetry(url.toString());
+        const data = (await res.json()) as {
+          candlesticks?: KalshiCandlestick[];
+        };
+        const candlesticks = data.candlesticks ?? [];
 
-      const records = candlesticks.map((c) => ({
-        platform: Platform.KALSHI,
-        contractId,
-        source: HistoricalDataSource.KALSHI_API,
-        intervalMinutes: 1,
-        timestamp: new Date(c.end_period_ts * 1000),
-        open: new Decimal(c.open ?? c.price?.open ?? '0'),
-        high: new Decimal(c.high ?? c.price?.high ?? '0'),
-        low: new Decimal(c.low ?? c.price?.low ?? '0'),
-        close: new Decimal(c.close ?? c.price?.close ?? '0'),
-        volume: c.volume != null ? new Decimal(c.volume) : null,
-        openInterest:
-          c.open_interest != null ? new Decimal(c.open_interest) : null,
-      }));
+        const records = candlesticks.map((c) => ({
+          platform: Platform.KALSHI,
+          contractId,
+          source: HistoricalDataSource.KALSHI_API,
+          intervalMinutes: 1,
+          timestamp: new Date(c.end_period_ts * 1000),
+          open: new Decimal(c.open ?? c.price?.open ?? '0'),
+          high: new Decimal(c.high ?? c.price?.high ?? '0'),
+          low: new Decimal(c.low ?? c.price?.low ?? '0'),
+          close: new Decimal(c.close ?? c.price?.close ?? '0'),
+          volume: c.volume != null ? new Decimal(c.volume) : null,
+          openInterest:
+            c.open_interest != null ? new Decimal(c.open_interest) : null,
+        }));
 
-      // Flush each chunk immediately instead of accumulating
-      for (let i = 0; i < records.length; i += BATCH_SIZE) {
-        const batch = records.slice(i, i + BATCH_SIZE);
-        await this.prisma.historicalPrice.createMany({
-          data: batch,
-          skipDuplicates: true,
-        });
+        for (let i = 0; i < records.length; i += BATCH_SIZE) {
+          const batch = records.slice(i, i + BATCH_SIZE);
+          await this.prisma.historicalPrice.createMany({
+            data: batch,
+            skipDuplicates: true,
+          });
+        }
+        historicalCount += records.length;
       }
-      totalRecords += records.length;
+    }
+
+    // Live partition — fetch from cutoff onward
+    if (hasLive) {
+      const liveStart = new Date(
+        Math.max(dateRange.start.getTime(), cutoffTs.getTime()),
+      );
+      liveCount = await this.fetchAndPersistLiveCandlesticks(contractId, {
+        start: liveStart,
+        end: dateRange.end,
+      });
     }
 
     return {
       source: HistoricalDataSource.KALSHI_API,
       platform: 'kalshi',
       contractId,
-      recordCount: totalRecords,
+      recordCount: historicalCount + liveCount,
       dateRange,
       durationMs: Date.now() - startMs,
     };
@@ -187,34 +209,167 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
     const startMs = Date.now();
     const cutoff = await this.fetchCutoff();
 
-    // P2: Validate date range against cutoff
-    const maxTs = Math.floor(dateRange.end.getTime() / 1000);
-    const cutoffTs = Math.floor(cutoff.trades_created_ts.getTime() / 1000);
-    if (maxTs > cutoffTs) {
-      this.logger.warn(
-        `Requested max_ts ${maxTs} exceeds cutoff ${cutoffTs} for ${contractId} — data beyond cutoff not available in historical partition`,
+    const tradeCutoffTs = cutoff.trades_created_ts;
+    const hasHistorical = dateRange.start < tradeCutoffTs;
+    const hasLive = dateRange.end > tradeCutoffTs;
+
+    if (hasHistorical && hasLive) {
+      this.logger.debug(
+        `Routing trades: historical=true, live=true for ${contractId}`,
       );
     }
 
-    const effectiveEnd = new Date(
-      Math.min(dateRange.end.getTime(), cutoff.trades_created_ts.getTime()),
-    );
-    if (effectiveEnd <= dateRange.start) {
-      return {
-        source: HistoricalDataSource.KALSHI_API,
-        platform: 'kalshi',
-        contractId,
-        recordCount: 0,
-        dateRange,
-        durationMs: Date.now() - startMs,
-      };
+    let historicalCount = 0;
+    let liveCount = 0;
+
+    // Historical partition — fetch up to cutoff
+    if (hasHistorical) {
+      // Exclude the cutoff second when spanning (live owns it)
+      const effectiveEnd = hasLive
+        ? new Date(tradeCutoffTs.getTime() - 1000)
+        : dateRange.end;
+      let cursor: string | undefined;
+
+      do {
+        const url = new URL(`${this.baseUrl}/historical/trades`);
+        url.searchParams.set('ticker', contractId);
+        url.searchParams.set(
+          'min_ts',
+          String(Math.floor(dateRange.start.getTime() / 1000)),
+        );
+        url.searchParams.set(
+          'max_ts',
+          String(Math.floor(effectiveEnd.getTime() / 1000)),
+        );
+        url.searchParams.set('limit', '1000');
+        if (cursor) {
+          url.searchParams.set('cursor', cursor);
+        }
+
+        const res = await this.fetchWithRetry(url.toString());
+        const data = (await res.json()) as {
+          trades?: KalshiTrade[];
+          cursor?: string;
+        };
+        const trades = data.trades ?? [];
+
+        const pageRecords: Prisma.HistoricalTradeCreateManyInput[] = trades.map(
+          (t) => ({
+            platform: Platform.KALSHI,
+            contractId,
+            source: HistoricalDataSource.KALSHI_API,
+            externalTradeId:
+              t.trade_id ??
+              t.id ??
+              `kalshi-${contractId}-${t.created_time}-${t.yes_price_dollars}`,
+            price: new Decimal(t.yes_price_dollars),
+            size: new Decimal(t.count_fp ?? t.count ?? '1'),
+            side: t.taker_side === 'yes' ? 'buy' : 'sell',
+            timestamp: new Date(t.created_time),
+          }),
+        );
+
+        for (let i = 0; i < pageRecords.length; i += BATCH_SIZE) {
+          const batch = pageRecords.slice(i, i + BATCH_SIZE);
+          await this.prisma.historicalTrade.createMany({
+            data: batch,
+            skipDuplicates: true,
+          });
+        }
+        historicalCount += pageRecords.length;
+
+        cursor = data.cursor || undefined;
+      } while (cursor);
     }
 
+    // Live partition — fetch from cutoff onward
+    if (hasLive) {
+      const liveStart = new Date(
+        Math.max(dateRange.start.getTime(), tradeCutoffTs.getTime()),
+      );
+      liveCount = await this.fetchAndPersistLiveTrades(contractId, {
+        start: liveStart,
+        end: dateRange.end,
+      });
+    }
+
+    return {
+      source: HistoricalDataSource.KALSHI_API,
+      platform: 'kalshi',
+      contractId,
+      recordCount: historicalCount + liveCount,
+      dateRange,
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  getSupportedSources(): HistoricalDataSource[] {
+    return [HistoricalDataSource.KALSHI_API];
+  }
+
+  private async fetchAndPersistLiveCandlesticks(
+    contractId: string,
+    dateRange: { start: Date; end: Date },
+  ): Promise<number> {
+    const chunks = this.chunkDateRange(
+      dateRange.start,
+      dateRange.end,
+      LIVE_CHUNK_MS,
+    );
+    let count = 0;
+
+    for (const chunk of chunks) {
+      const url = new URL(`${this.baseUrl}/markets/candlesticks`);
+      url.searchParams.set('market_tickers', contractId);
+      url.searchParams.set('period_interval', '1');
+      url.searchParams.set(
+        'start_ts',
+        String(Math.floor(chunk.start.getTime() / 1000)),
+      );
+      url.searchParams.set(
+        'end_ts',
+        String(Math.floor(chunk.end.getTime() / 1000)),
+      );
+
+      const res = await this.fetchWithRetry(url.toString());
+      const data = (await res.json()) as KalshiLiveCandlestickBatchResponse;
+
+      const marketData = data.markets?.find(
+        (m) => m.market_ticker === contractId,
+      );
+      if (!marketData) {
+        this.logger.warn(
+          `Live candlestick response missing market ${contractId}`,
+        );
+        continue;
+      }
+
+      const records = marketData.candlesticks.map((c) =>
+        this.parseLiveCandlestick(c, contractId),
+      );
+
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        await this.prisma.historicalPrice.createMany({
+          data: batch,
+          skipDuplicates: true,
+        });
+      }
+      count += records.length;
+    }
+
+    return count;
+  }
+
+  private async fetchAndPersistLiveTrades(
+    contractId: string,
+    dateRange: { start: Date; end: Date },
+  ): Promise<number> {
+    let count = 0;
     let cursor: string | undefined;
-    let totalRecords = 0;
 
     do {
-      const url = new URL(`${this.baseUrl}/historical/trades`);
+      const url = new URL(`${this.baseUrl}/markets/trades`);
       url.searchParams.set('ticker', contractId);
       url.searchParams.set(
         'min_ts',
@@ -222,7 +377,7 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
       );
       url.searchParams.set(
         'max_ts',
-        String(Math.floor(effectiveEnd.getTime() / 1000)),
+        String(Math.floor(dateRange.end.getTime() / 1000)),
       );
       url.searchParams.set('limit', '1000');
       if (cursor) {
@@ -236,22 +391,19 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
       };
       const trades = data.trades ?? [];
 
-      // P18 + P5: Flush each page to DB immediately; generate synthetic ID if missing
-      const pageRecords: Prisma.HistoricalTradeCreateManyInput[] = trades.map(
-        (t) => ({
-          platform: Platform.KALSHI,
-          contractId,
-          source: HistoricalDataSource.KALSHI_API,
-          externalTradeId:
-            t.trade_id ??
-            t.id ??
-            `kalshi-${contractId}-${t.created_time}-${t.yes_price_dollars}`,
-          price: new Decimal(t.yes_price_dollars),
-          size: new Decimal(t.count_fp ?? t.count ?? '1'),
-          side: t.taker_side === 'yes' ? 'buy' : 'sell',
-          timestamp: new Date(t.created_time),
-        }),
-      );
+      const pageRecords = trades.map((t) => ({
+        platform: Platform.KALSHI,
+        contractId,
+        source: HistoricalDataSource.KALSHI_API,
+        externalTradeId:
+          t.trade_id ??
+          t.id ??
+          `kalshi-${contractId}-${t.created_time}-${t.yes_price_dollars}`,
+        price: new Decimal(t.yes_price_dollars),
+        size: new Decimal(t.count_fp ?? t.count ?? '1'),
+        side: t.taker_side === 'yes' ? 'buy' : 'sell',
+        timestamp: new Date(t.created_time),
+      }));
 
       for (let i = 0; i < pageRecords.length; i += BATCH_SIZE) {
         const batch = pageRecords.slice(i, i + BATCH_SIZE);
@@ -260,35 +412,44 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
           skipDuplicates: true,
         });
       }
-      totalRecords += pageRecords.length;
-
+      count += pageRecords.length;
       cursor = data.cursor || undefined;
     } while (cursor);
 
-    return {
-      source: HistoricalDataSource.KALSHI_API,
-      platform: 'kalshi',
-      contractId,
-      recordCount: totalRecords,
-      dateRange,
-      durationMs: Date.now() - startMs,
-    };
+    return count;
   }
 
-  getSupportedSources(): HistoricalDataSource[] {
-    return [HistoricalDataSource.KALSHI_API];
+  private parseLiveCandlestick(
+    c: KalshiLiveCandlestick,
+    contractId: string,
+  ): Prisma.HistoricalPriceCreateManyInput {
+    return {
+      platform: Platform.KALSHI,
+      contractId,
+      source: HistoricalDataSource.KALSHI_API,
+      intervalMinutes: 1,
+      timestamp: new Date(c.end_period_ts * 1000),
+      open: new Decimal(c.price?.open_dollars ?? '0'),
+      high: new Decimal(c.price?.high_dollars ?? '0'),
+      low: new Decimal(c.price?.low_dollars ?? '0'),
+      close: new Decimal(c.price?.close_dollars ?? '0'),
+      volume: c.volume_fp != null ? new Decimal(c.volume_fp) : null,
+      openInterest:
+        c.open_interest_fp != null ? new Decimal(c.open_interest_fp) : null,
+    };
   }
 
   private chunkDateRange(
     start: Date,
     end: Date,
+    chunkMs: number = SEVEN_DAYS_MS,
   ): Array<{ start: Date; end: Date }> {
     const chunks: Array<{ start: Date; end: Date }> = [];
     let current = start.getTime();
     const endMs = end.getTime();
 
     while (current < endMs) {
-      const chunkEnd = Math.min(current + SEVEN_DAYS_MS, endMs);
+      const chunkEnd = Math.min(current + chunkMs, endMs);
       chunks.push({
         start: new Date(current),
         end: new Date(chunkEnd),
