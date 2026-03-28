@@ -11,6 +11,13 @@ import {
   TradingResumedEvent,
 } from '../common/events/system.events';
 import { ShadowComparisonEvent } from '../common/events/execution.events';
+import {
+  BacktestRunCompletedEvent,
+  BacktestRunFailedEvent,
+  BacktestEngineStateChangedEvent,
+  BacktestSensitivityCompletedEvent,
+  BacktestSensitivityProgressEvent,
+} from '../common/events/backtesting.events';
 
 vi.mock('../common/services/correlation-context', () => ({
   getCorrelationId: () => 'test-correlation-id',
@@ -316,6 +323,133 @@ describe('DashboardGateway', () => {
           modelDecision: 'hold',
           agreement: false,
           currentEdge: '0.01500000',
+        }),
+      );
+    });
+  });
+
+  describe('Backtest event handlers', () => {
+    it('[P0] should have @OnEvent handler for backtesting.run.completed that emits to WS clients', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token'),
+      );
+
+      const event = new BacktestRunCompletedEvent({
+        runId: 'run-1',
+        metrics: { profitFactor: '1.45', totalTrades: 50 },
+      });
+
+      gateway.handleBacktestRunCompleted(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.run.completed');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          runId: 'run-1',
+          metrics: { profitFactor: '1.45', totalTrades: 50 },
+        }),
+      );
+    });
+
+    it('[P0] should have @OnEvent handler for backtesting.sensitivity.completed that emits to WS clients', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token'),
+      );
+
+      const event = new BacktestSensitivityCompletedEvent({
+        runId: 'run-1',
+        sweepCount: 66,
+        recommendedParams: { edgeThresholdPct: 0.012 },
+      });
+
+      gateway.handleBacktestSensitivityCompleted(event);
+
+      expect(client.send).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.sensitivity.completed');
+      expect(sent.data).toEqual(
+        expect.objectContaining({ runId: 'run-1', sweepCount: 66 }),
+      );
+    });
+
+    it('[P1] should have @OnEvent handlers for backtesting.run.failed, backtesting.engine.state-changed, backtesting.sensitivity.progress', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(
+        client as never,
+        createMockRequest('test-token'),
+      );
+
+      // run.failed
+      const failedEvent = new BacktestRunFailedEvent({
+        runId: 'run-2',
+        errorCode: 4001,
+        message: 'Timeout exceeded',
+      });
+      gateway.handleBacktestRunFailed(failedEvent);
+
+      let sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.run.failed');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          runId: 'run-2',
+          errorCode: 4001,
+          message: 'Timeout exceeded',
+        }),
+      );
+
+      // engine.state-changed
+      const stateEvent = new BacktestEngineStateChangedEvent({
+        runId: 'run-3',
+        fromState: 'LOADING_DATA',
+        toState: 'SIMULATING',
+      });
+      gateway.handleBacktestStateChanged(stateEvent);
+
+      sent = JSON.parse(client.send.mock.calls[1]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.engine.state-changed');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          runId: 'run-3',
+          fromState: 'LOADING_DATA',
+          toState: 'SIMULATING',
+        }),
+      );
+
+      // sensitivity.progress
+      const progressEvent = new BacktestSensitivityProgressEvent({
+        runId: 'run-4',
+        completedSweeps: 33,
+        totalPlannedSweeps: 66,
+      });
+      gateway.handleBacktestSensitivityProgress(progressEvent);
+
+      sent = JSON.parse(client.send.mock.calls[2]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.sensitivity.progress');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          runId: 'run-4',
+          completedSweeps: 33,
+          totalPlannedSweeps: 66,
         }),
       );
     });

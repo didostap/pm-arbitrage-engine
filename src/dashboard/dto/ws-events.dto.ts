@@ -119,4 +119,9 @@ export const WS_EVENTS = {
   SHADOW_COMPARISON: 'shadow.comparison',
   SHADOW_DAILY_SUMMARY: 'shadow.daily_summary',
   AUTO_UNWIND: 'auto_unwind.result',
+  BACKTEST_RUN_COMPLETED: 'backtesting.run.completed',
+  BACKTEST_RUN_FAILED: 'backtesting.run.failed',
+  BACKTEST_ENGINE_STATE_CHANGED: 'backtesting.engine.state-changed',
+  BACKTEST_SENSITIVITY_COMPLETED: 'backtesting.sensitivity.completed',
+  BACKTEST_SENSITIVITY_PROGRESS: 'backtesting.sensitivity.progress',
 } as const;

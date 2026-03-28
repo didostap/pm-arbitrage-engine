@@ -73,17 +73,21 @@ export class BacktestController {
   async listRuns(
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
+    @Query('status') status?: string,
   ) {
     const safeLimitValue = Math.min(Math.max(limit, 1), MAX_LIST_LIMIT);
     const safeOffset = Math.max(offset, 0);
 
+    const where = status ? { status: status as never } : {};
+
     const [runs, count] = await Promise.all([
       this.prisma.backtestRun.findMany({
+        where,
         take: safeLimitValue,
         skip: safeOffset,
         orderBy: { startedAt: 'desc' },
       }),
-      this.prisma.backtestRun.count(),
+      this.prisma.backtestRun.count({ where }),
     ]);
 
     return {

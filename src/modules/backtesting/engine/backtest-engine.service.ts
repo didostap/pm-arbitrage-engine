@@ -235,7 +235,10 @@ export class BacktestEngineService implements IBacktestEngine {
       if (walkForwardResults) {
         await this.prisma.backtestRun.update({
           where: { id: runId },
-          data: { walkForwardResults: walkForwardResults as any },
+          data: {
+            walkForwardResults:
+              walkForwardResults as unknown as Prisma.InputJsonValue,
+          },
         });
 
         this.eventEmitter.emit(
@@ -648,5 +651,4 @@ export class BacktestEngineService implements IBacktestEngine {
     timeSteps.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     return timeSteps;
   }
-
 }

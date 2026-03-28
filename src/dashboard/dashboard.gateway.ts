@@ -37,6 +37,13 @@ import type {
   TradingHaltedEvent,
   TradingResumedEvent,
 } from '../common/events/system.events';
+import type {
+  BacktestRunCompletedEvent,
+  BacktestRunFailedEvent,
+  BacktestEngineStateChangedEvent,
+  BacktestSensitivityCompletedEvent,
+  BacktestSensitivityProgressEvent,
+} from '../common/events/backtesting.events';
 import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
@@ -276,6 +283,72 @@ export class DashboardGateway
         updatedBy: event.updatedBy,
       },
       timestamp: event.timestamp.toISOString(),
+    });
+  }
+
+  // --- Backtesting event handlers ---
+
+  @OnEvent(EVENT_NAMES.BACKTEST_RUN_COMPLETED)
+  handleBacktestRunCompleted(event: BacktestRunCompletedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_RUN_COMPLETED,
+      data: { runId: event.runId, metrics: event.metrics },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.BACKTEST_RUN_FAILED)
+  handleBacktestRunFailed(event: BacktestRunFailedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_RUN_FAILED,
+      data: {
+        runId: event.runId,
+        errorCode: event.errorCode,
+        message: event.message,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.BACKTEST_ENGINE_STATE_CHANGED)
+  handleBacktestStateChanged(event: BacktestEngineStateChangedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_ENGINE_STATE_CHANGED,
+      data: {
+        runId: event.runId,
+        fromState: event.fromState,
+        toState: event.toState,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.BACKTEST_SENSITIVITY_COMPLETED)
+  handleBacktestSensitivityCompleted(
+    event: BacktestSensitivityCompletedEvent,
+  ): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_SENSITIVITY_COMPLETED,
+      data: {
+        runId: event.runId,
+        sweepCount: event.sweepCount,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.BACKTEST_SENSITIVITY_PROGRESS)
+  handleBacktestSensitivityProgress(
+    event: BacktestSensitivityProgressEvent,
+  ): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_SENSITIVITY_PROGRESS,
+      data: {
+        runId: event.runId,
+        completedSweeps: event.completedSweeps,
+        totalPlannedSweeps: event.totalPlannedSweeps,
+      },
+      timestamp: new Date().toISOString(),
     });
   }
 

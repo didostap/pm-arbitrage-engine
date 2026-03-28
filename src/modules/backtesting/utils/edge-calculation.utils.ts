@@ -66,7 +66,13 @@ export function calculateCurrentEdge(
   positionSizeUsd: Decimal,
 ): Decimal {
   const { bestEdge, buySide } = calculateBestEdge(pairData);
-  return calculateNetEdge(bestEdge, pairData, buySide, gasEstimate, positionSizeUsd);
+  return calculateNetEdge(
+    bestEdge,
+    pairData,
+    buySide,
+    gasEstimate,
+    positionSizeUsd,
+  );
 }
 
 export function isInTradingWindow(
@@ -81,8 +87,7 @@ export function isInTradingWindow(
     );
   }
   return (
-    hour >= config.tradingWindowStartHour ||
-    hour < config.tradingWindowEndHour
+    hour >= config.tradingWindowStartHour || hour < config.tradingWindowEndHour
   );
 }
 

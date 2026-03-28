@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Platform, Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../common/prisma.service';
@@ -107,7 +108,7 @@ export class CalibrationReportService {
 
     await this.prisma.backtestRun.update({
       where: { id: runId },
-      data: { report: report as any },
+      data: { report: report as unknown as Prisma.InputJsonValue },
     });
 
     this.eventEmitter.emit(
@@ -287,8 +288,8 @@ export class CalibrationReportService {
     return positions
       .filter((p) => p.exitTimestamp != null && p.realizedPnl != null)
       .map((p) => ({
-        realizedPnl: new Decimal(p.realizedPnl.toString()),
-        exitTimestamp: new Date(p.exitTimestamp),
+        realizedPnl: new Decimal(p.realizedPnl!.toString()),
+        exitTimestamp: new Date(p.exitTimestamp!),
         positionSizeUsd: new Decimal(p.positionSizeUsd.toString()),
       }));
   }
@@ -339,7 +340,7 @@ export class CalibrationReportService {
   private async detectCoverageGaps(
     dateRangeStart: Date,
     dateRangeEnd: Date,
-    groupedPrices: { platform: string; contractId: string }[],
+    groupedPrices: { platform: Platform; contractId: string }[],
   ): Promise<CoverageGapEntry[]> {
     const gaps: CoverageGapEntry[] = [];
     const ONE_HOUR_MS = 60 * 60 * 1000;
