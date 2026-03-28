@@ -9,17 +9,29 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { IngestionOrchestratorService } from '../ingestion/ingestion-orchestrator.service';
 import { PrismaService } from '../../../common/prisma.service';
 import { IngestionTriggerDto } from '../dto/ingestion-trigger.dto';
+import {
+  computeFreshStatus,
+  getThresholdKey,
+} from '../dto/data-source-freshness.dto';
+import type {
+  DataSourceFreshnessDto,
+  FreshnessResponseDto,
+} from '../dto/data-source-freshness.dto';
+import { CronTime } from 'cron';
+import { HistoricalDataSource } from '@prisma/client';
 
-@Controller('api/backtesting')
+@Controller('backtesting')
 export class HistoricalDataController {
   private readonly logger = new Logger(HistoricalDataController.name);
 
   constructor(
     private readonly orchestrator: IngestionOrchestratorService,
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('ingest')
@@ -57,6 +69,104 @@ export class HistoricalDataController {
       data: { status: 'accepted' },
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('freshness')
+  async getFreshness(): Promise<{
+    data: FreshnessResponseDto;
+    timestamp: string;
+  }> {
+    const nowMs = Date.now();
+    const rows = await this.prisma.dataSourceFreshness.findMany();
+
+    const sources: DataSourceFreshnessDto[] = await Promise.all(
+      rows.map(async (row) => {
+        const thresholdKey = getThresholdKey(row.source);
+        const thresholdMs =
+          Number(this.configService.get(thresholdKey)) || 129_600_000;
+        const freshStatus = computeFreshStatus(
+          row.lastSuccessfulAt,
+          thresholdMs,
+          nowMs,
+        );
+        const timeSinceLastSuccessMs = row.lastSuccessfulAt
+          ? nowMs - row.lastSuccessfulAt.getTime()
+          : null;
+        const latestDataTimestamp = await this.getLatestDataTimestamp(
+          row.source,
+        );
+
+        return {
+          source: row.source,
+          lastSuccessfulAt: row.lastSuccessfulAt?.toISOString() ?? null,
+          lastAttemptAt: row.lastAttemptAt?.toISOString() ?? null,
+          recordsFetched: row.recordsFetched,
+          contractsUpdated: row.contractsUpdated,
+          status: row.status,
+          errorMessage: row.errorMessage,
+          freshStatus,
+          stalenessThresholdMs: thresholdMs,
+          timeSinceLastSuccessMs,
+          latestDataTimestamp: latestDataTimestamp?.toISOString() ?? null,
+        };
+      }),
+    );
+
+    const staleSources = sources
+      .filter((s) => s.freshStatus === 'stale' || s.freshStatus === 'never')
+      .map((s) => s.source);
+
+    let nextScheduledRun: string | null = null;
+    try {
+      const cronExpr =
+        process.env.INCREMENTAL_INGESTION_CRON_EXPRESSION ?? '0 0 2 * * *';
+      const cronTime = new CronTime(cronExpr, 'UTC');
+      nextScheduledRun = cronTime.sendAt().toISO();
+    } catch {
+      // Invalid cron expression — leave null
+    }
+
+    const response: FreshnessResponseDto = {
+      sources,
+      overallFresh: sources.length > 0 && staleSources.length === 0,
+      staleSources,
+      nextScheduledRun,
+    };
+
+    return {
+      data: response,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  private async getLatestDataTimestamp(source: string): Promise<Date | null> {
+    const src = source as HistoricalDataSource;
+    const tradeOnlySources = new Set<HistoricalDataSource>([
+      'GOLDSKY' as HistoricalDataSource,
+    ]);
+    const depthOnlySources = new Set<HistoricalDataSource>([
+      'PMXT_ARCHIVE' as HistoricalDataSource,
+    ]);
+
+    if (tradeOnlySources.has(src)) {
+      const r = await this.prisma.historicalTrade.aggregate({
+        where: { source: src },
+        _max: { timestamp: true },
+      });
+      return r._max.timestamp;
+    }
+    if (depthOnlySources.has(src)) {
+      const r = await this.prisma.historicalDepth.aggregate({
+        where: { source: src },
+        _max: { timestamp: true },
+      });
+      return r._max.timestamp;
+    }
+    const r = await this.prisma.historicalPrice.aggregate({
+      where: { source: src },
+      _max: { timestamp: true },
+    });
+    return r._max.timestamp;
   }
 
   @Get('coverage')

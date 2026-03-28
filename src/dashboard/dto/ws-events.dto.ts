@@ -124,4 +124,6 @@ export const WS_EVENTS = {
   BACKTEST_ENGINE_STATE_CHANGED: 'backtesting.engine.state-changed',
   BACKTEST_SENSITIVITY_COMPLETED: 'backtesting.sensitivity.completed',
   BACKTEST_SENSITIVITY_PROGRESS: 'backtesting.sensitivity.progress',
+  INCREMENTAL_FRESHNESS_UPDATED: 'backtesting.incremental.freshness-updated',
+  INCREMENTAL_DATA_STALE: 'backtesting.incremental.stale',
 } as const;

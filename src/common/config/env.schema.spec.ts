@@ -99,4 +99,27 @@ describe('envSchema', () => {
     expect(result.OPERATOR_API_TOKEN).toBe('test-secret-token-12345');
     expect(result.PLATFORM_MODE_KALSHI).toBe('live');
   });
+
+  // Story 10-9-6: Incremental Ingestion env vars
+  it('[P1] INCREMENTAL_INGESTION_CRON_EXPRESSION defaults to daily 2 AM UTC', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.INCREMENTAL_INGESTION_CRON_EXPRESSION).toBe('0 0 2 * * *');
+  });
+
+  it('[P1] INCREMENTAL_INGESTION_ENABLED defaults to true', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.INCREMENTAL_INGESTION_ENABLED).toBe(true);
+  });
+
+  it('[P1] STALENESS_THRESHOLD_PLATFORM_MS defaults to 129600000 (36 hours)', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.STALENESS_THRESHOLD_PLATFORM_MS).toBe(129_600_000);
+  });
+
+  it('[P1] per-category staleness thresholds have correct defaults', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.STALENESS_THRESHOLD_PMXT_MS).toBe(172_800_000);
+    expect(result.STALENESS_THRESHOLD_ODDSPIPE_MS).toBe(129_600_000);
+    expect(result.STALENESS_THRESHOLD_VALIDATION_MS).toBe(259_200_000);
+  });
 });

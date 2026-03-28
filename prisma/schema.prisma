@@ -148,6 +148,14 @@ model EngineConfig {
   exitMaxChunkSize             Int?    @map("exit_max_chunk_size")
   exitProfitCaptureRatio       Float?  @map("exit_profit_capture_ratio")
 
+  // --- Incremental Ingestion (6) ---
+  incrementalIngestionCronExpression String?  @map("incremental_ingestion_cron_expression")
+  incrementalIngestionEnabled         Boolean? @map("incremental_ingestion_enabled")
+  stalenessThresholdPlatformMs        Int?     @map("staleness_threshold_platform_ms")
+  stalenessThresholdPmxtMs            Int?     @map("staleness_threshold_pmxt_ms")
+  stalenessThresholdOddspipeMs        Int?     @map("staleness_threshold_oddspipe_ms")
+  stalenessThresholdValidationMs      Int?     @map("staleness_threshold_validation_ms")
+
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -658,4 +666,20 @@ model BacktestPosition {
   @@index([runId])
   @@index([exitReason])
   @@map("backtest_positions")
+}
+
+// Data source freshness tracking for incremental ingestion (Story 10-9-6)
+model DataSourceFreshness {
+  id               Int                  @id @default(autoincrement())
+  source           HistoricalDataSource @unique
+  lastSuccessfulAt DateTime?            @map("last_successful_at") @db.Timestamptz
+  lastAttemptAt    DateTime?            @map("last_attempt_at") @db.Timestamptz
+  recordsFetched   Int                  @default(0) @map("records_fetched")
+  contractsUpdated Int                  @default(0) @map("contracts_updated")
+  status           String               @default("idle") // 'idle' | 'running' | 'success' | 'failed'
+  errorMessage     String?              @map("error_message")
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("data_source_freshness")
 }

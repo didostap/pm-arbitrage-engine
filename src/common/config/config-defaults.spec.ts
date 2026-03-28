@@ -118,6 +118,13 @@ const CATEGORY_B_FIELDS: string[] = [
   'pairCooldownMinutes',
   'pairMaxConcurrentPositions',
   'pairDiversityThreshold',
+  // Incremental Ingestion (Story 10-9-6)
+  'incrementalIngestionCronExpression',
+  'incrementalIngestionEnabled',
+  'stalenessThresholdPlatformMs',
+  'stalenessThresholdPmxtMs',
+  'stalenessThresholdOddspipeMs',
+  'stalenessThresholdValidationMs',
 ];
 
 /** Env var keys that correspond to Category B fields */
@@ -204,6 +211,12 @@ const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   pairCooldownMinutes: 'PAIR_COOLDOWN_MINUTES',
   pairMaxConcurrentPositions: 'PAIR_MAX_CONCURRENT_POSITIONS',
   pairDiversityThreshold: 'PAIR_DIVERSITY_THRESHOLD',
+  incrementalIngestionCronExpression: 'INCREMENTAL_INGESTION_CRON_EXPRESSION',
+  incrementalIngestionEnabled: 'INCREMENTAL_INGESTION_ENABLED',
+  stalenessThresholdPlatformMs: 'STALENESS_THRESHOLD_PLATFORM_MS',
+  stalenessThresholdPmxtMs: 'STALENESS_THRESHOLD_PMXT_MS',
+  stalenessThresholdOddspipeMs: 'STALENESS_THRESHOLD_ODDSPIPE_MS',
+  stalenessThresholdValidationMs: 'STALENESS_THRESHOLD_VALIDATION_MS',
 };
 
 describe('CONFIG_DEFAULTS', () => {
@@ -215,7 +228,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(80);
+    expect(categoryBKeys.length).toBe(86);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {
@@ -298,6 +311,43 @@ describe('CONFIG_DEFAULTS', () => {
     expect(CONFIG_DEFAULTS.stressTestScenarios.defaultValue).toBe(1000);
   });
 
+  // Story 10-9-6: Incremental Ingestion staleness threshold defaults
+  it('[P1] should map incremental ingestion config entries to their env vars', () => {
+    expect(CONFIG_DEFAULTS.incrementalIngestionCronExpression.envKey).toBe(
+      'INCREMENTAL_INGESTION_CRON_EXPRESSION',
+    );
+    expect(CONFIG_DEFAULTS.incrementalIngestionEnabled.envKey).toBe(
+      'INCREMENTAL_INGESTION_ENABLED',
+    );
+  });
+
+  it('[P1] should map staleness threshold config keys to their env vars', () => {
+    expect(CONFIG_DEFAULTS.stalenessThresholdPlatformMs.envKey).toBe(
+      'STALENESS_THRESHOLD_PLATFORM_MS',
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdPlatformMs.defaultValue).toBe(
+      129_600_000,
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdPmxtMs.envKey).toBe(
+      'STALENESS_THRESHOLD_PMXT_MS',
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdPmxtMs.defaultValue).toBe(
+      172_800_000,
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdOddspipeMs.envKey).toBe(
+      'STALENESS_THRESHOLD_ODDSPIPE_MS',
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdOddspipeMs.defaultValue).toBe(
+      129_600_000,
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdValidationMs.envKey).toBe(
+      'STALENESS_THRESHOLD_VALIDATION_MS',
+    );
+    expect(CONFIG_DEFAULTS.stalenessThresholdValidationMs.defaultValue).toBe(
+      259_200_000,
+    );
+  });
+
   it('[P1] should have correct default values for boolean fields', () => {
     expect(CONFIG_DEFAULTS.csvEnabled.defaultValue).toBe(true);
     expect(CONFIG_DEFAULTS.discoveryEnabled.defaultValue).toBe(true);
@@ -306,6 +356,7 @@ describe('CONFIG_DEFAULTS', () => {
     expect(CONFIG_DEFAULTS.calibrationEnabled.defaultValue).toBe(true);
     expect(CONFIG_DEFAULTS.autoUnwindEnabled.defaultValue).toBe(false);
     expect(CONFIG_DEFAULTS.adaptiveSequencingEnabled.defaultValue).toBe(true);
+    expect(CONFIG_DEFAULTS.incrementalIngestionEnabled.defaultValue).toBe(true);
   });
 
   it('[P2] should have correct default values for string/enum fields', () => {
@@ -327,6 +378,9 @@ describe('CONFIG_DEFAULTS', () => {
     expect(CONFIG_DEFAULTS.discoveryCronExpression.defaultValue).toBe(
       '0 0 8,20 * * *',
     );
+    expect(
+      CONFIG_DEFAULTS.incrementalIngestionCronExpression.defaultValue,
+    ).toBe('0 0 2 * * *');
   });
 
   it('[P2] should have correct default values for float fields', () => {
@@ -419,6 +473,13 @@ describe('CONFIG_DEFAULTS', () => {
       'pairCooldownMinutes',
       'pairMaxConcurrentPositions',
       'pairDiversityThreshold',
+      // Incremental Ingestion
+      'incrementalIngestionCronExpression',
+      'incrementalIngestionEnabled',
+      'stalenessThresholdPlatformMs',
+      'stalenessThresholdPmxtMs',
+      'stalenessThresholdOddspipeMs',
+      'stalenessThresholdValidationMs',
     ];
     for (const key of effectiveConfigKeys) {
       expect(

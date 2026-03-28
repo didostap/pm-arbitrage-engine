@@ -177,6 +177,23 @@ function buildEffectiveConfig(
     pairCooldownMinutes: resolve('pairCooldownMinutes') as number,
     pairMaxConcurrentPositions: resolve('pairMaxConcurrentPositions') as number,
     pairDiversityThreshold: resolve('pairDiversityThreshold') as number,
+    // Incremental Ingestion
+    incrementalIngestionCronExpression: resolve(
+      'incrementalIngestionCronExpression',
+    ) as string,
+    incrementalIngestionEnabled: resolve(
+      'incrementalIngestionEnabled',
+    ) as boolean,
+    stalenessThresholdPlatformMs: resolve(
+      'stalenessThresholdPlatformMs',
+    ) as number,
+    stalenessThresholdPmxtMs: resolve('stalenessThresholdPmxtMs') as number,
+    stalenessThresholdOddspipeMs: resolve(
+      'stalenessThresholdOddspipeMs',
+    ) as number,
+    stalenessThresholdValidationMs: resolve(
+      'stalenessThresholdValidationMs',
+    ) as number,
     // Exit Mode
     exitMode: resolve('exitMode') as string,
     exitEdgeEvapMultiplier: resolve('exitEdgeEvapMultiplier') as number,

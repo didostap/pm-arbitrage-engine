@@ -12,7 +12,7 @@ import { AuthTokenGuard } from '../../common/guards/auth-token.guard.js';
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
 @UseGuards(AuthTokenGuard)
-@Controller('api/knowledge-base')
+@Controller('knowledge-base')
 export class CalibrationController {
   constructor(private readonly calibrationService: CalibrationService) {}
 

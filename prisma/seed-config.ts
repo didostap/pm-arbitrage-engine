@@ -38,6 +38,7 @@ export const BOOLEAN_FIELDS = new Set([
   'calibrationEnabled',
   'autoUnwindEnabled',
   'adaptiveSequencingEnabled',
+  'incrementalIngestionEnabled',
 ]);
 
 /** Fields that are Prisma Float — parse as float */

@@ -43,6 +43,8 @@ import type {
   BacktestEngineStateChangedEvent,
   BacktestSensitivityCompletedEvent,
   BacktestSensitivityProgressEvent,
+  IncrementalDataFreshnessUpdatedEvent,
+  IncrementalDataStaleEvent,
 } from '../common/events/backtesting.events';
 import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
@@ -347,6 +349,32 @@ export class DashboardGateway
         runId: event.runId,
         completedSweeps: event.completedSweeps,
         totalPlannedSweeps: event.totalPlannedSweeps,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // --- Incremental freshness event handlers (Story 10-9-6) ---
+
+  @OnEvent(EVENT_NAMES.INCREMENTAL_DATA_FRESHNESS_UPDATED)
+  broadcastFreshnessUpdate(event: IncrementalDataFreshnessUpdatedEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.INCREMENTAL_FRESHNESS_UPDATED,
+      data: { sources: event.sources },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  @OnEvent(EVENT_NAMES.INCREMENTAL_DATA_STALE)
+  broadcastStalenessWarning(event: IncrementalDataStaleEvent): void {
+    this.broadcast({
+      event: WS_EVENTS.INCREMENTAL_DATA_STALE,
+      data: {
+        source: event.source,
+        lastSuccessfulAt: event.lastSuccessfulAt?.toISOString() ?? null,
+        thresholdMs: event.thresholdMs,
+        ageMs: event.ageMs,
+        severity: event.severity,
       },
       timestamp: new Date().toISOString(),
     });

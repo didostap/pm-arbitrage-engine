@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { HistoricalDataController } from './historical-data.controller';
 import { IngestionOrchestratorService } from '../ingestion/ingestion-orchestrator.service';
 import { PrismaService } from '../../../common/prisma.service';
@@ -24,6 +25,7 @@ describe('HistoricalDataController', () => {
             provide: PrismaService,
             useValue: {},
           },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -68,6 +70,7 @@ describe('HistoricalDataController', () => {
             provide: PrismaService,
             useValue: {},
           },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -98,6 +101,7 @@ describe('HistoricalDataController', () => {
             provide: PrismaService,
             useValue: {},
           },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -153,6 +157,7 @@ describe('HistoricalDataController', () => {
             provide: IngestionOrchestratorService,
             useValue: {},
           },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -207,6 +212,7 @@ describe('HistoricalDataController', () => {
             provide: IngestionOrchestratorService,
             useValue: {},
           },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -264,6 +270,7 @@ describe('HistoricalDataController', () => {
         providers: [
           { provide: PrismaService, useValue: mockPrisma },
           { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -315,6 +322,7 @@ describe('HistoricalDataController', () => {
         providers: [
           { provide: PrismaService, useValue: mockPrisma },
           { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -366,6 +374,7 @@ describe('HistoricalDataController', () => {
         providers: [
           { provide: PrismaService, useValue: mockPrisma },
           { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: { get: vi.fn() } },
         ],
       }).compile();
 
@@ -374,6 +383,255 @@ describe('HistoricalDataController', () => {
 
       expect(result.data.depth.count).toBe(0);
       expect(result.data.freshness).toEqual({});
+    });
+  });
+
+  // ============================================================
+  // Story 10-9-6: Freshness Endpoint
+  // ============================================================
+
+  describe('GET /api/backtesting/freshness (Story 10-9-6)', () => {
+    const aggregateMock = () =>
+      vi.fn().mockResolvedValue({ _max: { timestamp: null } });
+
+    it('[P0] should return all DataSourceFreshness rows with server-computed freshStatus', async () => {
+      const nowMs = Date.now();
+      const freshTime = new Date(nowMs - 3_600_000); // 1h ago — well within 36h threshold
+      const mockPrisma = {
+        dataSourceFreshness: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              source: 'KALSHI_API',
+              lastSuccessfulAt: freshTime,
+              lastAttemptAt: freshTime,
+              recordsFetched: 1247,
+              contractsUpdated: 15,
+              status: 'success',
+              errorMessage: null,
+            },
+          ]),
+        },
+        historicalPrice: { aggregate: aggregateMock() },
+        historicalTrade: { aggregate: aggregateMock() },
+        historicalDepth: { aggregate: aggregateMock() },
+      };
+      const mockConfig = {
+        get: vi.fn(() => 129_600_000), // 36h threshold
+      };
+
+      const module = await Test.createTestingModule({
+        controllers: [HistoricalDataController],
+        providers: [
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: mockConfig },
+        ],
+      }).compile();
+
+      const controller = module.get(HistoricalDataController);
+      const result = await controller.getFreshness();
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            sources: expect.arrayContaining([
+              expect.objectContaining({
+                source: 'KALSHI_API',
+                freshStatus: 'fresh',
+                recordsFetched: 1247,
+                status: 'success',
+              }),
+            ]),
+            overallFresh: true,
+            staleSources: [],
+          }),
+          timestamp: expect.any(String),
+        }),
+      );
+    });
+
+    it('[P1] freshStatus computation: fresh <50%, warning 50-100%, stale >100%, never when null', async () => {
+      const nowMs = Date.now();
+      const threshold = 100_000; // 100s for easy testing
+      const mockPrisma = {
+        dataSourceFreshness: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              source: 'KALSHI_API',
+              lastSuccessfulAt: new Date(nowMs - 30_000),
+              lastAttemptAt: null,
+              recordsFetched: 0,
+              contractsUpdated: 0,
+              status: 'success',
+              errorMessage: null,
+            },
+            {
+              source: 'POLYMARKET_API',
+              lastSuccessfulAt: new Date(nowMs - 60_000),
+              lastAttemptAt: null,
+              recordsFetched: 0,
+              contractsUpdated: 0,
+              status: 'success',
+              errorMessage: null,
+            },
+            {
+              source: 'GOLDSKY',
+              lastSuccessfulAt: new Date(nowMs - 150_000),
+              lastAttemptAt: null,
+              recordsFetched: 0,
+              contractsUpdated: 0,
+              status: 'success',
+              errorMessage: null,
+            },
+            {
+              source: 'PMXT_ARCHIVE',
+              lastSuccessfulAt: null,
+              lastAttemptAt: null,
+              recordsFetched: 0,
+              contractsUpdated: 0,
+              status: 'idle',
+              errorMessage: null,
+            },
+          ]),
+        },
+        historicalPrice: { aggregate: aggregateMock() },
+        historicalTrade: { aggregate: aggregateMock() },
+        historicalDepth: { aggregate: aggregateMock() },
+      };
+      const mockConfig = { get: vi.fn(() => threshold) };
+
+      const module = await Test.createTestingModule({
+        controllers: [HistoricalDataController],
+        providers: [
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: mockConfig },
+        ],
+      }).compile();
+
+      const controller = module.get(HistoricalDataController);
+      const result = await controller.getFreshness();
+      const sources = result.data.sources;
+
+      const bySource = (s: string) => sources.find((x: any) => x.source === s);
+      expect(bySource('KALSHI_API')?.freshStatus).toBe('fresh'); // 30% < 50%
+      expect(bySource('POLYMARKET_API')?.freshStatus).toBe('warning'); // 60% > 50%
+      expect(bySource('GOLDSKY')?.freshStatus).toBe('stale'); // 150% > 100%
+      expect(bySource('PMXT_ARCHIVE')?.freshStatus).toBe('never'); // null
+    });
+
+    it('[P1] DataSourceFreshnessDto should include all required fields', async () => {
+      const nowMs = Date.now();
+      const mockPrisma = {
+        dataSourceFreshness: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              source: 'KALSHI_API',
+              lastSuccessfulAt: new Date(nowMs - 3_600_000),
+              lastAttemptAt: new Date(nowMs - 3_600_000),
+              recordsFetched: 100,
+              contractsUpdated: 5,
+              status: 'success',
+              errorMessage: null,
+            },
+          ]),
+        },
+        historicalPrice: { aggregate: aggregateMock() },
+        historicalTrade: { aggregate: aggregateMock() },
+        historicalDepth: { aggregate: aggregateMock() },
+      };
+      const mockConfig = { get: vi.fn(() => 129_600_000) };
+
+      const module = await Test.createTestingModule({
+        controllers: [HistoricalDataController],
+        providers: [
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: mockConfig },
+        ],
+      }).compile();
+
+      const controller = module.get(HistoricalDataController);
+      const result = await controller.getFreshness();
+      const dto = result.data.sources[0];
+
+      expect(dto).toEqual(
+        expect.objectContaining({
+          source: expect.any(String),
+          lastSuccessfulAt: expect.any(String),
+          lastAttemptAt: expect.any(String),
+          recordsFetched: expect.any(Number),
+          contractsUpdated: expect.any(Number),
+          status: expect.any(String),
+          freshStatus: expect.stringMatching(/^(fresh|warning|stale|never)$/),
+          stalenessThresholdMs: expect.any(Number),
+          timeSinceLastSuccessMs: expect.any(Number),
+        }),
+      );
+    });
+    it('[P1] should populate latestDataTimestamp from max timestamp per source', async () => {
+      const nowMs = Date.now();
+      const dataTs = new Date('2026-03-27T12:00:00Z');
+      const mockPrisma = {
+        dataSourceFreshness: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              source: 'KALSHI_API',
+              lastSuccessfulAt: new Date(nowMs - 3_600_000),
+              lastAttemptAt: new Date(nowMs - 3_600_000),
+              recordsFetched: 100,
+              contractsUpdated: 5,
+              status: 'success',
+              errorMessage: null,
+            },
+          ]),
+        },
+        historicalPrice: {
+          aggregate: vi.fn().mockResolvedValue({ _max: { timestamp: dataTs } }),
+        },
+        historicalTrade: { aggregate: aggregateMock() },
+        historicalDepth: { aggregate: aggregateMock() },
+      };
+      const mockConfig = { get: vi.fn(() => 129_600_000) };
+
+      const module = await Test.createTestingModule({
+        controllers: [HistoricalDataController],
+        providers: [
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: mockConfig },
+        ],
+      }).compile();
+
+      const controller = module.get(HistoricalDataController);
+      const result = await controller.getFreshness();
+      const dto = result.data.sources[0];
+
+      expect(dto.latestDataTimestamp).toBe(dataTs.toISOString());
+    });
+
+    it('[P2] should return overallFresh: false when no sources exist', async () => {
+      const mockPrisma = {
+        dataSourceFreshness: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      };
+      const mockConfig = { get: vi.fn(() => 129_600_000) };
+
+      const module = await Test.createTestingModule({
+        controllers: [HistoricalDataController],
+        providers: [
+          { provide: PrismaService, useValue: mockPrisma },
+          { provide: IngestionOrchestratorService, useValue: {} },
+          { provide: ConfigService, useValue: mockConfig },
+        ],
+      }).compile();
+
+      const controller = module.get(HistoricalDataController);
+      const result = await controller.getFreshness();
+
+      expect(result.data.overallFresh).toBe(false);
+      expect(result.data.sources).toHaveLength(0);
     });
   });
 

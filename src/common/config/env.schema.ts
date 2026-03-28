@@ -284,4 +284,31 @@ export const envSchema = z.object({
   PAIR_COOLDOWN_MINUTES: z.coerce.number().int().min(0).default(30),
   PAIR_MAX_CONCURRENT_POSITIONS: z.coerce.number().int().min(0).default(2),
   PAIR_DIVERSITY_THRESHOLD: z.coerce.number().int().min(0).default(5),
+
+  // Incremental Ingestion (Story 10-9-6) — cron schedule + staleness thresholds
+  INCREMENTAL_INGESTION_CRON_EXPRESSION: z.string().default('0 0 2 * * *'),
+  INCREMENTAL_INGESTION_ENABLED: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('true'),
+  STALENESS_THRESHOLD_PLATFORM_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(129_600_000),
+  STALENESS_THRESHOLD_PMXT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(172_800_000),
+  STALENESS_THRESHOLD_ODDSPIPE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(129_600_000),
+  STALENESS_THRESHOLD_VALIDATION_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(259_200_000),
 });

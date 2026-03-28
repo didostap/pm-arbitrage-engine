@@ -17,6 +17,8 @@ import {
   BacktestEngineStateChangedEvent,
   BacktestSensitivityCompletedEvent,
   BacktestSensitivityProgressEvent,
+  IncrementalDataFreshnessUpdatedEvent,
+  IncrementalDataStaleEvent,
 } from '../common/events/backtesting.events';
 
 vi.mock('../common/services/correlation-context', () => ({
@@ -450,6 +452,76 @@ describe('DashboardGateway', () => {
           runId: 'run-4',
           completedSweeps: 33,
           totalPlannedSweeps: 66,
+        }),
+      );
+    });
+  });
+
+  // ============================================================
+  // Story 10-9-6: Incremental Freshness WebSocket Handlers
+  // ============================================================
+
+  describe('Incremental freshness events (Story 10-9-6)', () => {
+    it('[P0] broadcastFreshnessUpdate should broadcast INCREMENTAL_FRESHNESS_UPDATED event to WS clients', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(client as any, createMockRequest('test-token'));
+
+      const event = new IncrementalDataFreshnessUpdatedEvent({
+        sources: [
+          {
+            source: 'KALSHI_API',
+            recordsFetched: 1247,
+            contractsUpdated: 15,
+            status: 'success',
+            lastSuccessfulAt: new Date('2026-03-28T02:00:00Z'),
+          },
+        ],
+      });
+
+      gateway.broadcastFreshnessUpdate(event);
+
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: { sources: unknown[] };
+      };
+      expect(sent.event).toBe('backtesting.incremental.freshness-updated');
+      expect(sent.data.sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'KALSHI_API',
+            recordsFetched: 1247,
+            status: 'success',
+          }),
+        ]),
+      );
+    });
+
+    it('[P1] broadcastStalenessWarning should broadcast INCREMENTAL_DATA_STALE event to WS clients', () => {
+      const client = createMockWsClient();
+      gateway.handleConnection(client as any, createMockRequest('test-token'));
+
+      const lastSuccessful = new Date('2026-03-26T14:00:00Z');
+      const event = new IncrementalDataStaleEvent({
+        source: 'PMXT_ARCHIVE',
+        lastSuccessfulAt: lastSuccessful,
+        thresholdMs: 172_800_000,
+        ageMs: 200_000_000,
+        severity: 'warning',
+      });
+
+      gateway.broadcastStalenessWarning(event);
+
+      const sent = JSON.parse(client.send.mock.calls[0]![0] as string) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      expect(sent.event).toBe('backtesting.incremental.stale');
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          source: 'PMXT_ARCHIVE',
+          thresholdMs: 172_800_000,
+          ageMs: 200_000_000,
+          severity: 'warning',
         }),
       );
     });

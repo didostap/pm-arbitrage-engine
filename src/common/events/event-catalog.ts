@@ -271,6 +271,13 @@ export const EVENT_NAMES = {
   BACKTEST_WALKFORWARD_COMPLETED: 'backtesting.walkforward.completed',
   /** Emitted periodically during sensitivity sweep for dashboard progress updates */
   BACKTEST_SENSITIVITY_PROGRESS: 'backtesting.sensitivity.progress',
+
+  // [Story 10-9-6] Incremental Ingestion Freshness Events
+  /** Emitted when a data source exceeds its staleness threshold */
+  INCREMENTAL_DATA_STALE: 'backtesting.incremental.stale',
+  /** Emitted after every incremental refresh with per-source summary */
+  INCREMENTAL_DATA_FRESHNESS_UPDATED:
+    'backtesting.incremental.freshness-updated',
 } as const;
 
 /**

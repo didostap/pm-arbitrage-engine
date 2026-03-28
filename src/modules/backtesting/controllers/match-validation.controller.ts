@@ -17,7 +17,7 @@ import {
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../../../common/errors/system-health-error';
 
-@Controller('api/backtesting/validation')
+@Controller('backtesting/validation')
 export class MatchValidationController {
   private readonly logger = new Logger(MatchValidationController.name);
 

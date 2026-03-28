@@ -27,7 +27,7 @@ import { asPositionId } from '../common/types/branded.type';
 
 @ApiTags('Position Management')
 @ApiBearerAuth()
-@Controller('api/positions')
+@Controller('positions')
 @UseGuards(AuthTokenGuard)
 export class PositionManagementController {
   constructor(

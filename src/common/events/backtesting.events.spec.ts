@@ -15,6 +15,8 @@ import {
   BacktestPositionOpenedEvent,
   BacktestPositionClosedEvent,
   BacktestEngineStateChangedEvent,
+  IncrementalDataStaleEvent,
+  IncrementalDataFreshnessUpdatedEvent,
 } from './backtesting.events';
 import { BaseEvent } from './base.event';
 import { EVENT_NAMES } from './event-catalog';
@@ -474,5 +476,113 @@ describe('Event catalog entries (Story 10-9-3)', () => {
     expect(EVENT_NAMES.BACKTEST_ENGINE_STATE_CHANGED).toBe(
       'backtesting.engine.state-changed',
     );
+  });
+});
+
+// ============================================================
+// Story 10-9-6: Incremental Ingestion Freshness Events
+// ============================================================
+
+describe('Event catalog entries (Story 10-9-6)', () => {
+  it('[P0] should define INCREMENTAL_DATA_STALE in EVENT_NAMES', () => {
+    expect(EVENT_NAMES.INCREMENTAL_DATA_STALE).toBe(
+      'backtesting.incremental.stale',
+    );
+  });
+
+  it('[P0] should define INCREMENTAL_DATA_FRESHNESS_UPDATED in EVENT_NAMES', () => {
+    expect(EVENT_NAMES.INCREMENTAL_DATA_FRESHNESS_UPDATED).toBe(
+      'backtesting.incremental.freshness-updated',
+    );
+  });
+});
+
+describe('IncrementalDataStaleEvent', () => {
+  it('[P0] should carry source, lastSuccessfulAt, thresholdMs, ageMs, severity', () => {
+    const lastSuccessful = new Date('2026-03-27T02:00:00Z');
+    const event = new IncrementalDataStaleEvent({
+      source: 'KALSHI_API',
+      lastSuccessfulAt: lastSuccessful,
+      thresholdMs: 129_600_000,
+      ageMs: 150_000_000,
+      severity: 'warning',
+      correlationId: 'stale-corr-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        source: 'KALSHI_API',
+        lastSuccessfulAt: lastSuccessful,
+        thresholdMs: 129_600_000,
+        ageMs: 150_000_000,
+        severity: 'warning',
+        correlationId: 'stale-corr-1',
+      }),
+    );
+    expect(event.timestamp).toBeInstanceOf(Date);
+  });
+
+  it('[P1] should extend BaseEvent with correct eventName property', () => {
+    const event = new IncrementalDataStaleEvent({
+      source: 'PMXT_ARCHIVE',
+      lastSuccessfulAt: null,
+      thresholdMs: 172_800_000,
+      ageMs: 200_000_000,
+      severity: 'error',
+    });
+    expect(event).toBeInstanceOf(BaseEvent);
+  });
+});
+
+describe('IncrementalDataFreshnessUpdatedEvent', () => {
+  it('[P0] should carry sources array with per-source summary', () => {
+    const lastSuccessful = new Date('2026-03-28T02:00:00Z');
+    const event = new IncrementalDataFreshnessUpdatedEvent({
+      sources: [
+        {
+          source: 'KALSHI_API',
+          recordsFetched: 1247,
+          contractsUpdated: 15,
+          status: 'success',
+          lastSuccessfulAt: lastSuccessful,
+        },
+        {
+          source: 'POLYMARKET_API',
+          recordsFetched: 0,
+          contractsUpdated: 0,
+          status: 'failed',
+          lastSuccessfulAt: null,
+        },
+      ],
+      correlationId: 'fresh-corr-1',
+    });
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        sources: expect.arrayContaining([
+          expect.objectContaining({
+            source: 'KALSHI_API',
+            recordsFetched: 1247,
+            contractsUpdated: 15,
+            status: 'success',
+            lastSuccessfulAt: lastSuccessful,
+          }),
+          expect.objectContaining({
+            source: 'POLYMARKET_API',
+            recordsFetched: 0,
+            status: 'failed',
+          }),
+        ]),
+        correlationId: 'fresh-corr-1',
+      }),
+    );
+    expect(event.timestamp).toBeInstanceOf(Date);
+  });
+
+  it('[P1] should extend BaseEvent', () => {
+    const event = new IncrementalDataFreshnessUpdatedEvent({
+      sources: [],
+    });
+    expect(event).toBeInstanceOf(BaseEvent);
   });
 });

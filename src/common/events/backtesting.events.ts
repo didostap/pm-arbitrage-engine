@@ -278,3 +278,51 @@ export class BacktestWalkForwardCompletedEvent extends BaseEvent {
     this.testPct = payload.testPct;
   }
 }
+
+// ============================================================
+// Story 10-9-6: Incremental Ingestion Freshness Events
+// ============================================================
+
+export class IncrementalDataStaleEvent extends BaseEvent {
+  public readonly source: string;
+  public readonly lastSuccessfulAt: Date | null;
+  public readonly thresholdMs: number;
+  public readonly ageMs: number;
+  public readonly severity: 'warning' | 'error';
+
+  constructor(payload: {
+    source: string;
+    lastSuccessfulAt: Date | null;
+    thresholdMs: number;
+    ageMs: number;
+    severity: 'warning' | 'error';
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.source = payload.source;
+    this.lastSuccessfulAt = payload.lastSuccessfulAt;
+    this.thresholdMs = payload.thresholdMs;
+    this.ageMs = payload.ageMs;
+    this.severity = payload.severity;
+  }
+}
+
+export interface IncrementalSourceSummary {
+  source: string;
+  recordsFetched: number;
+  contractsUpdated: number;
+  status: string;
+  lastSuccessfulAt: Date | null;
+}
+
+export class IncrementalDataFreshnessUpdatedEvent extends BaseEvent {
+  public readonly sources: IncrementalSourceSummary[];
+
+  constructor(payload: {
+    sources: IncrementalSourceSummary[];
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.sources = payload.sources;
+  }
+}

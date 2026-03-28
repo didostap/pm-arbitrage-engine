@@ -5,7 +5,7 @@
  * Verifies ALL @OnEvent handlers are wired to their events via real EventEmitter2.
  * Uses expectEventHandled() integration helper — not mocks.
  *
- * Handler inventory: 14 non-gateway + 22 gateway = 36 event subscriptions
+ * Handler inventory: 14 non-gateway + 29 gateway = 43 event subscriptions
  */
 import { describe, it, vi, beforeEach, afterEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -491,7 +491,7 @@ describe('Event Wiring Audit — ConfigAccessor', () => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// AC2-INT-003: DashboardGateway @OnEvent Handlers (22 subscriptions)
+// AC2-INT-003: DashboardGateway @OnEvent Handlers (29 subscriptions)
 //
 // Verifies @OnEvent decorator wiring only — NOT WebSocket broadcast.
 // ──────────────────────────────────────────────────────────────
@@ -520,6 +520,15 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     'handleShadowDailySummary',
     'handleAutoUnwind',
     'handleConfigSettingsUpdated',
+    // Backtesting (Story 10-9-3/4/5)
+    'handleBacktestRunCompleted',
+    'handleBacktestRunFailed',
+    'handleBacktestStateChanged',
+    'handleBacktestSensitivityCompleted',
+    'handleBacktestSensitivityProgress',
+    // Incremental freshness (Story 10-9-6)
+    'broadcastFreshnessUpdate',
+    'broadcastStalenessWarning',
   ];
 
   beforeEach(async () => {
@@ -572,7 +581,7 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     });
   });
 
-  // Individual gateway handlers (19 methods × 19 events)
+  // Individual gateway handlers (26 methods × 26 events)
   const gatewayHandlers = [
     { method: 'handleOrderFilled', event: EVENT_NAMES.ORDER_FILLED },
     { method: 'handleExecutionFailed', event: EVENT_NAMES.EXECUTION_FAILED },
@@ -619,6 +628,36 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     {
       method: 'handleConfigSettingsUpdated',
       event: EVENT_NAMES.CONFIG_SETTINGS_UPDATED,
+    },
+    // Backtesting (Story 10-9-3/4/5)
+    {
+      method: 'handleBacktestRunCompleted',
+      event: EVENT_NAMES.BACKTEST_RUN_COMPLETED,
+    },
+    {
+      method: 'handleBacktestRunFailed',
+      event: EVENT_NAMES.BACKTEST_RUN_FAILED,
+    },
+    {
+      method: 'handleBacktestStateChanged',
+      event: EVENT_NAMES.BACKTEST_ENGINE_STATE_CHANGED,
+    },
+    {
+      method: 'handleBacktestSensitivityCompleted',
+      event: EVENT_NAMES.BACKTEST_SENSITIVITY_COMPLETED,
+    },
+    {
+      method: 'handleBacktestSensitivityProgress',
+      event: EVENT_NAMES.BACKTEST_SENSITIVITY_PROGRESS,
+    },
+    // Incremental freshness (Story 10-9-6)
+    {
+      method: 'broadcastFreshnessUpdate',
+      event: EVENT_NAMES.INCREMENTAL_DATA_FRESHNESS_UPDATED,
+    },
+    {
+      method: 'broadcastStalenessWarning',
+      event: EVENT_NAMES.INCREMENTAL_DATA_STALE,
     },
   ] as const;
 

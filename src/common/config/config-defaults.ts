@@ -322,4 +322,30 @@ export const CONFIG_DEFAULTS = {
     envKey: 'PAIR_DIVERSITY_THRESHOLD',
     defaultValue: 5,
   },
+
+  // --- Incremental Ingestion (Story 10-9-6) ---
+  incrementalIngestionCronExpression: {
+    envKey: 'INCREMENTAL_INGESTION_CRON_EXPRESSION',
+    defaultValue: '0 0 2 * * *',
+  },
+  incrementalIngestionEnabled: {
+    envKey: 'INCREMENTAL_INGESTION_ENABLED',
+    defaultValue: true,
+  },
+  stalenessThresholdPlatformMs: {
+    envKey: 'STALENESS_THRESHOLD_PLATFORM_MS',
+    defaultValue: 129_600_000,
+  },
+  stalenessThresholdPmxtMs: {
+    envKey: 'STALENESS_THRESHOLD_PMXT_MS',
+    defaultValue: 172_800_000,
+  },
+  stalenessThresholdOddspipeMs: {
+    envKey: 'STALENESS_THRESHOLD_ODDSPIPE_MS',
+    defaultValue: 129_600_000,
+  },
+  stalenessThresholdValidationMs: {
+    envKey: 'STALENESS_THRESHOLD_VALIDATION_MS',
+    defaultValue: 259_200_000,
+  },
 } satisfies Record<string, ConfigDefaultEntry>;

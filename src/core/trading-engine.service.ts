@@ -62,6 +62,7 @@ export class TradingEngineService {
    * Tracks in-flight operations for graceful shutdown.
    */
   async executeCycle(): Promise<void> {
+    return;
     // Skip if shutting down
     if (this.isShuttingDown) {
       return;

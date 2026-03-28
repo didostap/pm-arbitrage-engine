@@ -125,6 +125,14 @@ export interface EffectiveConfig {
   pairMaxConcurrentPositions: number;
   pairDiversityThreshold: number;
 
+  // --- Incremental Ingestion ---
+  incrementalIngestionCronExpression: string;
+  incrementalIngestionEnabled: boolean;
+  stalenessThresholdPlatformMs: number;
+  stalenessThresholdPmxtMs: number;
+  stalenessThresholdOddspipeMs: number;
+  stalenessThresholdValidationMs: number;
+
   // --- Exit Mode ---
   exitMode: string;
   exitEdgeEvapMultiplier: number;
