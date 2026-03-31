@@ -5,14 +5,15 @@ function createMockPrisma() {
   return {
     historicalPrice: {
       findMany: vi.fn().mockResolvedValue([]),
-      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     historicalTrade: {
       findMany: vi.fn().mockResolvedValue([]),
-      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     historicalDepth: {
       findMany: vi.fn().mockResolvedValue([]),
+    },
+    ingestionQualityReport: {
+      create: vi.fn().mockResolvedValue({ id: 1 }),
     },
   } as any;
 }
@@ -170,6 +171,95 @@ describe('IngestionQualityAssessorService', () => {
       await service.runQualityAssessment('m1', TARGET, DATE_RANGE, 'corr-1');
 
       expect(dataQuality.assessFreshness).toHaveBeenCalled();
+    });
+  });
+
+  describe('contract-level quality report storage', () => {
+    it('should create ingestionQualityReport instead of updateMany for price flags', async () => {
+      const mockPrisma = createMockPrisma();
+      mockPrisma.historicalPrice.findMany.mockResolvedValue([
+        {
+          platform: 'KALSHI',
+          contractId: 'K1',
+          source: 'KALSHI_API',
+          intervalMinutes: 1,
+          timestamp: new Date('2025-01-15'),
+          open: '0.50',
+          high: '0.52',
+          low: '0.48',
+          close: '0.51',
+          volume: '1000',
+          openInterest: null,
+        },
+      ]);
+
+      const dataQuality = createMockDataQuality();
+      dataQuality.assessPriceQuality.mockReturnValue({
+        ...createEmptyFlags(),
+        hasGaps: true,
+        gapDetails: [{ from: new Date(), to: new Date() }],
+      });
+
+      const { service } = createService(mockPrisma, dataQuality);
+      await service.runQualityAssessment('m1', TARGET, DATE_RANGE, 'corr-1');
+
+      expect(mockPrisma.ingestionQualityReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            matchId: 'm1',
+            contractId: 'K1',
+            platform: 'kalshi',
+            source: 'KALSHI_API',
+            assessmentType: 'price',
+            recordsAssessed: 1,
+            correlationId: 'corr-1',
+          }),
+        }),
+      );
+    });
+
+    it('should create ingestionQualityReport instead of updateMany for trade flags', async () => {
+      const mockPrisma = createMockPrisma();
+      mockPrisma.historicalTrade.findMany.mockResolvedValue([
+        {
+          platform: 'KALSHI',
+          contractId: 'K1',
+          source: 'KALSHI_API',
+          externalTradeId: 't1',
+          price: '0.50',
+          size: '25',
+          side: 'buy',
+          timestamp: new Date('2025-01-15'),
+        },
+      ]);
+
+      const dataQuality = createMockDataQuality();
+      dataQuality.assessTradeQuality.mockReturnValue({
+        ...createEmptyFlags(),
+        hasGaps: true,
+        gapDetails: [{ from: new Date(), to: new Date() }],
+      });
+
+      const { service } = createService(mockPrisma, dataQuality);
+      await service.runQualityAssessment('m1', TARGET, DATE_RANGE, 'corr-1');
+
+      expect(mockPrisma.ingestionQualityReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            matchId: 'm1',
+            contractId: 'K1',
+            assessmentType: 'trade',
+            recordsAssessed: 1,
+          }),
+        }),
+      );
+    });
+
+    it('should not call historicalPrice.updateMany or historicalTrade.updateMany', async () => {
+      const mockPrisma = createMockPrisma();
+      // Ensure updateMany does not exist on the mocks (removed from mock factory)
+      expect(mockPrisma.historicalPrice.updateMany).toBeUndefined();
+      expect(mockPrisma.historicalTrade.updateMany).toBeUndefined();
     });
   });
 

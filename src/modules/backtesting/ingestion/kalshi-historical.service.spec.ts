@@ -113,7 +113,7 @@ describe('KalshiHistoricalService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
-    it('[P20] should throw on non-2xx cutoff response via fetchWithRetry', async () => {
+    it('[P20] should throw on non-2xx cutoff response via fetchWithRetry', { timeout: 45_000 }, async () => {
       const { service } = createKalshiService();
 
       mockFetch.mockResolvedValue(
@@ -886,7 +886,7 @@ describe('KalshiHistoricalService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
-    it('[P0] should throw SystemHealthError with code 4206 on API failure', async () => {
+    it('[P0] should throw SystemHealthError with code 4206 on API failure', { timeout: 45_000 }, async () => {
       const { service } = createKalshiService();
 
       mockFetch.mockResolvedValueOnce(farFutureCutoffResponse());

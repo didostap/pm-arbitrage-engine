@@ -60,6 +60,19 @@ export class IngestionQualityAssessorService {
         platform: 'KALSHI',
         timestamp: { gte: dateRange.start, lte: dateRange.end },
       },
+      select: {
+        platform: true,
+        contractId: true,
+        source: true,
+        intervalMinutes: true,
+        timestamp: true,
+        open: true,
+        high: true,
+        low: true,
+        close: true,
+        volume: true,
+        openInterest: true,
+      },
       orderBy: { timestamp: 'asc' },
       take: QUALITY_SAMPLE_LIMIT,
     });
@@ -92,6 +105,16 @@ export class IngestionQualityAssessorService {
         contractId: target.kalshiTicker,
         platform: 'KALSHI',
         timestamp: { gte: dateRange.start, lte: dateRange.end },
+      },
+      select: {
+        platform: true,
+        contractId: true,
+        source: true,
+        externalTradeId: true,
+        price: true,
+        size: true,
+        side: true,
+        timestamp: true,
       },
       orderBy: { timestamp: 'asc' },
       take: QUALITY_SAMPLE_LIMIT,
@@ -137,15 +160,23 @@ export class IngestionQualityAssessorService {
         contractId: target.kalshiTicker,
         flags: kalshiPriceFlags,
       });
+    }
 
-      // Persist quality flags on Kalshi price records
-      await this.prisma.historicalPrice.updateMany({
-        where: {
+    // Persist contract-level quality report (replaces per-row updateMany)
+    if (kalshiPriceFlags) {
+      await this.prisma.ingestionQualityReport.create({
+        data: {
+          matchId,
           contractId: target.kalshiTicker,
-          platform: 'KALSHI',
-          timestamp: { gte: dateRange.start, lte: dateRange.end },
+          platform: 'kalshi',
+          source: 'KALSHI_API',
+          assessmentType: 'price',
+          dateRangeStart: dateRange.start,
+          dateRangeEnd: dateRange.end,
+          qualityFlags: flagsToJson(kalshiPriceFlags),
+          correlationId,
+          recordsAssessed: kalshiPrices.length,
         },
-        data: { qualityFlags: flagsToJson(kalshiPriceFlags) },
       });
     }
 
@@ -156,15 +187,23 @@ export class IngestionQualityAssessorService {
         contractId: target.kalshiTicker,
         flags: kalshiTradeFlags,
       });
+    }
 
-      // Persist quality flags on Kalshi trade records
-      await this.prisma.historicalTrade.updateMany({
-        where: {
+    // Persist contract-level quality report (replaces per-row updateMany)
+    if (kalshiTradeFlags) {
+      await this.prisma.ingestionQualityReport.create({
+        data: {
+          matchId,
           contractId: target.kalshiTicker,
-          platform: 'KALSHI',
-          timestamp: { gte: dateRange.start, lte: dateRange.end },
+          platform: 'kalshi',
+          source: 'KALSHI_API',
+          assessmentType: 'trade',
+          dateRangeStart: dateRange.start,
+          dateRangeEnd: dateRange.end,
+          qualityFlags: flagsToJson(kalshiTradeFlags),
+          correlationId,
+          recordsAssessed: kalshiTrades.length,
         },
-        data: { qualityFlags: flagsToJson(kalshiTradeFlags) },
       });
     }
 
@@ -174,6 +213,15 @@ export class IngestionQualityAssessorService {
         contractId: target.polymarketTokenId,
         source: 'PMXT_ARCHIVE',
         timestamp: { gte: dateRange.start, lte: dateRange.end },
+      },
+      select: {
+        platform: true,
+        contractId: true,
+        source: true,
+        timestamp: true,
+        bids: true,
+        asks: true,
+        updateType: true,
       },
       orderBy: { timestamp: 'asc' },
       take: QUALITY_SAMPLE_LIMIT,
@@ -195,7 +243,6 @@ export class IngestionQualityAssessorService {
           })),
           timestamp: d.timestamp,
           updateType: toDepthUpdateType(d.updateType),
-          qualityFlags: null,
         })),
       );
 

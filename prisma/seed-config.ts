@@ -39,6 +39,7 @@ export const BOOLEAN_FIELDS = new Set([
   'autoUnwindEnabled',
   'adaptiveSequencingEnabled',
   'incrementalIngestionEnabled',
+  'externalPairIngestionEnabled',
 ]);
 
 /** Fields that are Prisma Float — parse as float */
@@ -49,6 +50,8 @@ export const FLOAT_FIELDS = new Set([
   'exitTimeDecayTrigger',
   'exitDepthSlippageTolerance',
   'exitProfitCaptureRatio',
+  'externalPairDedupTitleThreshold',
+  'externalPairCatalogMatchThreshold',
 ]);
 
 /**

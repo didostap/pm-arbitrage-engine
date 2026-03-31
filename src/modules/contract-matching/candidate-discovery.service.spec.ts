@@ -1365,4 +1365,33 @@ describe('CandidateDiscoveryService', () => {
       });
     });
   });
+
+  // Story 10-9-7: isRunning getter for concurrency guard
+  describe('isRunning getter', () => {
+    it('[P1] CandidateDiscoveryService.isRunning public getter should return _isRunning field value', () => {
+      expect(service.isRunning).toBe(false);
+    });
+
+    it('[P2] isRunning should be true during runDiscovery() execution and false after', async () => {
+      let capturedIsRunning = false;
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises -- mock returns Promise matching real signature
+      catalogSync.syncCatalogs.mockImplementation(() => {
+        capturedIsRunning = service.isRunning;
+        return Promise.resolve(new Map());
+      });
+
+      await service.runDiscovery();
+
+      expect(capturedIsRunning).toBe(true);
+      expect(service.isRunning).toBe(false);
+    });
+
+    it('[P2] isRunning should be false after runDiscovery() throws', async () => {
+      catalogSync.syncCatalogs.mockRejectedValue(new Error('fail'));
+
+      await service.runDiscovery();
+
+      expect(service.isRunning).toBe(false);
+    });
+  });
 });

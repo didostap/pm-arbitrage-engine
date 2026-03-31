@@ -66,4 +66,6 @@ export const SYSTEM_HEALTH_ERROR_CODES = {
   BACKTEST_INSUFFICIENT_DATA: 4211,
   /** Invalid backtest configuration parameters — error */
   BACKTEST_INVALID_CONFIGURATION: 4212,
+  /** All external pair providers failed during ingestion — warning */
+  EXTERNAL_PAIR_INGESTION_FAILURE: 4220,
 } as const;

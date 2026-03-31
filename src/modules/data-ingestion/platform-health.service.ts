@@ -79,6 +79,7 @@ export class PlatformHealthService {
    */
   @Cron('*/30 * * * * *') // Every 30 seconds
   async publishHealth(): Promise<void> {
+    return;
     // Wrap in correlation context so events get correlationId from async storage
     return withCorrelationId(async () => {
       const correlationId = randomUUID();

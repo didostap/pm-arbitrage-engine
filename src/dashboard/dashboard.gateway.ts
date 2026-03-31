@@ -46,6 +46,7 @@ import type {
   IncrementalDataFreshnessUpdatedEvent,
   IncrementalDataStaleEvent,
 } from '../common/events/backtesting.events';
+import type { ExternalPairIngestionRunCompletedEvent } from '../common/events/external-pair-ingestion-run-completed.event';
 import { WS_EVENTS } from './dto/ws-events.dto';
 import { DashboardEventMapperService } from './dashboard-event-mapper.service';
 
@@ -376,6 +377,19 @@ export class DashboardGateway
         ageMs: event.ageMs,
         severity: event.severity,
       },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // --- External pair ingestion event handlers (Story 10-9-7) ---
+
+  @OnEvent(EVENT_NAMES.EXTERNAL_PAIR_INGESTION_RUN_COMPLETED)
+  broadcastExternalPairIngestionCompleted(
+    event: ExternalPairIngestionRunCompletedEvent,
+  ): void {
+    this.broadcast({
+      event: WS_EVENTS.EXTERNAL_PAIR_INGESTION_RUN_COMPLETED,
+      data: { sources: event.sources, durationMs: event.durationMs },
       timestamp: new Date().toISOString(),
     });
   }

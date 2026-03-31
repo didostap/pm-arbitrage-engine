@@ -16,5 +16,6 @@ import { BacktestController } from './controllers/backtest.controller';
     ReportingModule,
   ],
   controllers: [HistoricalDataController, BacktestController],
+  exports: [IngestionModule, ValidationModule],
 })
 export class BacktestingModule {}

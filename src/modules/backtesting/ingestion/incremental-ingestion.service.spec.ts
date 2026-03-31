@@ -78,6 +78,9 @@ describe('IncrementalIngestionService', () => {
       orchestrator as unknown as IngestionOrchestratorService,
     );
 
+  });
+
+  afterEach(() => {
     vi.useRealTimers();
   });
 
@@ -124,6 +127,8 @@ describe('IncrementalIngestionService', () => {
     // Only one call should have been made
     expect(slowFetch).toHaveBeenCalledTimes(1);
 
+    // Advance fake timers to resolve the pending setTimeout(100)
+    await vi.advanceTimersByTimeAsync(200);
     await first;
   });
 

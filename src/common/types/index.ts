@@ -39,3 +39,7 @@ export {
   asReservationId,
   unwrapId,
 } from './branded.type.js';
+export type {
+  ExternalMatchedPair,
+  ExternalMatchSource,
+} from '../../modules/backtesting/types/match-validation.types.js';

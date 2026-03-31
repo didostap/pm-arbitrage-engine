@@ -37,6 +37,7 @@ function buildMockMatch(overrides: Record<string, unknown> = {}) {
     lastComputedAt: null,
     clusterId: null,
     cluster: null,
+    origin: 'DISCOVERY',
     createdAt: new Date('2026-03-01'),
     updatedAt: new Date('2026-03-01'),
     ...overrides,

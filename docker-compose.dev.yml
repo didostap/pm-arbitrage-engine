@@ -4,6 +4,12 @@ services:
   postgres:
     image: postgres:16
     container_name: pm-arbitrage-postgres-dev
+    command:
+      - 'postgres'
+      - '-c'
+      - 'autovacuum_vacuum_scale_factor=0.05'
+      - '-c'
+      - 'autovacuum_analyze_scale_factor=0.02'
     ports:
       - '5433:5432'
     environment:

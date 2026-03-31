@@ -852,6 +852,54 @@ export const SETTINGS_METADATA: Record<
     min: 0.01,
     max: 5,
   },
+
+  // ── External Pair Ingestion (Story 10-9-7) ─────────────────────────────
+  externalPairIngestionCronExpression: {
+    group: SettingsGroup.Discovery,
+    label: 'External Pair Ingestion Cron',
+    description:
+      'Cron schedule for external pair ingestion from OddsPipe/Predexon. Default: twice daily 6 AM/6 PM UTC.',
+    type: 'string',
+    envDefault:
+      CONFIG_DEFAULTS.externalPairIngestionCronExpression.defaultValue,
+  },
+  externalPairIngestionEnabled: {
+    group: SettingsGroup.Discovery,
+    label: 'External Pair Ingestion Enabled',
+    description:
+      'Enable automated external pair ingestion from OddsPipe and Predexon.',
+    type: 'boolean',
+    envDefault: CONFIG_DEFAULTS.externalPairIngestionEnabled.defaultValue,
+  },
+  externalPairDedupTitleThreshold: {
+    group: SettingsGroup.Discovery,
+    label: 'External Pair Dedup Title Threshold',
+    description:
+      'Fuzzy title match threshold for OddsPipe dedup. Lower = more pairs scored (bias toward inclusion).',
+    type: 'float',
+    envDefault: CONFIG_DEFAULTS.externalPairDedupTitleThreshold.defaultValue,
+    min: 0,
+    max: 1,
+  },
+  externalPairLlmConcurrency: {
+    group: SettingsGroup.Discovery,
+    label: 'External Pair LLM Concurrency',
+    description:
+      'Max concurrent LLM scoring calls for external pairs. Lower than discovery (smaller batches).',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.externalPairLlmConcurrency.defaultValue,
+    min: 1,
+  },
+  externalPairCatalogMatchThreshold: {
+    group: SettingsGroup.Discovery,
+    label: 'External Pair Catalog Match Threshold',
+    description:
+      'Minimum Jaccard similarity for catalog-based ID resolution of OddsPipe pairs. Higher than dedup threshold — asserting identity, not detecting duplicates.',
+    type: 'float',
+    envDefault: CONFIG_DEFAULTS.externalPairCatalogMatchThreshold.defaultValue,
+    min: 0,
+    max: 1,
+  },
 } satisfies Record<keyof typeof CONFIG_DEFAULTS, SettingsMetadataEntry>;
 
 /** All valid SETTINGS_METADATA key names (excludes bankrollUsd for reset) */

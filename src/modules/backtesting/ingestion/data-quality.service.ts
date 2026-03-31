@@ -20,6 +20,8 @@ const DEPTH_GAP_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 const WIDE_SPREAD_THRESHOLD = new Decimal('0.05'); // 5% relative spread
 const IMBALANCE_THRESHOLD = new Decimal('0.1'); // 10%
 const FRESHNESS_STALE_HOURS = 48;
+const MAX_DETAIL_ENTRIES = 50;
+const CROSS_SOURCE_SAMPLE_LIMIT = 10_000;
 
 @Injectable()
 export class DataQualityService {
@@ -78,6 +80,14 @@ export class DataQualityService {
       }
     }
 
+    // Cap detail arrays to prevent unbounded JSON growth
+    if (flags.gapDetails.length > MAX_DETAIL_ENTRIES) {
+      flags.gapDetails = flags.gapDetails.slice(0, MAX_DETAIL_ENTRIES);
+    }
+    if (flags.jumpDetails.length > MAX_DETAIL_ENTRIES) {
+      flags.jumpDetails = flags.jumpDetails.slice(0, MAX_DETAIL_ENTRIES);
+    }
+
     // Stale data detection
     const latest = sorted[sorted.length - 1]!.timestamp;
     const hoursBehind = (Date.now() - latest.getTime()) / (1000 * 60 * 60);
@@ -126,6 +136,11 @@ export class DataQualityService {
           to: sorted[i]!.timestamp,
         });
       }
+    }
+
+    // Cap detail arrays to prevent unbounded JSON growth
+    if (flags.gapDetails.length > MAX_DETAIL_ENTRIES) {
+      flags.gapDetails = flags.gapDetails.slice(0, MAX_DETAIL_ENTRIES);
     }
 
     // Low volume: check if any 1-hour window has < 5 trades
@@ -278,6 +293,17 @@ export class DataQualityService {
       }
     }
 
+    // Cap detail arrays to prevent unbounded JSON growth
+    if (flags.gapDetails.length > MAX_DETAIL_ENTRIES) {
+      flags.gapDetails = flags.gapDetails.slice(0, MAX_DETAIL_ENTRIES);
+    }
+    if (
+      flags.spreadDetails &&
+      flags.spreadDetails.length > MAX_DETAIL_ENTRIES
+    ) {
+      flags.spreadDetails = flags.spreadDetails.slice(0, MAX_DETAIL_ENTRIES);
+    }
+
     return flags;
   }
 
@@ -368,6 +394,7 @@ export class DataQualityService {
       },
       orderBy: { timestamp: 'asc' },
       select: { source: true, timestamp: true, close: true },
+      take: CROSS_SOURCE_SAMPLE_LIMIT,
     });
 
     const oddspipePrices = prices.filter((p) => p.source === 'ODDSPIPE');

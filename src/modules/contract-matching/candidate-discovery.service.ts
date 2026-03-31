@@ -51,6 +51,7 @@ function isWithinSettlementWindow(
 @Injectable()
 export class CandidateDiscoveryService implements OnModuleInit {
   private readonly logger = new Logger(CandidateDiscoveryService.name);
+  private _isRunning = false;
   private readonly autoApproveThreshold: number;
   private readonly minReviewThreshold: number;
   private readonly preFilterThreshold: number;
@@ -135,6 +136,11 @@ export class CandidateDiscoveryService implements OnModuleInit {
     }
   }
 
+  /** Story 10-9-7: Public getter for concurrency guard with ExternalPairIngestionService */
+  public get isRunning(): boolean {
+    return this._isRunning;
+  }
+
   /** Story 10-5.2 AC6: hot-reload cron schedule */
   reloadCron(expression: string): void {
     const jobName = 'candidate-discovery';
@@ -174,6 +180,7 @@ export class CandidateDiscoveryService implements OnModuleInit {
 
   async runDiscovery(): Promise<void> {
     await withCorrelationId(async () => {
+      this._isRunning = true;
       const startTime = Date.now();
       const stats: DiscoveryStats = {
         catalogsFetched: 0,
@@ -294,6 +301,8 @@ export class CandidateDiscoveryService implements OnModuleInit {
             error: error instanceof Error ? error.message : String(error),
           },
         });
+      } finally {
+        this._isRunning = false;
       }
 
       this.emitCompletedEvent(stats, startTime);

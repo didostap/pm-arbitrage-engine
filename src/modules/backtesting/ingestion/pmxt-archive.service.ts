@@ -277,7 +277,6 @@ export class PmxtArchiveService implements OnModuleDestroy {
               asks,
               timestamp,
               updateType: 'snapshot',
-              qualityFlags: null,
             });
           }
         },

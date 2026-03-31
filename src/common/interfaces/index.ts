@@ -37,6 +37,11 @@ export type {
 } from './pair-concentration-filter.interface.js';
 export { PAIR_CONCENTRATION_FILTER_TOKEN } from './pair-concentration-filter.interface.js';
 export type { IHistoricalDataProvider } from './historical-data-provider.interface.js';
+export type { IExternalPairProvider } from './external-pair-provider.interface.js';
+export {
+  ODDSPIPE_PAIR_PROVIDER_TOKEN,
+  PREDEXON_PAIR_PROVIDER_TOKEN,
+} from './external-pair-provider.interface.js';
 export { HISTORICAL_DATA_PROVIDER_TOKEN } from './historical-data-provider.interface.js';
 export type {
   IBacktestEngine,

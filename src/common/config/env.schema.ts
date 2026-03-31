@@ -311,4 +311,22 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(259_200_000),
+
+  // External Pair Ingestion (Story 10-9-7) — cron schedule, enabled flag, dedup threshold, LLM concurrency
+  EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION: z.string().default('0 0 6,18 * * *'),
+  EXTERNAL_PAIR_INGESTION_ENABLED: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('true'),
+  EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .default(0.45),
+  EXTERNAL_PAIR_LLM_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  EXTERNAL_PAIR_CATALOG_MATCH_THRESHOLD: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .default(0.5),
 });

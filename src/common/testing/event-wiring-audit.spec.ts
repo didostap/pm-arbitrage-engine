@@ -529,6 +529,8 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     // Incremental freshness (Story 10-9-6)
     'broadcastFreshnessUpdate',
     'broadcastStalenessWarning',
+    // External pair ingestion (Story 10-9-7)
+    'broadcastExternalPairIngestionCompleted',
   ];
 
   beforeEach(async () => {
@@ -658,6 +660,11 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     {
       method: 'broadcastStalenessWarning',
       event: EVENT_NAMES.INCREMENTAL_DATA_STALE,
+    },
+    // External pair ingestion (Story 10-9-7)
+    {
+      method: 'broadcastExternalPairIngestionCompleted',
+      event: EVENT_NAMES.EXTERNAL_PAIR_INGESTION_RUN_COMPLETED,
     },
   ] as const;
 

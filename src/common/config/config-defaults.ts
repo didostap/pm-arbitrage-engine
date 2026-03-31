@@ -348,4 +348,26 @@ export const CONFIG_DEFAULTS = {
     envKey: 'STALENESS_THRESHOLD_VALIDATION_MS',
     defaultValue: 259_200_000,
   },
+
+  // --- External Pair Ingestion (Story 10-9-7) ---
+  externalPairIngestionCronExpression: {
+    envKey: 'EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION',
+    defaultValue: '0 0 6,18 * * *',
+  },
+  externalPairIngestionEnabled: {
+    envKey: 'EXTERNAL_PAIR_INGESTION_ENABLED',
+    defaultValue: true,
+  },
+  externalPairDedupTitleThreshold: {
+    envKey: 'EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD',
+    defaultValue: 0.45,
+  },
+  externalPairLlmConcurrency: {
+    envKey: 'EXTERNAL_PAIR_LLM_CONCURRENCY',
+    defaultValue: 5,
+  },
+  externalPairCatalogMatchThreshold: {
+    envKey: 'EXTERNAL_PAIR_CATALOG_MATCH_THRESHOLD',
+    defaultValue: 0.5,
+  },
 } satisfies Record<string, ConfigDefaultEntry>;

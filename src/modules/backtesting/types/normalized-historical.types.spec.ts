@@ -19,7 +19,6 @@ describe('NormalizedHistoricalDepth type (Story 10-9-1b)', () => {
       ],
       timestamp: new Date('2025-06-01T12:00:00Z'),
       updateType: 'snapshot',
-      qualityFlags: null,
     };
 
     expect(depth.bids[0]!.price).toBeInstanceOf(Decimal);
@@ -40,7 +39,6 @@ describe('NormalizedHistoricalDepth type (Story 10-9-1b)', () => {
       asks: [],
       timestamp: new Date('2025-06-01T12:00:00Z'),
       updateType: null,
-      qualityFlags: null,
     };
 
     expect(depth.updateType).toBeNull();

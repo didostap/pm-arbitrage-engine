@@ -351,10 +351,11 @@ describe('OddsPipeService', () => {
 
     function createSpreadsResponse(
       items: ReturnType<typeof createSpreadItem>[],
+      total?: number,
     ) {
       return {
         ok: true,
-        json: () => Promise.resolve({ items }),
+        json: () => Promise.resolve({ items, total: total ?? items.length }),
       };
     }
 
@@ -446,6 +447,33 @@ describe('OddsPipeService', () => {
       );
     });
 
+    it('[P1] should paginate through all results when total exceeds page limit', async () => {
+      const service = createService();
+      const page1Items = Array.from({ length: 200 }, () => createSpreadItem());
+      const page2Items = Array.from({ length: 50 }, () =>
+        createSpreadItem({
+          polymarket: { title: 'Page 2 pair', yes_price: 0.5 },
+        }),
+      );
+
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(createSpreadsResponse(page1Items, 250))
+          .mockResolvedValueOnce(createSpreadsResponse(page2Items, 250)),
+      );
+
+      const pairs = await service.fetchMatchedPairs();
+
+      expect(pairs).toHaveLength(250);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      // Verify offset param on second call
+      const secondCallUrl = (global.fetch as ReturnType<typeof vi.fn>).mock
+        .calls[1]![0] as string;
+      expect(secondCallUrl).toContain('offset=200');
+    });
+
     it('[P1] should handle error responses with existing error handling patterns', async () => {
       vi.stubGlobal(
         'fetch',
@@ -502,6 +530,67 @@ describe('OddsPipeService', () => {
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // Story 10-9-7: IExternalPairProvider adapter tests
+  describe('IExternalPairProvider adapter', () => {
+    it('[P0] fetchPairs() should delegate to existing fetchMatchedPairs() and return ExternalMatchedPair[]', async () => {
+      const service = createService();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [
+                {
+                  polymarket: {
+                    title: 'Will Bitcoin exceed $100k?',
+                    yes_price: 0.65,
+                  },
+                  kalshi: {
+                    title: 'Bitcoin above $100,000',
+                    yes_price: 0.62,
+                  },
+                  spread: { yes_diff: 0.03 },
+                },
+              ],
+            }),
+        }),
+      );
+
+      const spy = vi.spyOn(service, 'fetchMatchedPairs');
+      const result = await service.fetchPairs();
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          polymarketTitle: 'Will Bitcoin exceed $100k?',
+          kalshiTitle: 'Bitcoin above $100,000',
+          source: 'oddspipe',
+        }),
+      );
+    });
+
+    it('[P0] getSourceId() should return "oddspipe"', () => {
+      const service = createService();
+      expect(service.getSourceId()).toBe('oddspipe');
+    });
+
+    it('[P1] fetchPairs() should propagate errors from fetchMatchedPairs() without adding retry layer', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+        }),
+      );
+
+      const service = createService();
+      await expect(service.fetchPairs()).rejects.toThrow();
     });
   });
 });

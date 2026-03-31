@@ -126,4 +126,6 @@ export const WS_EVENTS = {
   BACKTEST_SENSITIVITY_PROGRESS: 'backtesting.sensitivity.progress',
   INCREMENTAL_FRESHNESS_UPDATED: 'backtesting.incremental.freshness-updated',
   INCREMENTAL_DATA_STALE: 'backtesting.incremental.stale',
+  EXTERNAL_PAIR_INGESTION_RUN_COMPLETED:
+    'contract.external-pair-ingestion.run_completed',
 } as const;

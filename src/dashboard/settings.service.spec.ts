@@ -103,6 +103,10 @@ function buildMockEffectiveConfig(
     pairCooldownMinutes: 30,
     pairMaxConcurrentPositions: 2,
     pairDiversityThreshold: 5,
+    externalPairIngestionCronExpression: '0 0 6,18 * * *',
+    externalPairIngestionEnabled: true,
+    externalPairDedupTitleThreshold: 0.45,
+    externalPairLlmConcurrency: 5,
     ...overrides,
   };
 }
@@ -246,8 +250,8 @@ describe('SettingsService', () => {
         expect(setting).toHaveProperty('group');
       }
 
-      // 88 settings (89 CONFIG_DEFAULTS minus bankrollUsd)
-      expect(allSettings.length).toBe(88);
+      // 93 settings (94 CONFIG_DEFAULTS minus bankrollUsd)
+      expect(allSettings.length).toBe(93);
     });
 
     it('[P0] currentValue falls back to env default when DB column is NULL', async () => {

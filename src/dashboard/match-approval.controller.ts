@@ -63,6 +63,7 @@ export class MatchApprovalController {
       query.clusterId,
       query.sortBy,
       query.order,
+      query.origin,
     );
 
     return {

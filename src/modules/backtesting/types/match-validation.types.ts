@@ -12,6 +12,12 @@ export interface ExternalMatchedPair {
     polyYesPrice: number;
     kalshiYesPrice: number;
   } | null;
+  /** Enrichment metadata — populated by catalog-based ID resolution */
+  settlementDate?: Date;
+  category?: string;
+  polymarketClobTokenId?: string;
+  polymarketOutcomeLabel?: string;
+  kalshiOutcomeLabel?: string;
 }
 
 export type ValidationCategory =

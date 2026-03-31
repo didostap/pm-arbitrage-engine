@@ -194,6 +194,20 @@ function buildEffectiveConfig(
     stalenessThresholdValidationMs: resolve(
       'stalenessThresholdValidationMs',
     ) as number,
+    // External Pair Ingestion
+    externalPairIngestionCronExpression: resolve(
+      'externalPairIngestionCronExpression',
+    ) as string,
+    externalPairIngestionEnabled: resolve(
+      'externalPairIngestionEnabled',
+    ) as boolean,
+    externalPairDedupTitleThreshold: resolve(
+      'externalPairDedupTitleThreshold',
+    ) as number,
+    externalPairLlmConcurrency: resolve('externalPairLlmConcurrency') as number,
+    externalPairCatalogMatchThreshold: resolve(
+      'externalPairCatalogMatchThreshold',
+    ) as number,
     // Exit Mode
     exitMode: resolve('exitMode') as string,
     exitEdgeEvapMultiplier: resolve('exitEdgeEvapMultiplier') as number,

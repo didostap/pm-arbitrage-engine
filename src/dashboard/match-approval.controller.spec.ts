@@ -43,6 +43,7 @@ function buildMatchDto(
     lastNetEdge: null,
     lastComputedAt: null,
     cluster: null,
+    origin: 'DISCOVERY',
     createdAt: '2026-03-01T00:00:00.000Z',
     updatedAt: '2026-03-01T00:00:00.000Z',
     ...overrides,
@@ -93,6 +94,7 @@ describe('MatchApprovalController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
       expect(result.data).toHaveLength(1);
       expect(result.count).toBe(1);
@@ -117,6 +119,7 @@ describe('MatchApprovalController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -134,6 +137,7 @@ describe('MatchApprovalController', () => {
         'all',
         2,
         50,
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -162,6 +166,7 @@ describe('MatchApprovalController', () => {
         undefined,
         MatchSortField.LAST_ANNUALIZED_RETURN,
         SortOrder.DESC,
+        undefined,
       );
     });
   });

@@ -402,6 +402,37 @@ describe('ContractMatchSyncService', () => {
     );
   });
 
+  describe('origin field', () => {
+    it('[P0] syncPairsToDatabase() should set origin: MANUAL on upsert for YAML-sourced pairs', async () => {
+      const pairs = [makePair()];
+      pairLoader.getYamlPairs.mockReturnValue(pairs);
+
+      await service.syncPairsToDatabase();
+
+      expect(prisma.contractMatch.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ origin: 'MANUAL' }),
+          update: expect.objectContaining({ origin: 'MANUAL' }),
+        }),
+      );
+    });
+
+    it('[P1] backfill migration SQL should update operatorApproved=true AND operatorRationale IS NULL to MANUAL', async () => {
+      const fs = await import('fs');
+      const path = await import('path');
+      const sql = fs.readFileSync(
+        path.resolve(
+          __dirname,
+          '../../../prisma/migrations/20260328175246_add_contract_match_origin/migration.sql',
+        ),
+        'utf-8',
+      );
+      expect(sql).toContain('SET "origin" = \'MANUAL\'');
+      expect(sql).toContain('"operator_approved" = true');
+      expect(sql).toContain('"operator_rationale" IS NULL');
+    });
+  });
+
   describe('resolutionDate sync', () => {
     it('should include resolutionDate in create when pair has resolutionDate', async () => {
       const pair = makePair({

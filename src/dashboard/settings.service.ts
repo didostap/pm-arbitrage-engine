@@ -28,6 +28,7 @@ import { TelegramAlertService } from '../modules/monitoring/telegram-alert.servi
 import { ExitMonitorService } from '../modules/exit-management/exit-monitor.service.js';
 import { DataIngestionService } from '../modules/data-ingestion/data-ingestion.service.js';
 import { CandidateDiscoveryService } from '../modules/contract-matching/candidate-discovery.service.js';
+import { ExternalPairIngestionService } from '../modules/contract-matching/external-pair-ingestion.service.js';
 import { ResolutionPollerService } from '../modules/contract-matching/resolution-poller.service.js';
 import { CalibrationService } from '../modules/contract-matching/calibration.service.js';
 import { SchedulerService } from '../core/scheduler.service.js';
@@ -216,6 +217,11 @@ export class SettingsService implements OnModuleInit {
       'calibration-cron',
       CalibrationService,
       (svc, cfg) => svc.reloadCron(cfg.calibrationCronExpression),
+    );
+    this.tryRegisterHandler(
+      'external-pair-ingestion-cron',
+      ExternalPairIngestionService,
+      (svc, cfg) => svc.reloadCron(cfg.externalPairIngestionCronExpression),
     );
 
     // Polling interval

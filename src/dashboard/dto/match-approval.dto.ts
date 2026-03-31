@@ -5,6 +5,7 @@ import {
   MaxLength,
   IsOptional,
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsUUID,
@@ -109,6 +110,15 @@ export class MatchListQueryDto {
   @IsOptional()
   @IsUUID()
   clusterId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by match origin (DISCOVERY, PREDEXON, ODDSPIPE, MANUAL)',
+    enum: ['DISCOVERY', 'PREDEXON', 'ODDSPIPE', 'MANUAL'],
+  })
+  @IsOptional()
+  @IsIn(['DISCOVERY', 'PREDEXON', 'ODDSPIPE', 'MANUAL'])
+  origin?: 'DISCOVERY' | 'PREDEXON' | 'ODDSPIPE' | 'MANUAL';
 
   @ApiPropertyOptional({
     enum: MatchSortField,
@@ -238,6 +248,11 @@ export class MatchSummaryDto {
       'Positions currently in OPEN, SINGLE_LEG_EXPOSED, or EXIT_PARTIAL status',
   })
   activePositionCount!: number;
+  @ApiProperty({
+    description: 'Match origin (DISCOVERY, PREDEXON, ODDSPIPE, MANUAL)',
+    enum: ['DISCOVERY', 'PREDEXON', 'ODDSPIPE', 'MANUAL'],
+  })
+  origin!: 'DISCOVERY' | 'PREDEXON' | 'ODDSPIPE' | 'MANUAL';
   @ApiProperty() createdAt!: string;
   @ApiProperty() updatedAt!: string;
 }

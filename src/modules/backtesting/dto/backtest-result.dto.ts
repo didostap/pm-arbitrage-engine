@@ -45,6 +45,5 @@ export class BacktestPositionResponseDto {
   fees!: string | null;
   exitReason!: string | null;
   holdingHours!: string | null;
-  qualityFlags!: Record<string, unknown> | null;
   createdAt!: string;
 }

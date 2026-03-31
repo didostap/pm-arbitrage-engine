@@ -278,6 +278,11 @@ export const EVENT_NAMES = {
   /** Emitted after every incremental refresh with per-source summary */
   INCREMENTAL_DATA_FRESHNESS_UPDATED:
     'backtesting.incremental.freshness-updated',
+
+  // [Story 10-9-7] External Pair Ingestion Events
+  /** Emitted when external pair ingestion run completes with per-source stats */
+  EXTERNAL_PAIR_INGESTION_RUN_COMPLETED:
+    'contract.external-pair-ingestion.run_completed',
 } as const;
 
 /**

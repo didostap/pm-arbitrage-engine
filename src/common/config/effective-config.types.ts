@@ -133,6 +133,13 @@ export interface EffectiveConfig {
   stalenessThresholdOddspipeMs: number;
   stalenessThresholdValidationMs: number;
 
+  // --- External Pair Ingestion ---
+  externalPairIngestionCronExpression: string;
+  externalPairIngestionEnabled: boolean;
+  externalPairDedupTitleThreshold: number;
+  externalPairLlmConcurrency: number;
+  externalPairCatalogMatchThreshold: number;
+
   // --- Exit Mode ---
   exitMode: string;
   exitEdgeEvapMultiplier: number;

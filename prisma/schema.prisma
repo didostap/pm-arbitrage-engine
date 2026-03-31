@@ -156,6 +156,13 @@ model EngineConfig {
   stalenessThresholdOddspipeMs        Int?     @map("staleness_threshold_oddspipe_ms")
   stalenessThresholdValidationMs      Int?     @map("staleness_threshold_validation_ms")
 
+  // --- External Pair Ingestion (4) ---
+  externalPairIngestionCronExpression String?  @map("external_pair_ingestion_cron_expression")
+  externalPairIngestionEnabled         Boolean? @map("external_pair_ingestion_enabled")
+  externalPairDedupTitleThreshold      Float?   @map("external_pair_dedup_title_threshold")
+  externalPairLlmConcurrency           Int?     @map("external_pair_llm_concurrency")
+  externalPairCatalogMatchThreshold    Float?   @map("external_pair_catalog_match_threshold")
+
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -252,6 +259,7 @@ model ContractMatch {
   polymarketOutcomeLabel    String?   @map("polymarket_outcome_label")
   kalshiOutcomeLabel        String?   @map("kalshi_outcome_label")
   clusterId                 String?   @map("cluster_id")
+  origin                    MatchOrigin @default(DISCOVERY) @map("origin")
   lastAnnualizedReturn      Decimal?  @map("last_annualized_return") @db.Decimal(20, 8)
   lastNetEdge               Decimal?  @map("last_net_edge") @db.Decimal(20, 8)
   lastComputedAt            DateTime? @map("last_computed_at") @db.Timestamptz
@@ -272,6 +280,7 @@ model ContractMatch {
   @@index([lastAnnualizedReturn])
   @@index([lastNetEdge])
   @@index([lastComputedAt])
+  @@index([origin])
   @@map("contract_matches")
 }
 
@@ -293,6 +302,14 @@ model RiskState {
 
   @@unique([singletonKey, mode])
   @@map("risk_states")
+}
+
+// Match origin enum for tracking how a contract match was discovered
+enum MatchOrigin {
+  DISCOVERY
+  PREDEXON
+  ODDSPIPE
+  MANUAL
 }
 
 // Order status enum for tracking order lifecycle
@@ -485,7 +502,6 @@ model HistoricalPrice {
   volume          Decimal?             @db.Decimal(20, 6)
   openInterest    Decimal?             @map("open_interest") @db.Decimal(20, 6)
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
-  qualityFlags    Json?                @map("quality_flags")
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
   @@unique([platform, contractId, source, intervalMinutes, timestamp])
@@ -507,7 +523,6 @@ model HistoricalTrade {
   side            String
   timestamp       DateTime             @db.Timestamptz
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
-  qualityFlags    Json?                @map("quality_flags")
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
   @@unique([platform, contractId, source, externalTradeId])
@@ -536,7 +551,6 @@ model HistoricalDepth {
   timestamp       DateTime             @db.Timestamptz
   updateType      String?              @map("update_type") // 'snapshot' | 'price_change' | null
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
-  qualityFlags    Json?                @map("quality_flags")
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
   @@unique([platform, contractId, source, timestamp])
@@ -582,6 +596,28 @@ model MatchValidationReport {
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("match_validation_reports")
+}
+
+// Ingestion quality assessment report — one row per contract+source assessment
+// Replaces per-row qualityFlags JSONB on historical tables (which caused ~50GB bloat)
+model IngestionQualityReport {
+  id              Int      @id @default(autoincrement())
+  matchId         String   @map("match_id")
+  contractId      String   @map("contract_id")
+  platform        String
+  source          String
+  assessmentType  String   @map("assessment_type") // 'price' | 'trade' | 'depth' | 'survivorship' | 'cross_source'
+  dateRangeStart  DateTime @map("date_range_start") @db.Timestamptz
+  dateRangeEnd    DateTime @map("date_range_end") @db.Timestamptz
+  qualityFlags    Json     @map("quality_flags")
+  correlationId   String?  @map("correlation_id")
+  recordsAssessed Int      @map("records_assessed")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([matchId, assessmentType])
+  @@index([contractId, source])
+  @@index([createdAt])
+  @@map("ingestion_quality_reports")
 }
 
 // Backtest run status lifecycle (Story 10-9-3)
@@ -659,7 +695,6 @@ model BacktestPosition {
   fees                  Decimal?             @map("fees") @db.Decimal(20, 6)
   exitReason            BacktestExitReason?  @map("exit_reason")
   holdingHours          Decimal?             @map("holding_hours") @db.Decimal(20, 6)
-  qualityFlags          Json?                @map("quality_flags")
   createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz
   run                   BacktestRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
 

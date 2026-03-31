@@ -4,22 +4,41 @@ import { SYSTEM_HEALTH_ERROR_CODES } from '../../../common/errors/system-health-
 
 function createPredexonPair(overrides?: Record<string, unknown>) {
   return {
-    polymarket_condition_id: '0xabc123',
-    kalshi_ticker: 'KXBTC-24DEC31',
-    polymarket_title: 'Will Bitcoin exceed $100k?',
-    kalshi_title: 'Bitcoin above $100,000',
-    similarity: 0.97,
-    ...overrides,
+    POLYMARKET: {
+      condition_id: '0xabc123',
+      title: 'Will Bitcoin exceed $100k?',
+      ...((overrides?.POLYMARKET as Record<string, unknown>) ?? {}),
+    },
+    KALSHI: {
+      market_ticker: 'KXBTC-24DEC31',
+      title: 'Bitcoin above $100,000',
+      ...((overrides?.KALSHI as Record<string, unknown>) ?? {}),
+    },
+    similarity:
+      overrides?.similarity !== undefined ? overrides.similarity : 0.97,
+    earliest_expiration_ts:
+      overrides?.earliest_expiration_ts !== undefined
+        ? overrides.earliest_expiration_ts
+        : 1798675200, // 2026-12-31T00:00:00Z
+    ...Object.fromEntries(
+      Object.entries(overrides ?? {}).filter(
+        ([k]) =>
+          ![
+            'POLYMARKET',
+            'KALSHI',
+            'similarity',
+            'earliest_expiration_ts',
+          ].includes(k),
+      ),
+    ),
   };
 }
 
 function createPredexonPairResponse(
   pairs: ReturnType<typeof createPredexonPair>[],
   pagination?: {
-    total?: number;
-    limit?: number;
-    offset?: number;
     has_more?: boolean;
+    pagination_key?: string;
   },
 ) {
   return {
@@ -27,12 +46,12 @@ function createPredexonPairResponse(
     status: 200,
     json: () =>
       Promise.resolve({
-        data: pairs,
+        pairs,
         pagination: {
-          total: pagination?.total ?? pairs.length,
-          limit: pagination?.limit ?? 100,
-          offset: pagination?.offset ?? 0,
+          limit: 100,
+          count: pairs.length,
           has_more: pagination?.has_more ?? false,
+          pagination_key: pagination?.pagination_key,
         },
       }),
   };
@@ -83,21 +102,56 @@ describe('PredexonMatchingService', () => {
         source: 'predexon',
         similarity: 0.97,
         spreadData: null,
+        settlementDate: new Date('2026-12-31T00:00:00.000Z'),
       }),
     );
   });
 
-  it('[P1] should paginate with offset until has_more === false', async () => {
+  it('[P1] should map earliest_expiration_ts to settlementDate', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        createPredexonPairResponse([
+          createPredexonPair({ earliest_expiration_ts: 1751328000 }), // 2025-07-01
+        ]),
+      ),
+    );
+
+    const service = createService();
+    const pairs = await service.fetchMatchedPairs();
+
+    expect(pairs[0]!.settlementDate).toEqual(new Date(1751328000 * 1000));
+  });
+
+  it('[P1] should leave settlementDate undefined when no expiration timestamp available', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          createPredexonPairResponse([
+            createPredexonPair({ earliest_expiration_ts: null }),
+          ]),
+        ),
+    );
+
+    const service = createService();
+    const pairs = await service.fetchMatchedPairs();
+
+    expect(pairs[0]!.settlementDate).toBeUndefined();
+  });
+
+  it('[P1] should paginate with pagination_key until has_more === false', async () => {
     const page1Pairs = Array.from({ length: 2 }, (_, i) =>
       createPredexonPair({
-        polymarket_condition_id: `0xpage1_${i}`,
-        kalshi_ticker: `K-P1-${i}`,
+        POLYMARKET: { condition_id: `0xpage1_${i}`, title: `P1 ${i}` },
+        KALSHI: { market_ticker: `K-P1-${i}`, title: `K1 ${i}` },
       }),
     );
     const page2Pairs = [
       createPredexonPair({
-        polymarket_condition_id: '0xpage2_0',
-        kalshi_ticker: 'K-P2-0',
+        POLYMARKET: { condition_id: '0xpage2_0', title: 'P2 0' },
+        KALSHI: { market_ticker: 'K-P2-0', title: 'K2 0' },
       }),
     ];
 
@@ -105,17 +159,12 @@ describe('PredexonMatchingService', () => {
       .fn()
       .mockResolvedValueOnce(
         createPredexonPairResponse(page1Pairs, {
-          total: 3,
-          limit: 100,
-          offset: 0,
           has_more: true,
+          pagination_key: 'cursor-abc',
         }),
       )
       .mockResolvedValueOnce(
         createPredexonPairResponse(page2Pairs, {
-          total: 3,
-          limit: 100,
-          offset: 100,
           has_more: false,
         }),
       );
@@ -127,8 +176,8 @@ describe('PredexonMatchingService', () => {
 
     expect(pairs).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // Verify offset pagination in URL
-    expect(fetchMock.mock.calls[1]![0]).toContain('offset=100');
+    // Verify cursor-based pagination in URL
+    expect(fetchMock.mock.calls[1]![0]).toContain('pagination_key=cursor-abc');
   });
 
   it('[P1] should include lowercase x-api-key header from PREDEXON_API_KEY config', async () => {
@@ -154,8 +203,8 @@ describe('PredexonMatchingService', () => {
     const page1 = [createPredexonPair()];
     const page2 = [
       createPredexonPair({
-        polymarket_condition_id: '0xp2',
-        kalshi_ticker: 'K-P2',
+        POLYMARKET: { condition_id: '0xp2', title: 'P2' },
+        KALSHI: { market_ticker: 'K-P2', title: 'K2' },
       }),
     ];
 
@@ -166,9 +215,8 @@ describe('PredexonMatchingService', () => {
         timestamps.push(Date.now());
         return Promise.resolve(
           createPredexonPairResponse(page1, {
-            total: 2,
-            offset: 0,
             has_more: true,
+            pagination_key: 'cursor-1',
           }),
         );
       })
@@ -176,8 +224,6 @@ describe('PredexonMatchingService', () => {
         timestamps.push(Date.now());
         return Promise.resolve(
           createPredexonPairResponse(page2, {
-            total: 2,
-            offset: 100,
             has_more: false,
           }),
         );
@@ -280,5 +326,50 @@ describe('PredexonMatchingService', () => {
     const pairs = await service.fetchMatchedPairs();
 
     expect(pairs).toEqual([]);
+  });
+
+  // Story 10-9-7: IExternalPairProvider adapter tests
+  describe('IExternalPairProvider adapter', () => {
+    it('[P0] fetchPairs() should delegate to existing fetchMatchedPairs() and return ExternalMatchedPair[]', async () => {
+      const pair = createPredexonPair();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          createPredexonPairResponse([pair], {
+            has_more: false,
+          }),
+        ),
+      );
+
+      const service = createService();
+      const spy = vi.spyOn(service, 'fetchMatchedPairs');
+      const result = await service.fetchPairs();
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(result).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            polymarketId: '0xabc123',
+            kalshiId: 'KXBTC-24DEC31',
+            source: 'predexon',
+          }),
+        ]),
+      );
+    });
+
+    it('[P0] getSourceId() should return "predexon"', () => {
+      const service = createService();
+      expect(service.getSourceId()).toBe('predexon');
+    });
+
+    it('[P1] fetchPairs() should propagate errors from fetchMatchedPairs() without adding retry layer', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockRejectedValue(new Error('Network failure')),
+      );
+
+      const service = createService();
+      await expect(service.fetchPairs()).rejects.toThrow();
+    });
   });
 });

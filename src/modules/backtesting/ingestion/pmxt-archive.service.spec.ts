@@ -430,7 +430,7 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:05:00Z'),
           updateType: 'snapshot' as const,
-          qualityFlags: null,
+
         },
         {
           platform: 'POLYMARKET',
@@ -440,7 +440,7 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.59'), size: new Decimal('90') }],
           timestamp: new Date('2025-06-01T00:35:00Z'),
           updateType: 'snapshot' as const,
-          qualityFlags: null,
+
         },
         {
           platform: 'POLYMARKET',
@@ -450,7 +450,7 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.58'), size: new Decimal('70') }],
           timestamp: new Date('2025-06-01T01:10:00Z'),
           updateType: 'snapshot' as const,
-          qualityFlags: null,
+
         },
       ];
       mockServiceMethods(service, depths);
@@ -478,7 +478,6 @@ describe('PmxtArchiveService', () => {
         asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
         timestamp: new Date(Date.UTC(2025, 0, 1, 0, 0, 0) + i * 60 * 60 * 1000),
         updateType: 'snapshot' as const,
-        qualityFlags: null,
       }));
       mockServiceMethods(service, records);
 
@@ -507,7 +506,7 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:00:00Z'),
           updateType: 'snapshot' as const,
-          qualityFlags: null,
+
         },
       ]);
 
@@ -533,7 +532,7 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:00:00Z'),
           updateType: 'snapshot' as const,
-          qualityFlags: null,
+
         },
       ]);
 
@@ -560,7 +559,6 @@ describe('PmxtArchiveService', () => {
           new Date('2025-06-01T00:00:00Z').getTime() + i * 60 * 60 * 1000,
         ),
         updateType: 'snapshot' as const,
-        qualityFlags: null,
       }));
       mockServiceMethods(service, depths);
 

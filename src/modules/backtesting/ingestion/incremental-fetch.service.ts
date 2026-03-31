@@ -26,6 +26,8 @@ interface TargetContract {
 
 /** 30 days in ms — OddsPipe free tier rolling window */
 const ODDSPIPE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+/** 90 days in ms — default lookback for first-time incremental ingestion */
+const DEFAULT_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** Retry strategy for per-source fetches: 3 attempts, 1s/2s/4s */
 const FETCH_RETRY = {
@@ -73,80 +75,172 @@ export class IncrementalFetchService {
     end: Date,
     results: Map<HistoricalDataSource, FetchResult>,
   ): Promise<void> {
-    // Kalshi
+    // Kalshi — batch-fetch incremental starts for all contracts, then ingest sequentially
+    // Quality checks collected during fetch, run after successful fetch (outside retry)
+    let kalshiQualityTasks: Array<{
+      matchId: string;
+      target: TargetContract;
+      dateRange: { start: Date; end: Date };
+    }> = [];
+
     await this.fetchSource(
       'KALSHI_API' as HistoricalDataSource,
       results,
       async () => {
+        kalshiQualityTasks = []; // Reset on retry
+        const kalshiTickers = [...targets.values()].map((t) => t.kalshiTicker);
+        const [priceStarts, tradeStarts] = await Promise.all([
+          this.batchGetIncrementalStarts(
+            'KALSHI_API' as HistoricalDataSource,
+            kalshiTickers,
+            'price',
+          ),
+          this.batchGetIncrementalStarts(
+            'KALSHI_API' as HistoricalDataSource,
+            kalshiTickers,
+            'trade',
+          ),
+        ]);
+
         let totalRecords = 0;
         let contractCount = 0;
+
         for (const [matchId, target] of targets) {
-          const start = await this.getIncrementalStart(
-            'KALSHI_API' as HistoricalDataSource,
-            target.kalshiTicker,
-          );
-          const dateRange = { start, end };
-          const prices = await this.kalshiHistorical.ingestPrices(
-            target.kalshiTicker,
-            dateRange,
-          );
-          const trades = await this.kalshiHistorical.ingestTrades(
-            target.kalshiTicker,
-            dateRange,
-          );
-          totalRecords += prices.recordCount + trades.recordCount;
-          contractCount++;
-          await this.runQualityCheck(matchId, target, dateRange);
+          try {
+            const priceStart = priceStarts.get(target.kalshiTicker)!;
+            const tradeStart = tradeStarts.get(target.kalshiTicker)!;
+            const prices = await this.kalshiHistorical.ingestPrices(
+              target.kalshiTicker,
+              { start: priceStart, end },
+            );
+            const trades = await this.kalshiHistorical.ingestTrades(
+              target.kalshiTicker,
+              { start: tradeStart, end },
+            );
+            totalRecords += prices.recordCount + trades.recordCount;
+            contractCount++;
+            const qualityStart = new Date(
+              Math.min(priceStart.getTime(), tradeStart.getTime()),
+            );
+            kalshiQualityTasks.push({
+              matchId,
+              target,
+              dateRange: { start: qualityStart, end },
+            });
+          } catch (error) {
+            this.logger.error(
+              `Kalshi fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            throw error;
+          }
         }
         return { recordCount: totalRecords, contractCount };
       },
     );
 
-    // Polymarket
+    for (const task of kalshiQualityTasks) {
+      await this.runQualityCheck(task.matchId, task.target, task.dateRange);
+    }
+
+    // Polymarket — batch-fetch incremental starts, then ingest with concurrency
+    // Quality checks collected during fetch, run after successful fetch (outside retry)
+    let polyQualityTasks: Array<{
+      matchId: string;
+      target: TargetContract;
+      dateRange: { start: Date; end: Date };
+    }> = [];
+
     await this.fetchSource(
       'POLYMARKET_API' as HistoricalDataSource,
       results,
       async () => {
+        polyQualityTasks = []; // Reset on retry
+        const polyTokenIds = [...targets.values()].map(
+          (t) => t.polymarketTokenId,
+        );
+        const priceStarts = await this.batchGetIncrementalStarts(
+          'POLYMARKET_API' as HistoricalDataSource,
+          polyTokenIds,
+          'price',
+        );
+
         let totalRecords = 0;
         let contractCount = 0;
-        for (const [matchId, target] of targets) {
-          const start = await this.getIncrementalStart(
-            'POLYMARKET_API' as HistoricalDataSource,
-            target.polymarketTokenId,
-          );
-          const dateRange = { start, end };
-          const prices = await this.polymarketHistorical.ingestPrices(
-            target.polymarketTokenId,
-            dateRange,
-          );
-          totalRecords += prices.recordCount;
-          contractCount++;
-          await this.runQualityCheck(matchId, target, dateRange);
+        const POLY_BATCH = 5;
+        const entries = [...targets.entries()];
+
+        for (let i = 0; i < entries.length; i += POLY_BATCH) {
+          try {
+            const batch = entries.slice(i, i + POLY_BATCH);
+            const batchResults = await Promise.allSettled(
+              batch.map(async ([matchId, target]) => {
+                const start = priceStarts.get(target.polymarketTokenId)!;
+                const dateRange = { start, end };
+                const prices = await this.polymarketHistorical.ingestPrices(
+                  target.polymarketTokenId,
+                  dateRange,
+                );
+                polyQualityTasks.push({ matchId, target, dateRange });
+                return prices.recordCount;
+              }),
+            );
+            for (const result of batchResults) {
+              if (result.status === 'fulfilled') {
+                totalRecords += result.value;
+                contractCount++;
+              } else {
+                this.logger.warn(
+                  `Polymarket contract ingestion failed: ${result.reason}`,
+                );
+              }
+            }
+          } catch (error) {
+            this.logger.error(
+              `Polymarket fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            throw error;
+          }
         }
         return { recordCount: totalRecords, contractCount };
       },
     );
 
-    // Goldsky (Polymarket on-chain trades)
+    for (const task of polyQualityTasks) {
+      await this.runQualityCheck(task.matchId, task.target, task.dateRange);
+    }
+
+    // Goldsky (Polymarket on-chain trades) — batch-fetch incremental starts
     await this.fetchSource(
       'GOLDSKY' as HistoricalDataSource,
       results,
       async () => {
+        const polyTokenIds = [...targets.values()].map(
+          (t) => t.polymarketTokenId,
+        );
+        const tradeStarts = await this.batchGetIncrementalStarts(
+          'GOLDSKY' as HistoricalDataSource,
+          polyTokenIds,
+          'trade',
+        );
+
         let totalRecords = 0;
         let contractCount = 0;
         for (const [, target] of targets) {
-          const start = await this.getIncrementalStart(
-            'GOLDSKY' as HistoricalDataSource,
-            target.polymarketTokenId,
-            'trade',
-          );
-          const dateRange = { start, end };
-          const trades = await this.polymarketHistorical.ingestTrades(
-            target.polymarketTokenId,
-            dateRange,
-          );
-          totalRecords += trades.recordCount;
-          contractCount++;
+          try {
+            const start = tradeStarts.get(target.polymarketTokenId)!;
+            const dateRange = { start, end };
+            const trades = await this.polymarketHistorical.ingestTrades(
+              target.polymarketTokenId,
+              dateRange,
+            );
+            totalRecords += trades.recordCount;
+            contractCount++;
+          } catch (error) {
+            this.logger.error(
+              `Goldsky fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            throw error;
+          }
         }
         return { recordCount: totalRecords, contractCount };
       },
@@ -297,24 +391,63 @@ export class IncrementalFetchService {
     }
   }
 
-  private async getIncrementalStart(
+  /**
+   * Batch-fetch incremental start timestamps for multiple contracts concurrently.
+   * Uses parallel aggregate queries (one per contract) instead of sequential calls.
+   */
+  private async batchGetIncrementalStarts(
     source: HistoricalDataSource,
-    contractId: string,
+    contractIds: string[],
     table: 'price' | 'trade' | 'depth' = 'price',
-  ): Promise<Date> {
+  ): Promise<Map<string, Date>> {
+    if (contractIds.length === 0) return new Map();
+
     const model =
       table === 'trade'
         ? this.prisma.historicalTrade
         : table === 'depth'
           ? this.prisma.historicalDepth
           : this.prisma.historicalPrice;
-    const result = await (
-      model as typeof this.prisma.historicalPrice
-    ).aggregate({
-      where: { source, contractId },
-      _max: { timestamp: true },
-    });
-    return result._max.timestamp ?? new Date(0);
+
+    const defaultStart = new Date(Date.now() - DEFAULT_LOOKBACK_MS);
+
+    // Process in batches of 10 to avoid exhausting the Prisma connection pool (limit: 21)
+    const BATCH_SIZE = 10;
+    const results: Array<{ contractId: string; timestamp: Date }> = [];
+    for (let i = 0; i < contractIds.length; i += BATCH_SIZE) {
+      const batch = contractIds.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (contractId) => {
+          const result = await (
+            model as typeof this.prisma.historicalPrice
+          ).aggregate({
+            where: { source, contractId },
+            _max: { timestamp: true },
+          });
+          return {
+            contractId,
+            timestamp: result._max.timestamp ?? defaultStart,
+          };
+        }),
+      );
+      results.push(...batchResults);
+    }
+
+    return new Map(results.map((r) => [r.contractId, r.timestamp]));
+  }
+
+  /** Single-contract convenience wrapper — used by OddsPipe per-contract error isolation */
+  private async getIncrementalStart(
+    source: HistoricalDataSource,
+    contractId: string,
+    table: 'price' | 'trade' | 'depth' = 'price',
+  ): Promise<Date> {
+    const map = await this.batchGetIncrementalStarts(
+      source,
+      [contractId],
+      table,
+    );
+    return map.get(contractId)!;
   }
 
   private async runQualityCheck(

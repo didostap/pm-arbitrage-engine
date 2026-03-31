@@ -18,11 +18,19 @@ import { ResolutionPollerService } from './resolution-poller.service.js';
 import { CalibrationService } from './calibration.service.js';
 import { CalibrationController } from './calibration.controller.js';
 import { ConnectorModule } from '../../connectors/connector.module.js';
+import { ExternalPairIngestionService } from './external-pair-ingestion.service.js';
+import { ExternalPairProcessorService } from './external-pair-processor.service.js';
+import { ExternalPairEnrichmentService } from './external-pair-enrichment.service.js';
+import { BacktestingModule } from '../backtesting/backtesting.module.js';
 
 export { SCORING_STRATEGY_TOKEN };
 
 @Module({
-  imports: [forwardRef(() => ConnectorModule), MonitoringModule],
+  imports: [
+    forwardRef(() => ConnectorModule),
+    MonitoringModule,
+    forwardRef(() => BacktestingModule),
+  ],
   controllers: [CalibrationController],
   providers: [
     ContractPairLoaderService,
@@ -43,6 +51,9 @@ export { SCORING_STRATEGY_TOKEN };
     CandidateDiscoveryService,
     ResolutionPollerService,
     CalibrationService,
+    ExternalPairIngestionService,
+    ExternalPairProcessorService,
+    ExternalPairEnrichmentService,
   ],
   exports: [
     ContractPairLoaderService,

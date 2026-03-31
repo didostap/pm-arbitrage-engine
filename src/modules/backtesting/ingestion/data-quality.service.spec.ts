@@ -358,7 +358,7 @@ describe('DataQualityService', () => {
         ],
         timestamp: new Date('2025-06-01T00:00:00Z'),
         updateType: 'snapshot' as const,
-        qualityFlags: null,
+
         ...overrides,
       };
     }
@@ -459,6 +459,121 @@ describe('DataQualityService', () => {
 
       const flags = service.assessDepthQuality(depths as any);
       expect(flags.hasGaps).toBe(true);
+    });
+  });
+
+  describe('detail array capping', () => {
+    it('should cap gapDetails at 50 entries in assessPriceQuality', () => {
+      const service = createDataQualityService();
+
+      // Create 200 prices with gaps between each (10-min gap, threshold 5min for 1-min interval)
+      const prices = Array.from({ length: 200 }, (_, i) =>
+        createNormalizedPrice({
+          timestamp: new Date(
+            new Date('2025-01-01T00:00:00Z').getTime() + i * 10 * 60 * 1000,
+          ),
+        }),
+      );
+
+      const flags = service.assessPriceQuality(prices, 1);
+      expect(flags.hasGaps).toBe(true);
+      expect(flags.gapDetails.length).toBe(50);
+    });
+
+    it('should cap jumpDetails at 50 entries in assessPriceQuality', () => {
+      const service = createDataQualityService();
+
+      // Create 200 prices with alternating large jumps (>20%)
+      const prices = Array.from({ length: 200 }, (_, i) =>
+        createNormalizedPrice({
+          close: new Decimal(i % 2 === 0 ? '0.50' : '0.80'),
+          timestamp: new Date(
+            new Date('2025-01-01T00:00:00Z').getTime() + i * 60 * 1000,
+          ),
+        }),
+      );
+
+      const flags = service.assessPriceQuality(prices, 1);
+      expect(flags.hasSuspiciousJumps).toBe(true);
+      expect(flags.jumpDetails.length).toBe(50);
+    });
+
+    it('should cap gapDetails at 50 entries in assessTradeQuality', () => {
+      const service = createDataQualityService();
+
+      // Create 200 trades with >1h gaps between each
+      const trades = Array.from({ length: 200 }, (_, i) =>
+        createNormalizedTrade({
+          timestamp: new Date(
+            new Date('2025-01-01T00:00:00Z').getTime() + i * 2 * 60 * 60 * 1000,
+          ),
+        }),
+      );
+
+      const flags = service.assessTradeQuality(trades);
+      expect(flags.hasGaps).toBe(true);
+      expect(flags.gapDetails.length).toBe(50);
+    });
+
+    it('should cap spreadDetails at 50 entries in assessDepthQuality', () => {
+      const service = createDataQualityService();
+
+      // Create 200 depth snapshots with wide spreads (>5%)
+      const depths = Array.from({ length: 200 }, (_, i) => ({
+        platform: 'polymarket',
+        contractId: '0xTokenABC',
+        source: 'PMXT_ARCHIVE' as any,
+        bids: [{ price: new Decimal('0.40'), size: new Decimal('100') }],
+        asks: [{ price: new Decimal('0.50'), size: new Decimal('100') }],
+        timestamp: new Date(
+          new Date('2025-06-01T00:00:00Z').getTime() + i * 60 * 1000,
+        ),
+        updateType: 'snapshot' as const,
+      }));
+
+      const flags = service.assessDepthQuality(depths as any);
+      expect(flags.hasWideSpreads).toBe(true);
+      expect(flags.spreadDetails!.length).toBe(50);
+    });
+
+    it('should preserve boolean flags even when arrays are truncated', () => {
+      const service = createDataQualityService();
+
+      const prices = Array.from({ length: 200 }, (_, i) =>
+        createNormalizedPrice({
+          close: new Decimal(i % 2 === 0 ? '0.50' : '0.80'),
+          timestamp: new Date(
+            new Date('2025-01-01T00:00:00Z').getTime() + i * 10 * 60 * 1000,
+          ),
+        }),
+      );
+
+      const flags = service.assessPriceQuality(prices, 1);
+      // Both boolean flags should be true even though arrays are capped
+      expect(flags.hasGaps).toBe(true);
+      expect(flags.hasSuspiciousJumps).toBe(true);
+      expect(flags.gapDetails.length).toBeLessThanOrEqual(50);
+      expect(flags.jumpDetails.length).toBeLessThanOrEqual(50);
+    });
+  });
+
+  describe('cross-source deviation query limit', () => {
+    it('should use take limit when querying cross-source prices', async () => {
+      const mockPrisma = {
+        historicalPrice: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as any;
+
+      const service = createDataQualityService(undefined, mockPrisma);
+      await service.assessCrossSourceDeviation('0xToken', {
+        start: new Date('2025-01-01'),
+        end: new Date('2025-04-01'),
+      });
+
+      expect(mockPrisma.historicalPrice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 10_000 }),
+      );
     });
   });
 

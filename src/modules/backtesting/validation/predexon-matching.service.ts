@@ -4,23 +4,31 @@ import {
   SystemHealthError,
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../../../common/errors/system-health-error';
+import type { IExternalPairProvider } from '../../../common/interfaces/external-pair-provider.interface';
 import type { ExternalMatchedPair } from '../types/match-validation.types';
 
 interface PredexonPair {
-  polymarket_condition_id: string;
-  kalshi_ticker: string;
-  polymarket_title: string;
-  kalshi_title: string;
-  similarity: number | null;
+  POLYMARKET?: {
+    condition_id?: string;
+    title?: string;
+    expiration_ts?: number;
+  };
+  KALSHI?: {
+    market_ticker?: string;
+    title?: string;
+    expiration_ts?: number;
+  };
+  similarity?: number | null;
+  earliest_expiration_ts?: number;
 }
 
 interface PredexonResponse {
-  data: PredexonPair[];
+  pairs: PredexonPair[];
   pagination: {
-    total: number;
     limit: number;
-    offset: number;
+    count: number;
     has_more: boolean;
+    pagination_key?: string;
   };
 }
 
@@ -31,7 +39,7 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 100; // Guard against infinite pagination loops
 
 @Injectable()
-export class PredexonMatchingService {
+export class PredexonMatchingService implements IExternalPairProvider {
   private readonly logger = new Logger(PredexonMatchingService.name);
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -46,7 +54,7 @@ export class PredexonMatchingService {
 
   async fetchMatchedPairs(): Promise<ExternalMatchedPair[]> {
     const allPairs: ExternalMatchedPair[] = [];
-    let offset = 0;
+    let paginationKey: string | undefined;
     let hasMore = true;
     let pageCount = 0;
 
@@ -58,7 +66,12 @@ export class PredexonMatchingService {
         break;
       }
 
-      const url = `${this.baseUrl}/v2/matching-markets/pairs?limit=${PAGE_SIZE}&offset=${offset}`;
+      const params = new URLSearchParams();
+      params.set('limit', String(PAGE_SIZE));
+      if (paginationKey) {
+        params.set('pagination_key', paginationKey);
+      }
+      const url = `${this.baseUrl}/v2/matching-markets/pairs?${params.toString()}`;
       const response = await this.fetchWithRetry(url);
 
       if (response === null) {
@@ -66,11 +79,11 @@ export class PredexonMatchingService {
         return allPairs;
       }
 
-      // P-12: Validate response shape before use
-      if (!Array.isArray(response.data)) {
+      // Validate response shape before use
+      if (!Array.isArray(response.pairs)) {
         throw new SystemHealthError(
           SYSTEM_HEALTH_ERROR_CODES.BACKTEST_PREDEXON_API_ERROR,
-          `Predexon API returned unexpected response shape: missing or non-array "data" field`,
+          'Predexon API returned unexpected response shape: missing or non-array "pairs" field',
           'error',
           'predexon',
         );
@@ -81,30 +94,38 @@ export class PredexonMatchingService {
       ) {
         throw new SystemHealthError(
           SYSTEM_HEALTH_ERROR_CODES.BACKTEST_PREDEXON_API_ERROR,
-          `Predexon API returned unexpected response shape: missing or malformed "pagination" field`,
+          'Predexon API returned unexpected response shape: missing or malformed "pagination" field',
           'error',
           'predexon',
         );
       }
 
-      if (response.data.length === 0) {
+      if (response.pairs.length === 0) {
         break; // Empty page — no more data
       }
 
-      for (const pair of response.data) {
+      for (const pair of response.pairs) {
+        const expirationTs =
+          pair.earliest_expiration_ts ??
+          pair.POLYMARKET?.expiration_ts ??
+          pair.KALSHI?.expiration_ts;
+
         allPairs.push({
-          polymarketId: pair.polymarket_condition_id,
-          kalshiId: pair.kalshi_ticker,
-          polymarketTitle: pair.polymarket_title,
-          kalshiTitle: pair.kalshi_title,
+          polymarketId: pair.POLYMARKET?.condition_id ?? null,
+          kalshiId: pair.KALSHI?.market_ticker ?? null,
+          polymarketTitle: pair.POLYMARKET?.title ?? '',
+          kalshiTitle: pair.KALSHI?.title ?? '',
           source: 'predexon',
-          similarity: pair.similarity,
+          similarity: pair.similarity ?? null,
           spreadData: null,
+          settlementDate: expirationTs
+            ? new Date(expirationTs * 1000)
+            : undefined,
         });
       }
 
       hasMore = response.pagination.has_more;
-      offset += PAGE_SIZE;
+      paginationKey = response.pagination.pagination_key;
       pageCount++;
     }
 
@@ -131,6 +152,14 @@ export class PredexonMatchingService {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchPairs(): Promise<ExternalMatchedPair[]> {
+    return this.fetchMatchedPairs();
+  }
+
+  getSourceId(): string {
+    return 'predexon';
   }
 
   private async fetchWithRetry(url: string): Promise<PredexonResponse | null> {

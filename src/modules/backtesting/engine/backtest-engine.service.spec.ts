@@ -1070,7 +1070,6 @@ describe('BacktestEngineService', () => {
             fees: new Decimal('2'),
             exitReason: 'PROFIT_CAPTURE',
             holdingHours: new Decimal('24'),
-            qualityFlags: null,
           },
         ],
       });

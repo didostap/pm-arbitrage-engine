@@ -49,6 +49,7 @@ export class MatchApprovalService {
     clusterId?: string,
     sortBy?: MatchSortField,
     order?: SortOrder,
+    origin?: 'DISCOVERY' | 'PREDEXON' | 'ODDSPIPE' | 'MANUAL',
   ): Promise<{
     data: MatchSummaryDto[];
     count: number;
@@ -59,6 +60,7 @@ export class MatchApprovalService {
       ...this.buildWhereFilter(status),
       ...this.buildResolutionFilter(resolution),
       ...(clusterId ? { clusterId } : {}),
+      ...(origin ? { origin } : {}),
     };
     const skip = (page - 1) * limit;
 
@@ -345,6 +347,7 @@ export class MatchApprovalService {
             slug: match.cluster.slug,
           }
         : null,
+      origin: match.origin,
       positionCount,
       activePositionCount,
       createdAt: match.createdAt.toISOString(),

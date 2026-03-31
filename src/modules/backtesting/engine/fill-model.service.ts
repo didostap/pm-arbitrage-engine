@@ -9,7 +9,6 @@ import type { NormalizedOrderBook } from '../../../common/types/normalized-order
 import type { ContractId } from '../../../common/types/branded.type';
 import { PlatformId } from '../../../common/types/platform.type';
 import type { NormalizedHistoricalDepth } from '../types/normalized-historical.types';
-import type { DataQualityFlags } from '../../../common/types/historical-data.types';
 
 @Injectable()
 export class FillModelService {
@@ -70,7 +69,6 @@ export class FillModelService {
       asks: (asksJson as Array<Record<string, unknown>>).map(parseLevel),
       timestamp: record.timestamp,
       updateType: record.updateType as 'snapshot' | 'price_change' | null,
-      qualityFlags: record.qualityFlags as DataQualityFlags | null,
     };
   }
 

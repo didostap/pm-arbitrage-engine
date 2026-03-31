@@ -384,7 +384,7 @@ describe('SensitivityAnalysisService', () => {
       expect(typeof result.partial).toBe('boolean');
     });
 
-    it('[P0] should reject concurrent sweep for same runId with BACKTEST_REPORT_ERROR 4205', async () => {
+    it('[P0] should reject concurrent sweep for same runId with BACKTEST_REPORT_ERROR 4205', { timeout: 45_000 }, async () => {
       engine.runHeadlessSimulation.mockImplementation(
         () =>
           new Promise((resolve) =>

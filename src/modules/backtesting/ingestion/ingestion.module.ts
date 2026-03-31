@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PersistenceModule } from '../../../common/persistence.module';
+import { ODDSPIPE_PAIR_PROVIDER_TOKEN } from '../../../common/interfaces/external-pair-provider.interface';
 import { KalshiHistoricalService } from './kalshi-historical.service';
 import { PolymarketHistoricalService } from './polymarket-historical.service';
 import { PmxtArchiveService } from './pmxt-archive.service';
@@ -23,7 +24,12 @@ import { ValidationModule } from '../validation/validation.module';
     IngestionOrchestratorService,
     IncrementalIngestionService,
     IncrementalFetchService,
+    { provide: ODDSPIPE_PAIR_PROVIDER_TOKEN, useExisting: OddsPipeService },
   ],
-  exports: [IngestionOrchestratorService, OddsPipeService],
+  exports: [
+    IngestionOrchestratorService,
+    OddsPipeService,
+    ODDSPIPE_PAIR_PROVIDER_TOKEN,
+  ],
 })
 export class IngestionModule {}

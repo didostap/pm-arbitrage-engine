@@ -122,4 +122,27 @@ describe('envSchema', () => {
     expect(result.STALENESS_THRESHOLD_ODDSPIPE_MS).toBe(129_600_000);
     expect(result.STALENESS_THRESHOLD_VALIDATION_MS).toBe(259_200_000);
   });
+
+  // Story 10-9-7: External Pair Ingestion env vars
+  it("[P1] EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION defaults to '0 0 6,18 * * *'", () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION).toBe(
+      '0 0 6,18 * * *',
+    );
+  });
+
+  it('[P1] EXTERNAL_PAIR_INGESTION_ENABLED defaults to true', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.EXTERNAL_PAIR_INGESTION_ENABLED).toBe(true);
+  });
+
+  it('[P1] EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD defaults to 0.45', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD).toBe(0.45);
+  });
+
+  it('[P1] EXTERNAL_PAIR_LLM_CONCURRENCY defaults to 5', () => {
+    const result = envSchema.parse(validEnv);
+    expect(result.EXTERNAL_PAIR_LLM_CONCURRENCY).toBe(5);
+  });
 });

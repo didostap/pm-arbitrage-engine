@@ -575,9 +575,6 @@ export class BacktestEngineService implements IBacktestEngine {
           fees: p.fees?.toFixed(6) ?? null,
           exitReason: p.exitReason,
           holdingHours: p.holdingHours?.toFixed(6) ?? null,
-          qualityFlags: p.qualityFlags
-            ? (p.qualityFlags as Prisma.InputJsonValue)
-            : Prisma.JsonNull,
         })),
       });
     }

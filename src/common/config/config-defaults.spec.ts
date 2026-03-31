@@ -125,6 +125,11 @@ const CATEGORY_B_FIELDS: string[] = [
   'stalenessThresholdPmxtMs',
   'stalenessThresholdOddspipeMs',
   'stalenessThresholdValidationMs',
+  // External Pair Ingestion (Story 10-9-7)
+  'externalPairIngestionCronExpression',
+  'externalPairIngestionEnabled',
+  'externalPairDedupTitleThreshold',
+  'externalPairLlmConcurrency',
 ];
 
 /** Env var keys that correspond to Category B fields */
@@ -217,6 +222,11 @@ const EXPECTED_ENV_KEY_MAPPING: Record<string, string> = {
   stalenessThresholdPmxtMs: 'STALENESS_THRESHOLD_PMXT_MS',
   stalenessThresholdOddspipeMs: 'STALENESS_THRESHOLD_ODDSPIPE_MS',
   stalenessThresholdValidationMs: 'STALENESS_THRESHOLD_VALIDATION_MS',
+  externalPairIngestionCronExpression:
+    'EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION',
+  externalPairIngestionEnabled: 'EXTERNAL_PAIR_INGESTION_ENABLED',
+  externalPairDedupTitleThreshold: 'EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD',
+  externalPairLlmConcurrency: 'EXTERNAL_PAIR_LLM_CONCURRENCY',
 };
 
 describe('CONFIG_DEFAULTS', () => {
@@ -228,7 +238,7 @@ describe('CONFIG_DEFAULTS', () => {
     const categoryBKeys = CATEGORY_B_FIELDS.filter(
       (f) => f !== 'bankrollUsd' && f !== 'paperBankrollUsd',
     );
-    expect(categoryBKeys.length).toBe(86);
+    expect(categoryBKeys.length).toBe(90);
   });
 
   it('[P0] should include bankrollUsd mapped to RISK_BANKROLL_USD', () => {
@@ -357,6 +367,9 @@ describe('CONFIG_DEFAULTS', () => {
     expect(CONFIG_DEFAULTS.autoUnwindEnabled.defaultValue).toBe(false);
     expect(CONFIG_DEFAULTS.adaptiveSequencingEnabled.defaultValue).toBe(true);
     expect(CONFIG_DEFAULTS.incrementalIngestionEnabled.defaultValue).toBe(true);
+    expect(CONFIG_DEFAULTS.externalPairIngestionEnabled.defaultValue).toBe(
+      true,
+    );
   });
 
   it('[P2] should have correct default values for string/enum fields', () => {
@@ -381,6 +394,9 @@ describe('CONFIG_DEFAULTS', () => {
     expect(
       CONFIG_DEFAULTS.incrementalIngestionCronExpression.defaultValue,
     ).toBe('0 0 2 * * *');
+    expect(
+      CONFIG_DEFAULTS.externalPairIngestionCronExpression.defaultValue,
+    ).toBe('0 0 6,18 * * *');
   });
 
   it('[P2] should have correct default values for float fields', () => {
@@ -480,6 +496,11 @@ describe('CONFIG_DEFAULTS', () => {
       'stalenessThresholdPmxtMs',
       'stalenessThresholdOddspipeMs',
       'stalenessThresholdValidationMs',
+      // External Pair Ingestion
+      'externalPairIngestionCronExpression',
+      'externalPairIngestionEnabled',
+      'externalPairDedupTitleThreshold',
+      'externalPairLlmConcurrency',
     ];
     for (const key of effectiveConfigKeys) {
       expect(
@@ -487,6 +508,35 @@ describe('CONFIG_DEFAULTS', () => {
         `EffectiveConfig field "${key}" missing from CONFIG_DEFAULTS — resolve() in buildEffectiveConfig will silently return null`,
       ).toHaveProperty(key);
     }
+  });
+
+  // Story 10-9-7: External Pair Ingestion config defaults
+  it('[P1] should map externalPairIngestionCronExpression to EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION', () => {
+    expect(CONFIG_DEFAULTS.externalPairIngestionCronExpression.envKey).toBe(
+      'EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION',
+    );
+  });
+
+  it('[P1] should map externalPairIngestionEnabled to EXTERNAL_PAIR_INGESTION_ENABLED', () => {
+    expect(CONFIG_DEFAULTS.externalPairIngestionEnabled.envKey).toBe(
+      'EXTERNAL_PAIR_INGESTION_ENABLED',
+    );
+  });
+
+  it('[P1] should map externalPairDedupTitleThreshold to EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD', () => {
+    expect(CONFIG_DEFAULTS.externalPairDedupTitleThreshold.envKey).toBe(
+      'EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD',
+    );
+    expect(CONFIG_DEFAULTS.externalPairDedupTitleThreshold.defaultValue).toBe(
+      0.45,
+    );
+  });
+
+  it('[P1] should map externalPairLlmConcurrency to EXTERNAL_PAIR_LLM_CONCURRENCY', () => {
+    expect(CONFIG_DEFAULTS.externalPairLlmConcurrency.envKey).toBe(
+      'EXTERNAL_PAIR_LLM_CONCURRENCY',
+    );
+    expect(CONFIG_DEFAULTS.externalPairLlmConcurrency.defaultValue).toBe(5);
   });
 
   it('[P2] should NOT include Category A env vars (secrets, infrastructure)', () => {

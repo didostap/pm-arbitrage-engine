@@ -40,5 +40,4 @@ export interface NormalizedHistoricalDepth {
   asks: Array<{ price: Decimal; size: Decimal }>;
   timestamp: Date;
   updateType: 'snapshot' | 'price_change' | null;
-  qualityFlags: DataQualityFlags | null;
 }

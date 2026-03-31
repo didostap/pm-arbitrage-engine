@@ -21,7 +21,6 @@ export interface SimulatedPosition {
   realizedPnl: Decimal | null;
   fees: Decimal | null;
   holdingHours: Decimal | null;
-  qualityFlags: Record<string, unknown> | null;
 }
 
 export function createSimulatedPosition(params: {
@@ -47,7 +46,6 @@ export function createSimulatedPosition(params: {
     realizedPnl: null,
     fees: null,
     holdingHours: null,
-    qualityFlags: null,
   };
 }
 

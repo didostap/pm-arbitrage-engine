@@ -12,9 +12,9 @@ import {
 
 const CUTOFF_TTL_MS = 3_600_000; // 1 hour
 const BATCH_SIZE = 500;
-const EFFECTIVE_RATE = 14; // 70% of Basic tier 20 req/s
-const MIN_INTERVAL_MS = 1000 / EFFECTIVE_RATE; // ~71ms
-const MAX_RETRIES = 3;
+const EFFECTIVE_RATE = 10; // 50% of Basic tier 20 req/s — headroom for burst detection
+const MIN_INTERVAL_MS = 1000 / EFFECTIVE_RATE; // 100ms
+const MAX_RETRIES = 5;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const LIVE_CHUNK_MS = 6 * 24 * 60 * 60 * 1000; // 6 days — 8,640 1-min candles, under 10K cap
 
@@ -110,6 +110,19 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
     contractId: string,
     dateRange: { start: Date; end: Date },
   ): Promise<IngestionMetadata> {
+    if (dateRange.start >= dateRange.end) {
+      this.logger.debug(
+        `Skipping prices for ${contractId}: start >= end (${dateRange.start.toISOString()} >= ${dateRange.end.toISOString()})`,
+      );
+      return {
+        source: HistoricalDataSource.KALSHI_API,
+        platform: 'kalshi',
+        contractId,
+        recordCount: 0,
+        dateRange,
+        durationMs: 0,
+      };
+    }
     const startMs = Date.now();
     const cutoff = await this.fetchCutoff();
 
@@ -149,35 +162,42 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
           String(Math.floor(chunk.end.getTime() / 1000)),
         );
 
-        const res = await this.fetchWithRetry(url.toString());
-        const data = (await res.json()) as {
-          candlesticks?: KalshiCandlestick[];
-        };
-        const candlesticks = data.candlesticks ?? [];
+        try {
+          const res = await this.fetchWithRetry(url.toString());
+          const data = (await res.json()) as {
+            candlesticks?: KalshiCandlestick[];
+          };
+          const candlesticks = data.candlesticks ?? [];
 
-        const records = candlesticks.map((c) => ({
-          platform: Platform.KALSHI,
-          contractId,
-          source: HistoricalDataSource.KALSHI_API,
-          intervalMinutes: 1,
-          timestamp: new Date(c.end_period_ts * 1000),
-          open: new Decimal(c.open ?? c.price?.open ?? '0'),
-          high: new Decimal(c.high ?? c.price?.high ?? '0'),
-          low: new Decimal(c.low ?? c.price?.low ?? '0'),
-          close: new Decimal(c.close ?? c.price?.close ?? '0'),
-          volume: c.volume != null ? new Decimal(c.volume) : null,
-          openInterest:
-            c.open_interest != null ? new Decimal(c.open_interest) : null,
-        }));
+          const records = candlesticks.map((c) => ({
+            platform: Platform.KALSHI,
+            contractId,
+            source: HistoricalDataSource.KALSHI_API,
+            intervalMinutes: 1,
+            timestamp: new Date(c.end_period_ts * 1000),
+            open: new Decimal(c.open ?? c.price?.open ?? '0'),
+            high: new Decimal(c.high ?? c.price?.high ?? '0'),
+            low: new Decimal(c.low ?? c.price?.low ?? '0'),
+            close: new Decimal(c.close ?? c.price?.close ?? '0'),
+            volume: c.volume != null ? new Decimal(c.volume) : null,
+            openInterest:
+              c.open_interest != null ? new Decimal(c.open_interest) : null,
+          }));
 
-        for (let i = 0; i < records.length; i += BATCH_SIZE) {
-          const batch = records.slice(i, i + BATCH_SIZE);
-          await this.prisma.historicalPrice.createMany({
-            data: batch,
-            skipDuplicates: true,
-          });
+          for (let i = 0; i < records.length; i += BATCH_SIZE) {
+            const batch = records.slice(i, i + BATCH_SIZE);
+            await this.prisma.historicalPrice.createMany({
+              data: batch,
+              skipDuplicates: true,
+            });
+          }
+          historicalCount += records.length;
+        } catch (error) {
+          this.logger.error(
+            `Error fetching Kalshi prices for ${contractId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          throw error;
         }
-        historicalCount += records.length;
       }
     }
 
@@ -206,6 +226,19 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
     contractId: string,
     dateRange: { start: Date; end: Date },
   ): Promise<IngestionMetadata> {
+    if (dateRange.start >= dateRange.end) {
+      this.logger.debug(
+        `Skipping trades for ${contractId}: start >= end (${dateRange.start.toISOString()} >= ${dateRange.end.toISOString()})`,
+      );
+      return {
+        source: HistoricalDataSource.KALSHI_API,
+        platform: 'kalshi',
+        contractId,
+        recordCount: 0,
+        dateRange,
+        durationMs: 0,
+      };
+    }
     const startMs = Date.now();
     const cutoff = await this.fetchCutoff();
 
@@ -483,6 +516,23 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
         return res;
       }
 
+      // 429 = rate limited — retryable with longer backoff
+      if (res.status === 429) {
+        const retryAfter = res.headers.get('Retry-After');
+        const delay = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s, 16s
+        this.logger.warn(
+          `Kalshi 429 rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), waiting ${delay}ms`,
+        );
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, delay));
+        }
+        lastError = new Error(`Kalshi API 429 on attempt ${attempt + 1}`);
+        continue;
+      }
+
+      // Other 4xx — permanent client error, throw immediately
       if (res.status >= 400 && res.status < 500) {
         throw new SystemHealthError(
           SYSTEM_HEALTH_ERROR_CODES.BACKTEST_EXTERNAL_API_ERROR,
@@ -492,6 +542,7 @@ export class KalshiHistoricalService implements IHistoricalDataProvider {
         );
       }
 
+      // 5xx — server error, retry with standard backoff
       lastError = new Error(
         `Kalshi API ${res.status} on attempt ${attempt + 1}`,
       );

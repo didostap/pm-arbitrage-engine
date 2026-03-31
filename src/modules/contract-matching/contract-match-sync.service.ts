@@ -69,6 +69,7 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
             polymarketDescription: description,
             kalshiDescription: description,
             polymarketClobTokenId: pair.polymarketClobTokenId,
+            origin: 'MANUAL',
             ...(pair.resolutionDate !== undefined
               ? { resolutionDate: pair.resolutionDate }
               : {}),
@@ -82,6 +83,7 @@ export class ContractMatchSyncService implements OnApplicationBootstrap {
             operatorApproved: true,
             operatorApprovalTimestamp: timestamp,
             resolutionDate: pair.resolutionDate ?? null,
+            origin: 'MANUAL',
           },
         });
 
