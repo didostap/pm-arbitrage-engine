@@ -171,6 +171,7 @@ export class ExternalPairEnrichmentService {
       }
     }
 
+    if (best && best.similarity === 0) return null;
     return best;
   }
 }

@@ -47,7 +47,6 @@ describe('FillModelService', () => {
         ],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot' as const,
-
       };
 
       const orderBook = service.adaptDepthToOrderBook(depth, PlatformId.KALSHI);
@@ -79,7 +78,6 @@ describe('FillModelService', () => {
         ],
         timestamp: new Date(),
         updateType: 'snapshot' as const,
-
       };
 
       const orderBook = service.adaptDepthToOrderBook(depth, PlatformId.KALSHI);
@@ -103,7 +101,6 @@ describe('FillModelService', () => {
         asks: [{ price: new Decimal('0.51'), size: new Decimal('100') }],
         timestamp: new Date(),
         updateType: 'snapshot' as const,
-
       };
 
       const orderBook = service.adaptDepthToOrderBook(
@@ -125,7 +122,6 @@ describe('FillModelService', () => {
         asks: [],
         timestamp: new Date(),
         updateType: 'snapshot' as const,
-
       };
 
       const orderBook = service.adaptDepthToOrderBook(depth, PlatformId.KALSHI);
@@ -150,7 +146,6 @@ describe('FillModelService', () => {
         asks: [{ price: '0.46', size: '150' }],
         timestamp: new Date('2025-02-01T13:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 
@@ -198,7 +193,6 @@ describe('FillModelService', () => {
         asks: [{ price: '0.51', size: '200' }],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(snapshot);
 
@@ -254,7 +248,6 @@ describe('FillModelService', () => {
         ],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 
@@ -283,7 +276,6 @@ describe('FillModelService', () => {
         asks: [],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 
@@ -309,7 +301,6 @@ describe('FillModelService', () => {
         asks: [{ price: '0.46', size: '50' }],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 
@@ -337,7 +328,6 @@ describe('FillModelService', () => {
         asks: [{ price: '0.55', size: '500' }],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 
@@ -392,7 +382,6 @@ describe('FillModelService', () => {
         asks: [{ price: '0.4600', size: '200.75' }],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot',
-
       };
       prismaService.historicalDepth.findFirst.mockResolvedValue(depthRecord);
 

@@ -329,62 +329,81 @@ describe('PolymarketHistoricalService', () => {
       }
     });
 
-    it('[P0] should paginate Goldsky via id_gt', async () => {
+    it('[P0] should paginate Goldsky via id_gt per asset side', async () => {
       const mockPrisma = createMockPrisma();
       const { service } = createPolymarketService(mockPrisma);
 
-      // Page 1
+      // makerAssetId query — page 1 (full)
       mockFetch.mockResolvedValueOnce(
         createJsonResponse({
           data: {
             orderFilledEvents: Array.from({ length: 1000 }, (_, i) => ({
-              id: `event-${String(i).padStart(4, '0')}`,
+              id: `maker-${String(i).padStart(4, '0')}`,
               transactionHash: `0x${i}`,
               timestamp: '1704067200',
               maker: '0xmaker',
               taker: '0xtaker',
-              makerAssetId: USDC_ASSET_ID,
-              takerAssetId: '12345678',
-              makerAmountFilled: '50000000',
-              takerAmountFilled: '100000000',
+              makerAssetId: '12345678',
+              takerAssetId: USDC_ASSET_ID,
+              makerAmountFilled: '100000000',
+              takerAmountFilled: '50000000',
               fee: '500000',
             })),
           },
         }),
       );
 
-      // Page 2 (empty — end)
+      // makerAssetId query — page 2 (empty)
       mockFetch.mockResolvedValueOnce(
         createJsonResponse({
           data: { orderFilledEvents: [] },
         }),
       );
 
-      mockPrisma.historicalTrade.createMany.mockResolvedValue({ count: 500 });
+      // takerAssetId query — page 1 (empty — no taker-side trades)
+      mockFetch.mockResolvedValueOnce(
+        createJsonResponse({
+          data: { orderFilledEvents: [] },
+        }),
+      );
+
+      mockPrisma.historicalTrade.createMany.mockResolvedValue({ count: 1000 });
 
       await service.ingestTrades('12345678', {
         start: new Date('2024-01-01'),
         end: new Date('2024-01-02'),
       });
 
-      // Page 2 query should include id_gt from last result of page 1
+      // Page 2 of maker query should include id_gt from last result of page 1
       const secondCallBody = JSON.parse(
         mockFetch.mock.calls[1]?.[1]?.body || '{}',
       );
-      expect(secondCallBody.variables?.id_gt).toBe('event-0999');
+      expect(secondCallBody.variables?.id_gt).toBe('maker-0999');
+      // First call should filter by makerAssetId
+      const firstCallBody = JSON.parse(
+        mockFetch.mock.calls[0]?.[1]?.body || '{}',
+      );
+      expect(firstCallBody.query).toContain('makerAssetId');
     });
 
-    it('[P0] should filter results client-side by target token ID', async () => {
+    it('[P0] should include contractId in GraphQL where clause for server-side filtering', async () => {
       const mockPrisma = createMockPrisma();
       const { service } = createPolymarketService(mockPrisma);
 
       const TARGET_TOKEN = '12345678';
 
+      // makerAssetId query — empty (token is on taker side)
+      mockFetch.mockResolvedValueOnce(
+        createJsonResponse({
+          data: { orderFilledEvents: [] },
+        }),
+      );
+
+      // takerAssetId query — returns the matching event
       mockFetch.mockResolvedValueOnce(
         createJsonResponse({
           data: {
             orderFilledEvents: [
-              // Match: takerAssetId = target token
               {
                 id: 'e1',
                 transactionHash: '0x1',
@@ -397,24 +416,12 @@ describe('PolymarketHistoricalService', () => {
                 takerAmountFilled: '100000000',
                 fee: '0',
               },
-              // No match: neither asset ID is the target
-              {
-                id: 'e2',
-                transactionHash: '0x2',
-                timestamp: '1704067200',
-                maker: '0xm',
-                taker: '0xt',
-                makerAssetId: USDC_ASSET_ID,
-                takerAssetId: '99999999',
-                makerAmountFilled: '50000000',
-                takerAmountFilled: '100000000',
-                fee: '0',
-              },
             ],
           },
         }),
       );
 
+      // takerAssetId query — page 2 empty
       mockFetch.mockResolvedValueOnce(
         createJsonResponse({
           data: { orderFilledEvents: [] },
@@ -428,7 +435,19 @@ describe('PolymarketHistoricalService', () => {
         end: new Date('2024-01-02'),
       });
 
-      // Only the matching trade should be inserted
+      // Verify both queries include contractId
+      const firstCallBody = JSON.parse(
+        mockFetch.mock.calls[0]?.[1]?.body || '{}',
+      );
+      expect(firstCallBody.variables?.contractId).toBe(TARGET_TOKEN);
+      // First query filters makerAssetId, second filters takerAssetId
+      expect(firstCallBody.query).toContain('makerAssetId');
+      const secondCallBody = JSON.parse(
+        mockFetch.mock.calls[1]?.[1]?.body || '{}',
+      );
+      expect(secondCallBody.query).toContain('takerAssetId');
+
+      // The matching event should be inserted
       const insertedData =
         mockPrisma.historicalTrade.createMany.mock.calls[0]?.[0]?.data;
       expect(insertedData).toHaveLength(1);
@@ -438,7 +457,12 @@ describe('PolymarketHistoricalService', () => {
       const mockPrisma = createMockPrisma();
       const { service } = createPolymarketService(mockPrisma);
 
-      // Verify fetchWithTimeout is used (Goldsky call includes AbortSignal)
+      // Two queries (maker side + taker side) — both empty, separate response objects
+      mockFetch.mockResolvedValueOnce(
+        createJsonResponse({
+          data: { orderFilledEvents: [] },
+        }),
+      );
       mockFetch.mockResolvedValueOnce(
         createJsonResponse({
           data: { orderFilledEvents: [] },

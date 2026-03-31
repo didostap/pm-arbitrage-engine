@@ -61,21 +61,64 @@ describe('Core Lifecycle (e2e)', () => {
           updatedAt: new Date(),
         }),
       },
-      backtestRun: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}), update: vi.fn().mockResolvedValue({}) },
-      backtestPosition: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
-      calibrationRun: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
-      historicalPrice: { findMany: vi.fn().mockResolvedValue([]), aggregate: vi.fn().mockResolvedValue({}), groupBy: vi.fn().mockResolvedValue([]) },
-      historicalTrade: { findMany: vi.fn().mockResolvedValue([]), aggregate: vi.fn().mockResolvedValue({}) },
-      historicalDepth: { findMany: vi.fn().mockResolvedValue([]), groupBy: vi.fn().mockResolvedValue([]) },
-      dataCatalog: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
-      dataSourceFreshness: { findMany: vi.fn().mockResolvedValue([]), upsert: vi.fn().mockResolvedValue({}) },
-      matchValidationReport: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
-      ingestionQualityReport: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
-      stressTestRun: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
-      auditLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
+      backtestRun: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      backtestPosition: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      calibrationRun: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      historicalPrice: {
+        findMany: vi.fn().mockResolvedValue([]),
+        aggregate: vi.fn().mockResolvedValue({}),
+        groupBy: vi.fn().mockResolvedValue([]),
+      },
+      historicalTrade: {
+        findMany: vi.fn().mockResolvedValue([]),
+        aggregate: vi.fn().mockResolvedValue({}),
+      },
+      historicalDepth: {
+        findMany: vi.fn().mockResolvedValue([]),
+        groupBy: vi.fn().mockResolvedValue([]),
+      },
+      dataCatalog: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      dataSourceFreshness: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      matchValidationReport: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      ingestionQualityReport: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      stressTestRun: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      auditLog: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
       clusterTagMapping: { findMany: vi.fn().mockResolvedValue([]) },
       order: { findMany: vi.fn().mockResolvedValue([]) },
-      riskOverrideLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
+      riskOverrideLog: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockResolvedValue({}),
+      },
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -152,21 +195,68 @@ describe('Core Lifecycle (e2e)', () => {
         findUnique: vi.fn().mockRejectedValue(new Error('Connection failed')),
         upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
       },
-      backtestRun: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), findFirst: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')), update: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      backtestPosition: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      calibrationRun: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      historicalPrice: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), aggregate: vi.fn().mockRejectedValue(new Error('Connection failed')), groupBy: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      historicalTrade: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), aggregate: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      historicalDepth: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), groupBy: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      dataCatalog: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), findFirst: vi.fn().mockRejectedValue(new Error('Connection failed')), upsert: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      dataSourceFreshness: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), upsert: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      matchValidationReport: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      ingestionQualityReport: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      stressTestRun: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      auditLog: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      clusterTagMapping: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      order: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')) },
-      riskOverrideLog: { findMany: vi.fn().mockRejectedValue(new Error('Connection failed')), create: vi.fn().mockRejectedValue(new Error('Connection failed')) },
+      backtestRun: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        findFirst: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        update: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      backtestPosition: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      calibrationRun: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      historicalPrice: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        aggregate: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        groupBy: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      historicalTrade: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        aggregate: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      historicalDepth: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        groupBy: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      dataCatalog: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        findFirst: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      dataSourceFreshness: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        upsert: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      matchValidationReport: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      ingestionQualityReport: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      stressTestRun: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      auditLog: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      clusterTagMapping: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      order: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
+      riskOverrideLog: {
+        findMany: vi.fn().mockRejectedValue(new Error('Connection failed')),
+        create: vi.fn().mockRejectedValue(new Error('Connection failed')),
+      },
     };
 
     const failingModule = await Test.createTestingModule({

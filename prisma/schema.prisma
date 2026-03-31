@@ -508,6 +508,7 @@ model HistoricalPrice {
   @@index([platform, contractId, timestamp])
   @@index([source, timestamp])
   @@index([timestamp])
+  @@index([contractId, source, timestamp])
   @@map("historical_prices")
 }
 
@@ -557,6 +558,7 @@ model HistoricalDepth {
   @@index([platform, contractId, timestamp])
   @@index([source, timestamp])
   @@index([timestamp])
+  @@index([contractId, source, timestamp])
   @@map("historical_depths")
 }
 

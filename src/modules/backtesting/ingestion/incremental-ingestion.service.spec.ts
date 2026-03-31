@@ -77,7 +77,6 @@ describe('IncrementalIngestionService', () => {
       fetchService as unknown as IncrementalFetchService,
       orchestrator as unknown as IngestionOrchestratorService,
     );
-
   });
 
   afterEach(() => {

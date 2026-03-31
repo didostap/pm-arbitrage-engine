@@ -70,6 +70,7 @@ describe('CandidateDiscoveryService', () => {
   let eventEmitter: { emit: ReturnType<typeof vi.fn> };
   let configService: ConfigService;
   let schedulerRegistry: { addCronJob: ReturnType<typeof vi.fn> };
+  let externalIngestion: { isRunning: boolean };
 
   const configValues: Record<string, string | number | boolean> = {
     DISCOVERY_ENABLED: true,
@@ -122,6 +123,7 @@ describe('CandidateDiscoveryService', () => {
       ),
     } as unknown as ConfigService;
     schedulerRegistry = { addCronJob: vi.fn() };
+    externalIngestion = { isRunning: false };
 
     service = new CandidateDiscoveryService(
       catalogSync as unknown as CatalogSyncService,
@@ -133,6 +135,7 @@ describe('CandidateDiscoveryService', () => {
       eventEmitter as unknown as EventEmitter2,
       configService,
       schedulerRegistry as unknown as SchedulerRegistry,
+      externalIngestion,
     );
   });
 
@@ -157,6 +160,7 @@ describe('CandidateDiscoveryService', () => {
         eventEmitter as unknown as EventEmitter2,
         configService,
         schedulerRegistry as unknown as SchedulerRegistry,
+        externalIngestion,
       );
 
       service.onModuleInit();
@@ -182,6 +186,7 @@ describe('CandidateDiscoveryService', () => {
         eventEmitter as unknown as EventEmitter2,
         configService,
         schedulerRegistry as unknown as SchedulerRegistry,
+        externalIngestion,
       );
 
       service.onModuleInit();
@@ -212,6 +217,7 @@ describe('CandidateDiscoveryService', () => {
         eventEmitter as unknown as EventEmitter2,
         configService,
         schedulerRegistry as unknown as SchedulerRegistry,
+        externalIngestion,
       );
 
       service.onModuleInit();
@@ -886,6 +892,7 @@ describe('CandidateDiscoveryService', () => {
           eventEmitter as unknown as EventEmitter2,
           configService,
           schedulerRegistry as unknown as SchedulerRegistry,
+          externalIngestion,
         );
 
         const kalshi5 = Array.from({ length: 5 }, (_, i) =>
@@ -1041,6 +1048,7 @@ describe('CandidateDiscoveryService', () => {
           eventEmitter as unknown as EventEmitter2,
           configService,
           schedulerRegistry as unknown as SchedulerRegistry,
+          externalIngestion,
         );
 
         preFilter.filterCandidates
@@ -1242,6 +1250,7 @@ describe('CandidateDiscoveryService', () => {
         eventEmitter as unknown as EventEmitter2,
         configService,
         schedulerRegistry as unknown as SchedulerRegistry,
+        externalIngestion,
       );
 
       expect(() => invalidService.onModuleInit()).toThrow(
@@ -1392,6 +1401,30 @@ describe('CandidateDiscoveryService', () => {
       await service.runDiscovery();
 
       expect(service.isRunning).toBe(false);
+    });
+  });
+
+  describe('bidirectional concurrency guard', () => {
+    it('[P1] runDiscovery() should skip when ExternalPairIngestionService.isRunning is true', async () => {
+      externalIngestion.isRunning = true;
+
+      await service.runDiscovery();
+
+      expect(catalogSync.syncCatalogs).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        EVENT_NAMES.DISCOVERY_RUN_COMPLETED,
+        expect.anything(),
+      );
+    });
+
+    it('[P1] runDiscovery() should proceed when ExternalPairIngestionService.isRunning is false', async () => {
+      externalIngestion.isRunning = false;
+
+      catalogSync.syncCatalogs.mockResolvedValue(new Map());
+
+      await service.runDiscovery();
+
+      expect(catalogSync.syncCatalogs).toHaveBeenCalled();
     });
   });
 });

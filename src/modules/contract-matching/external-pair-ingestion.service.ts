@@ -23,6 +23,11 @@ export class ExternalPairIngestionService implements OnModuleInit {
   /** Cleanup: reset in finally block of runExternalPairIngestion() */
   private _isRunning = false;
 
+  /** Bidirectional concurrency guard — CandidateDiscoveryService checks this */
+  public get isRunning(): boolean {
+    return this._isRunning;
+  }
+
   constructor(
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,

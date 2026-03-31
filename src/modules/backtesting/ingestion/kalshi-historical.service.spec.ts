@@ -113,15 +113,19 @@ describe('KalshiHistoricalService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
-    it('[P20] should throw on non-2xx cutoff response via fetchWithRetry', { timeout: 45_000 }, async () => {
-      const { service } = createKalshiService();
+    it(
+      '[P20] should throw on non-2xx cutoff response via fetchWithRetry',
+      { timeout: 45_000 },
+      async () => {
+        const { service } = createKalshiService();
 
-      mockFetch.mockResolvedValue(
-        new Response('Service Unavailable', { status: 503 }),
-      );
+        mockFetch.mockResolvedValue(
+          new Response('Service Unavailable', { status: 503 }),
+        );
 
-      await expect(service.fetchCutoff()).rejects.toThrow(SystemHealthError);
-    });
+        await expect(service.fetchCutoff()).rejects.toThrow(SystemHealthError);
+      },
+    );
   });
 
   describe('ingestPrices', () => {
@@ -886,21 +890,25 @@ describe('KalshiHistoricalService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
-    it('[P0] should throw SystemHealthError with code 4206 on API failure', { timeout: 45_000 }, async () => {
-      const { service } = createKalshiService();
+    it(
+      '[P0] should throw SystemHealthError with code 4206 on API failure',
+      { timeout: 45_000 },
+      async () => {
+        const { service } = createKalshiService();
 
-      mockFetch.mockResolvedValueOnce(farFutureCutoffResponse());
-      mockFetch.mockResolvedValue(
-        new Response('Server Error', { status: 500 }),
-      );
+        mockFetch.mockResolvedValueOnce(farFutureCutoffResponse());
+        mockFetch.mockResolvedValue(
+          new Response('Server Error', { status: 500 }),
+        );
 
-      await expect(
-        service.ingestPrices('KXBTC-24DEC31', {
-          start: new Date('2024-01-01'),
-          end: new Date('2024-01-02'),
-        }),
-      ).rejects.toThrow(SystemHealthError);
-    });
+        await expect(
+          service.ingestPrices('KXBTC-24DEC31', {
+            start: new Date('2024-01-01'),
+            end: new Date('2024-01-02'),
+          }),
+        ).rejects.toThrow(SystemHealthError);
+      },
+    );
   });
 
   describe('fetchAndPersistLiveCandlesticks', () => {

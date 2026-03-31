@@ -15,6 +15,7 @@ import {
 import { SCORING_STRATEGY_TOKEN } from '../../common/interfaces/scoring-strategy.interface';
 import { CLUSTER_CLASSIFIER_TOKEN } from '../../common/interfaces/cluster-classifier.interface';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
+import { ConfigValidationError } from '../../common/errors/config-validation-error';
 import type { ExternalMatchedPair } from '../../common/types';
 
 function makePair(
@@ -119,6 +120,45 @@ describe('ExternalPairProcessorService', () => {
     }).compile();
 
     service = module.get(ExternalPairProcessorService);
+  });
+
+  describe('config validation', () => {
+    it('[P0] should throw ConfigValidationError when minReviewThreshold >= autoApproveThreshold', async () => {
+      const badConfigService = {
+        get: vi
+          .fn()
+          .mockImplementation((key: string, defaultValue?: unknown) => {
+            const map: Record<string, unknown> = {
+              LLM_AUTO_APPROVE_THRESHOLD: 40,
+              LLM_MIN_REVIEW_THRESHOLD: 85,
+              EXTERNAL_PAIR_DEDUP_TITLE_THRESHOLD: 0.45,
+              EXTERNAL_PAIR_LLM_CONCURRENCY: 5,
+            };
+            return map[key] ?? defaultValue;
+          }),
+      };
+
+      await expect(
+        Test.createTestingModule({
+          providers: [
+            ExternalPairProcessorService,
+            { provide: PrismaService, useValue: prisma },
+            {
+              provide: ODDSPIPE_PAIR_PROVIDER_TOKEN,
+              useValue: oddsPipeProvider,
+            },
+            {
+              provide: PREDEXON_PAIR_PROVIDER_TOKEN,
+              useValue: predexonProvider,
+            },
+            { provide: SCORING_STRATEGY_TOKEN, useValue: scoringStrategy },
+            { provide: CLUSTER_CLASSIFIER_TOKEN, useValue: clusterClassifier },
+            { provide: EventEmitter2, useValue: emitter },
+            { provide: ConfigService, useValue: badConfigService },
+          ],
+        }).compile(),
+      ).rejects.toThrow(ConfigValidationError);
+    });
   });
 
   describe('provider fetching + error isolation', () => {
@@ -617,6 +657,19 @@ describe('ExternalPairProcessorService', () => {
       expect(stats?.unresolvable).toBe(0);
     });
 
+    it('[P1] enrichFn returning different length should skip enrichment and process raw pairs', async () => {
+      predexonProvider.fetchPairs.mockResolvedValue([makePair()]);
+
+      const enrichFn = vi.fn().mockResolvedValue([]); // Returns empty array — length mismatch
+
+      const result = await service.processAllProviders(enrichFn);
+
+      expect(enrichFn).toHaveBeenCalledOnce();
+      // Should still process with original pair (Predexon has IDs)
+      const stats = result.sources.find((s) => s.source === 'predexon');
+      expect(stats?.scored).toBe(1);
+    });
+
     it('[P1] enrichFn failure should process with raw pairs', async () => {
       predexonProvider.fetchPairs.mockResolvedValue([makePair()]);
 
@@ -660,5 +713,14 @@ describe('computeTitleSimilarity', () => {
 
   it('both empty returns 0', () => {
     expect(computeTitleSimilarity('', '')).toBe(0);
+  });
+
+  it('one empty title returns 0', () => {
+    expect(computeTitleSimilarity('', 'Alpha beta gamma')).toBe(0);
+    expect(computeTitleSimilarity('Some title here', '')).toBe(0);
+  });
+
+  it('title with only special characters returns 0', () => {
+    expect(computeTitleSimilarity('$$$!!!', 'Alpha beta gamma')).toBe(0);
   });
 });

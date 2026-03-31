@@ -8,7 +8,6 @@ import { ExternalPairIngestionService } from './external-pair-ingestion.service'
 import { ExternalPairProcessorService } from './external-pair-processor.service';
 import { CandidateDiscoveryService } from './candidate-discovery.service';
 import { ExternalPairEnrichmentService } from './external-pair-enrichment.service';
-import { PrismaService } from '../../common/prisma.service';
 import { EVENT_NAMES } from '../../common/events/event-catalog';
 import { ExternalPairIngestionRunCompletedEvent } from '../../common/events/external-pair-ingestion-run-completed.event';
 
@@ -77,7 +76,6 @@ describe('ExternalPairIngestionService', () => {
               .mockImplementation((pairs: unknown[]) => Promise.resolve(pairs)),
           },
         },
-        { provide: PrismaService, useValue: {} },
       ],
     }).compile();
 
@@ -262,6 +260,19 @@ describe('ExternalPairIngestionService', () => {
           c[0] === EVENT_NAMES.EXTERNAL_PAIR_INGESTION_RUN_COMPLETED,
       )?.[1] as ExternalPairIngestionRunCompletedEvent;
       expect(emittedEvent.sources).toEqual([]);
+    });
+
+    it('[P1] isRunning getter should reflect _isRunning state for bidirectional concurrency guard', () => {
+      expect(service.isRunning).toBe(false);
+
+      const neverResolve = new Promise<never>(() => {});
+      processor.processAllProviders.mockReturnValue(neverResolve);
+
+      const firstRun = service.handleCron();
+      expect(service.isRunning).toBe(true);
+
+      // Clean up
+      firstRun.catch(() => {});
     });
 
     it('[P1] no startup run — service should NOT call runExternalPairIngestion() in onModuleInit()', () => {

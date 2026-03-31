@@ -10,8 +10,12 @@ import {
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../../../common/errors/system-health-error';
 
-/** USDC.e collateral token address on Polygon PoS — verified from Polymarket docs */
-export const USDC_ASSET_ID = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+/**
+ * USDC collateral asset ID in Goldsky's orderFilledEvents subgraph.
+ * In the CTF Exchange, USDC (ERC20) is represented as asset ID "0" —
+ * NOT the ERC-20 contract address. See: poly_data docs + CTF exchange spec.
+ */
+export const USDC_ASSET_ID = '0';
 
 const VALID_SIDES = new Set(['buy', 'sell']);
 
@@ -166,9 +170,59 @@ export class PolymarketHistoricalService implements IHistoricalDataProvider {
     dateRange: { start: Date; end: Date },
   ): Promise<IngestionMetadata> {
     const startMs = Date.now();
+
+    // Two separate queries avoid Goldsky's OR-induced full table scan.
+    // Each single-column filter uses the subgraph index efficiently.
+    const makerRecords = await this.fetchGoldskyTradesForAssetSide(
+      contractId,
+      'makerAssetId',
+      dateRange,
+    );
+    const takerRecords = await this.fetchGoldskyTradesForAssetSide(
+      contractId,
+      'takerAssetId',
+      dateRange,
+    );
+
+    // Deduplicate by externalTradeId (same event may appear if token is on both sides — rare but possible in mint/merge)
+    const seen = new Set<string>();
+    const allRecords: Prisma.HistoricalTradeCreateManyInput[] = [];
+    for (const r of [...makerRecords, ...takerRecords]) {
+      const key = r.externalTradeId;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        allRecords.push(r);
+      }
+    }
+
+    // Persist
+    for (let i = 0; i < allRecords.length; i += BATCH_SIZE) {
+      const batch = allRecords.slice(i, i + BATCH_SIZE);
+      await this.prisma.historicalTrade.createMany({
+        data: batch,
+        skipDuplicates: true,
+      });
+    }
+
+    return {
+      source: HistoricalDataSource.GOLDSKY,
+      platform: 'polymarket',
+      contractId,
+      recordCount: allRecords.length,
+      dateRange,
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  /** Paginate through Goldsky orderFilledEvents filtering by a single asset side */
+  private async fetchGoldskyTradesForAssetSide(
+    contractId: string,
+    assetField: 'makerAssetId' | 'takerAssetId',
+    dateRange: { start: Date; end: Date },
+  ): Promise<Prisma.HistoricalTradeCreateManyInput[]> {
+    const records: Prisma.HistoricalTradeCreateManyInput[] = [];
     let lastId: string | undefined;
     let hasMore = true;
-    let totalRecords = 0;
 
     while (hasMore) {
       await this.goldskyRateLimit();
@@ -176,15 +230,19 @@ export class PolymarketHistoricalService implements IHistoricalDataProvider {
       const variables: Record<string, unknown> = {
         timestamp_gte: String(Math.floor(dateRange.start.getTime() / 1000)),
         timestamp_lte: String(Math.floor(dateRange.end.getTime() / 1000)),
+        contractId,
         first: GOLDSKY_PAGE_SIZE,
       };
       if (lastId) {
         variables.id_gt = lastId;
       }
 
-      const query = `query OrderFilledEvents($timestamp_gte: BigInt!, $timestamp_lte: BigInt!, $first: Int!, $id_gt: ID) {
+      const idVarDecl = lastId ? ', $id_gt: ID!' : '';
+      const idWhereClause = lastId ? ', id_gt: $id_gt' : '';
+
+      const query = `query OrderFilledEvents($timestamp_gte: BigInt!, $timestamp_lte: BigInt!, $contractId: String!, $first: Int!${idVarDecl}) {
   orderFilledEvents(
-    where: { timestamp_gte: $timestamp_gte, timestamp_lte: $timestamp_lte, id_gt: $id_gt }
+    where: { timestamp_gte: $timestamp_gte, timestamp_lte: $timestamp_lte${idWhereClause}, ${assetField}: $contractId }
     first: $first
     orderBy: id
     orderDirection: asc
@@ -202,7 +260,6 @@ export class PolymarketHistoricalService implements IHistoricalDataProvider {
   }
 }`;
 
-      // P10: Use fetchWithTimeout for Goldsky — bare fetch can hang indefinitely
       const res = await this.fetchWithTimeout(this.goldskyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,24 +291,12 @@ export class PolymarketHistoricalService implements IHistoricalDataProvider {
 
       const events = data.data?.orderFilledEvents ?? [];
 
-      if (events.length === 0) {
-        hasMore = false;
-        break;
-      }
+      if (events.length === 0) break;
 
-      // Client-side filter by target token ID, then flush per page
-      const pageRecords: Prisma.HistoricalTradeCreateManyInput[] = [];
       for (const event of events) {
-        if (
-          event.makerAssetId !== contractId &&
-          event.takerAssetId !== contractId
-        ) {
-          continue;
-        }
-
         const derived = this.deriveTradeFromEvent(event);
         if (derived) {
-          pageRecords.push({
+          records.push({
             platform: Platform.POLYMARKET,
             contractId,
             source: HistoricalDataSource.GOLDSKY,
@@ -264,36 +309,13 @@ export class PolymarketHistoricalService implements IHistoricalDataProvider {
         }
       }
 
-      // P18: Flush each page to DB immediately
-      for (let i = 0; i < pageRecords.length; i += BATCH_SIZE) {
-        const batch = pageRecords.slice(i, i + BATCH_SIZE);
-        await this.prisma.historicalTrade.createMany({
-          data: batch,
-          skipDuplicates: true,
-        });
-      }
-      totalRecords += pageRecords.length;
-
-      // IG-2: Goldsky ID ordering — KNOWN LIMITATION. The Graph docs state entity IDs
-      // sort alphanumerically, NOT by creation time. id_gt pagination combined with
-      // timestamp_gte/timestamp_lte WHERE clause may miss events whose IDs sort before
-      // our cursor. For correctness, switch to orderBy: timestamp + tie-breaking cursor.
-      // Accepted risk for MVP: within a bounded time window the omission rate is low.
-      // TODO: Switch to timestamp-based pagination in a follow-up story.
       lastId = events[events.length - 1]!.id;
       if (events.length < GOLDSKY_PAGE_SIZE) {
         hasMore = false;
       }
     }
 
-    return {
-      source: HistoricalDataSource.GOLDSKY,
-      platform: 'polymarket',
-      contractId,
-      recordCount: totalRecords,
-      dateRange,
-      durationMs: Date.now() - startMs,
-    };
+    return records;
   }
 
   async importPolyDataBootstrap(

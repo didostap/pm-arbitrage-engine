@@ -430,7 +430,6 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:05:00Z'),
           updateType: 'snapshot' as const,
-
         },
         {
           platform: 'POLYMARKET',
@@ -440,7 +439,6 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.59'), size: new Decimal('90') }],
           timestamp: new Date('2025-06-01T00:35:00Z'),
           updateType: 'snapshot' as const,
-
         },
         {
           platform: 'POLYMARKET',
@@ -450,7 +448,6 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.58'), size: new Decimal('70') }],
           timestamp: new Date('2025-06-01T01:10:00Z'),
           updateType: 'snapshot' as const,
-
         },
       ];
       mockServiceMethods(service, depths);
@@ -506,7 +503,6 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:00:00Z'),
           updateType: 'snapshot' as const,
-
         },
       ]);
 
@@ -532,7 +528,6 @@ describe('PmxtArchiveService', () => {
           asks: [{ price: new Decimal('0.60'), size: new Decimal('80') }],
           timestamp: new Date('2025-06-01T00:00:00Z'),
           updateType: 'snapshot' as const,
-
         },
       ]);
 

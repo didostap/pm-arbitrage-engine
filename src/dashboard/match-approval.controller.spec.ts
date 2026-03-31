@@ -34,6 +34,8 @@ function buildMatchDto(
     divergenceNotes: null,
     polymarketRawCategory: null,
     kalshiRawCategory: null,
+    polymarketOutcomeLabel: null,
+    kalshiOutcomeLabel: null,
     firstTradedTimestamp: null,
     totalCyclesTraded: 0,
     primaryLeg: null,

@@ -239,7 +239,7 @@ export class IncrementalFetchService {
             this.logger.error(
               `Goldsky fetch failed: ${error instanceof Error ? error.message : String(error)}`,
             );
-            throw error;
+            // throw error;
           }
         }
         return { recordCount: totalRecords, contractCount };

@@ -47,36 +47,76 @@ export class IngestionQualityAssessorService {
     dateRange: { start: Date; end: Date },
     correlationId: string,
   ): Promise<void> {
-    // Survivorship bias — use actual ContractMatch data
+    // Survivorship bias — use actual ContractMatch data (sync, no DB)
     const survivorFlags = this.dataQuality.assessSurvivorshipBias(matchId, {
       operatorApproved: target.operatorApproved,
       resolutionTimestamp: target.resolutionTimestamp,
     });
 
-    // Query Kalshi prices for quality assessment
-    const kalshiPrices = await this.prisma.historicalPrice.findMany({
-      where: {
-        contractId: target.kalshiTicker,
-        platform: 'KALSHI',
-        timestamp: { gte: dateRange.start, lte: dateRange.end },
-      },
-      select: {
-        platform: true,
-        contractId: true,
-        source: true,
-        intervalMinutes: true,
-        timestamp: true,
-        open: true,
-        high: true,
-        low: true,
-        close: true,
-        volume: true,
-        openInterest: true,
-      },
-      orderBy: { timestamp: 'asc' },
-      take: QUALITY_SAMPLE_LIMIT,
-    });
+    // Run all independent DB queries in parallel
+    const [kalshiPrices, kalshiTrades, depths] = await Promise.all([
+      this.prisma.historicalPrice.findMany({
+        where: {
+          contractId: target.kalshiTicker,
+          platform: 'KALSHI',
+          timestamp: { gte: dateRange.start, lte: dateRange.end },
+        },
+        select: {
+          platform: true,
+          contractId: true,
+          source: true,
+          intervalMinutes: true,
+          timestamp: true,
+          open: true,
+          high: true,
+          low: true,
+          close: true,
+          volume: true,
+          openInterest: true,
+        },
+        orderBy: { timestamp: 'asc' },
+        take: QUALITY_SAMPLE_LIMIT,
+      }),
+      this.prisma.historicalTrade.findMany({
+        where: {
+          contractId: target.kalshiTicker,
+          platform: 'KALSHI',
+          timestamp: { gte: dateRange.start, lte: dateRange.end },
+        },
+        select: {
+          platform: true,
+          contractId: true,
+          source: true,
+          externalTradeId: true,
+          price: true,
+          size: true,
+          side: true,
+          timestamp: true,
+        },
+        orderBy: { timestamp: 'asc' },
+        take: QUALITY_SAMPLE_LIMIT,
+      }),
+      this.prisma.historicalDepth.findMany({
+        where: {
+          contractId: target.polymarketTokenId,
+          source: 'PMXT_ARCHIVE',
+          timestamp: { gte: dateRange.start, lte: dateRange.end },
+        },
+        select: {
+          platform: true,
+          contractId: true,
+          source: true,
+          timestamp: true,
+          bids: true,
+          asks: true,
+          updateType: true,
+        },
+        orderBy: { timestamp: 'asc' },
+        take: QUALITY_SAMPLE_LIMIT,
+      }),
+    ]);
 
+    // Assess quality (CPU-bound, runs synchronously)
     const kalshiPriceFlags =
       kalshiPrices.length > 0
         ? this.dataQuality.assessPriceQuality(
@@ -98,27 +138,6 @@ export class IngestionQualityAssessorService {
             1,
           )
         : null;
-
-    // Query Kalshi trades for quality assessment
-    const kalshiTrades = await this.prisma.historicalTrade.findMany({
-      where: {
-        contractId: target.kalshiTicker,
-        platform: 'KALSHI',
-        timestamp: { gte: dateRange.start, lte: dateRange.end },
-      },
-      select: {
-        platform: true,
-        contractId: true,
-        source: true,
-        externalTradeId: true,
-        price: true,
-        size: true,
-        side: true,
-        timestamp: true,
-      },
-      orderBy: { timestamp: 'asc' },
-      take: QUALITY_SAMPLE_LIMIT,
-    });
 
     const kalshiTradeFlags =
       kalshiTrades.length > 0
@@ -162,24 +181,6 @@ export class IngestionQualityAssessorService {
       });
     }
 
-    // Persist contract-level quality report (replaces per-row updateMany)
-    if (kalshiPriceFlags) {
-      await this.prisma.ingestionQualityReport.create({
-        data: {
-          matchId,
-          contractId: target.kalshiTicker,
-          platform: 'kalshi',
-          source: 'KALSHI_API',
-          assessmentType: 'price',
-          dateRangeStart: dateRange.start,
-          dateRangeEnd: dateRange.end,
-          qualityFlags: flagsToJson(kalshiPriceFlags),
-          correlationId,
-          recordsAssessed: kalshiPrices.length,
-        },
-      });
-    }
-
     if (kalshiTradeFlags && this.hasQualityIssues(kalshiTradeFlags)) {
       allFlagSets.push({
         source: 'KALSHI_API',
@@ -189,44 +190,47 @@ export class IngestionQualityAssessorService {
       });
     }
 
-    // Persist contract-level quality report (replaces per-row updateMany)
+    // Persist quality reports in parallel
+    const reportWrites: Promise<unknown>[] = [];
+    if (kalshiPriceFlags) {
+      reportWrites.push(
+        this.prisma.ingestionQualityReport.create({
+          data: {
+            matchId,
+            contractId: target.kalshiTicker,
+            platform: 'kalshi',
+            source: 'KALSHI_API',
+            assessmentType: 'price',
+            dateRangeStart: dateRange.start,
+            dateRangeEnd: dateRange.end,
+            qualityFlags: flagsToJson(kalshiPriceFlags),
+            correlationId,
+            recordsAssessed: kalshiPrices.length,
+          },
+        }),
+      );
+    }
+
     if (kalshiTradeFlags) {
-      await this.prisma.ingestionQualityReport.create({
-        data: {
-          matchId,
-          contractId: target.kalshiTicker,
-          platform: 'kalshi',
-          source: 'KALSHI_API',
-          assessmentType: 'trade',
-          dateRangeStart: dateRange.start,
-          dateRangeEnd: dateRange.end,
-          qualityFlags: flagsToJson(kalshiTradeFlags),
-          correlationId,
-          recordsAssessed: kalshiTrades.length,
-        },
-      });
+      reportWrites.push(
+        this.prisma.ingestionQualityReport.create({
+          data: {
+            matchId,
+            contractId: target.kalshiTicker,
+            platform: 'kalshi',
+            source: 'KALSHI_API',
+            assessmentType: 'trade',
+            dateRangeStart: dateRange.start,
+            dateRangeEnd: dateRange.end,
+            qualityFlags: flagsToJson(kalshiTradeFlags),
+            correlationId,
+            recordsAssessed: kalshiTrades.length,
+          },
+        }),
+      );
     }
 
     // Depth quality assessment — PMXT Archive (P-17: removed dead guard)
-    const depths = await this.prisma.historicalDepth.findMany({
-      where: {
-        contractId: target.polymarketTokenId,
-        source: 'PMXT_ARCHIVE',
-        timestamp: { gte: dateRange.start, lte: dateRange.end },
-      },
-      select: {
-        platform: true,
-        contractId: true,
-        source: true,
-        timestamp: true,
-        bids: true,
-        asks: true,
-        updateType: true,
-      },
-      orderBy: { timestamp: 'asc' },
-      take: QUALITY_SAMPLE_LIMIT,
-    });
-
     if (depths.length > 0) {
       const depthFlags = this.dataQuality.assessDepthQuality(
         depths.map((d) => ({
@@ -256,6 +260,9 @@ export class IngestionQualityAssessorService {
       }
     }
 
+    // Wait for report writes to complete
+    await Promise.all(reportWrites);
+
     for (const entry of allFlagSets) {
       this.dataQuality.emitQualityWarning(
         entry.source,
@@ -266,13 +273,23 @@ export class IngestionQualityAssessorService {
       );
     }
 
-    // Freshness assessment
-    try {
-      const freshness = await this.dataQuality.assessFreshness(
+    // Run freshness + cross-source deviation in parallel
+    const [freshnessResult, deviationResult] = await Promise.allSettled([
+      this.dataQuality.assessFreshness(target.polymarketTokenId, [
+        'PMXT_ARCHIVE',
+        'ODDSPIPE',
+        'KALSHI_API',
+        'POLYMARKET_API',
+        'GOLDSKY',
+      ]),
+      this.dataQuality.assessCrossSourceDeviation(
         target.polymarketTokenId,
-        ['PMXT_ARCHIVE', 'ODDSPIPE', 'KALSHI_API', 'POLYMARKET_API', 'GOLDSKY'],
-      );
+        dateRange,
+      ),
+    ]);
 
+    if (freshnessResult.status === 'fulfilled') {
+      const freshness = freshnessResult.value;
       if (freshness.stale.length > 0) {
         this.logger.warn({
           message: `Stale sources for ${target.polymarketTokenId}: ${freshness.stale.join(', ')}`,
@@ -281,19 +298,18 @@ export class IngestionQualityAssessorService {
           freshness,
         });
       }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+    } else {
+      const msg =
+        freshnessResult.reason instanceof Error
+          ? freshnessResult.reason.message
+          : String(freshnessResult.reason);
       this.logger.warn(
         `Freshness assessment failed for ${target.polymarketTokenId}: ${msg}`,
       );
     }
 
-    // Cross-source deviation check (IG-1: AC#5)
-    try {
-      const deviation = await this.dataQuality.assessCrossSourceDeviation(
-        target.polymarketTokenId,
-        dateRange,
-      );
+    if (deviationResult.status === 'fulfilled') {
+      const deviation = deviationResult.value;
       if (deviation.hasDeviation) {
         this.logger.warn({
           message: `Cross-source price deviation for ${matchId}: ${deviation.deviations.length} deviation(s) >10%`,
@@ -301,8 +317,11 @@ export class IngestionQualityAssessorService {
           deviations: deviation.deviations.length,
         });
       }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+    } else {
+      const msg =
+        deviationResult.reason instanceof Error
+          ? deviationResult.reason.message
+          : String(deviationResult.reason);
       this.logger.warn(
         `Cross-source deviation check failed for ${target.polymarketTokenId}: ${msg}`,
       );

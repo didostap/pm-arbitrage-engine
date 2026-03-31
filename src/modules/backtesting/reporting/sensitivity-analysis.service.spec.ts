@@ -384,21 +384,25 @@ describe('SensitivityAnalysisService', () => {
       expect(typeof result.partial).toBe('boolean');
     });
 
-    it('[P0] should reject concurrent sweep for same runId with BACKTEST_REPORT_ERROR 4205', { timeout: 45_000 }, async () => {
-      engine.runHeadlessSimulation.mockImplementation(
-        () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve(createMetricsResult(1.5)), 500),
-          ),
-      );
+    it(
+      '[P0] should reject concurrent sweep for same runId with BACKTEST_REPORT_ERROR 4205',
+      { timeout: 45_000 },
+      async () => {
+        engine.runHeadlessSimulation.mockImplementation(
+          () =>
+            new Promise((resolve) =>
+              setTimeout(() => resolve(createMetricsResult(1.5)), 500),
+            ),
+        );
 
-      const sweep1 = service.runSweep('run-1');
-      // Second sweep for same runId should be rejected
-      await expect(service.runSweep('run-1')).rejects.toMatchObject({
-        code: SYSTEM_HEALTH_ERROR_CODES.BACKTEST_REPORT_ERROR,
-      });
-      await sweep1; // let first complete
-    });
+        const sweep1 = service.runSweep('run-1');
+        // Second sweep for same runId should be rejected
+        await expect(service.runSweep('run-1')).rejects.toMatchObject({
+          code: SYSTEM_HEALTH_ERROR_CODES.BACKTEST_REPORT_ERROR,
+        });
+        await sweep1; // let first complete
+      },
+    );
 
     it('[P1] should clear concurrency flag in finally block (allow retry after failure)', async () => {
       engine.runHeadlessSimulation.mockRejectedValueOnce(

@@ -154,17 +154,24 @@ export class DataQualityService {
           flags.hasLowVolume = true;
         }
       } else {
-        // P21: Slide through 1-hour windows — use strict < to avoid ghost window at boundary
+        // P21: Slide through 1-hour windows — two-pointer O(n) instead of O(n²) filter
         const hourMs = 60 * 60 * 1000;
+        let left = 0;
+        let right = 0;
         let windowStart = startMs;
         while (windowStart < endMs) {
           const windowEnd = windowStart + hourMs;
-          const count = sorted.filter(
-            (t) =>
-              t.timestamp.getTime() >= windowStart &&
-              t.timestamp.getTime() < windowEnd,
-          ).length;
-          if (count < LOW_TRADE_THRESHOLD) {
+          while (
+            right < sorted.length &&
+            sorted[right]!.timestamp.getTime() < windowEnd
+          )
+            right++;
+          while (
+            left < sorted.length &&
+            sorted[left]!.timestamp.getTime() < windowStart
+          )
+            left++;
+          if (right - left < LOW_TRADE_THRESHOLD) {
             flags.hasLowVolume = true;
             break;
           }
@@ -409,11 +416,21 @@ export class DataQualityService {
       deviationPct: number;
     }> = [];
 
+    // Two-pointer merge: both arrays sorted by timestamp → O(n + m) instead of O(n × m)
+    let pi = 0;
     for (const op of oddspipePrices) {
       const opTime = op.timestamp.getTime();
-      const match = polyPrices.find(
-        (pp) => Math.abs(pp.timestamp.getTime() - opTime) < HOUR_MS,
-      );
+      // Advance pointer past poly prices that are too early
+      while (
+        pi < polyPrices.length - 1 &&
+        polyPrices[pi]!.timestamp.getTime() < opTime - HOUR_MS
+      )
+        pi++;
+      const match =
+        pi < polyPrices.length &&
+        Math.abs(polyPrices[pi]!.timestamp.getTime() - opTime) < HOUR_MS
+          ? polyPrices[pi]
+          : null;
       if (!match) continue;
 
       const opClose = new Decimal(op.close.toString());

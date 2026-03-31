@@ -18,8 +18,15 @@ import { MatchAutoApprovedEvent } from '../../common/events/match-auto-approved.
 import { MatchPendingReviewEvent } from '../../common/events/match-pending-review.event';
 import { ClusterAssignedEvent } from '../../common/events/risk.events';
 import { LlmScoringError } from '../../common/errors/llm-scoring-error';
+import { ConfigValidationError } from '../../common/errors/config-validation-error';
 import { asMatchId, asContractId } from '../../common/types/branded.type';
 import type { ExternalMatchedPair } from '../../common/types';
+import { MatchOrigin } from '@prisma/client';
+
+const ORIGIN_MAP: Record<string, MatchOrigin> = {
+  predexon: MatchOrigin.PREDEXON,
+  oddspipe: MatchOrigin.ODDSPIPE,
+};
 
 interface ExistingMatchDescription {
   polymarketDescription: string | null;
@@ -38,7 +45,7 @@ function normalizeTitle(title: string): string[] {
 export function computeTitleSimilarity(title1: string, title2: string): number {
   const tokens1 = normalizeTitle(title1);
   const tokens2 = normalizeTitle(title2);
-  if (tokens1.length === 0 && tokens2.length === 0) return 0;
+  if (tokens1.length === 0 || tokens2.length === 0) return 0;
   const set1 = new Set(tokens1);
   const set2 = new Set(tokens2);
   const intersection = new Set([...set1].filter((t) => set2.has(t)));
@@ -105,6 +112,15 @@ export class ExternalPairProcessorService {
         0.45,
       ),
     );
+
+    if (this.minReviewThreshold >= this.autoApproveThreshold) {
+      throw new ConfigValidationError(
+        `LLM_MIN_REVIEW_THRESHOLD (${this.minReviewThreshold}) must be less than LLM_AUTO_APPROVE_THRESHOLD (${this.autoApproveThreshold})`,
+        [
+          `LLM_MIN_REVIEW_THRESHOLD (${this.minReviewThreshold}) must be less than LLM_AUTO_APPROVE_THRESHOLD (${this.autoApproveThreshold})`,
+        ],
+      );
+    }
   }
 
   async processAllProviders(
@@ -116,6 +132,7 @@ export class ExternalPairProcessorService {
     ];
 
     const allPairs: { pair: ExternalMatchedPair; sourceId: string }[] = [];
+    /** Cleanup: local scope — GC'd on method return */
     const sourceStatsMap = new Map<string, ExternalPairSourceStats>();
 
     for (const { provider, sourceId } of providers) {
@@ -153,8 +170,16 @@ export class ExternalPairProcessorService {
       try {
         const rawPairs = allPairs.map((p) => p.pair);
         const enriched = await enrichFn(rawPairs);
-        for (let i = 0; i < allPairs.length; i++) {
-          allPairs[i]!.pair = enriched[i] ?? allPairs[i]!.pair;
+        if (enriched.length !== rawPairs.length) {
+          this.logger.warn({
+            message:
+              'Enrichment returned different length — skipping enrichment to avoid wrong-pair assignment',
+            data: { expected: rawPairs.length, got: enriched.length },
+          });
+        } else {
+          for (let i = 0; i < allPairs.length; i++) {
+            allPairs[i]!.pair = enriched[i] ?? allPairs[i]!.pair;
+          }
         }
       } catch (error) {
         this.logger.warn({
@@ -171,6 +196,12 @@ export class ExternalPairProcessorService {
       select: { polymarketDescription: true, kalshiDescription: true },
     });
 
+    // Process candidates in parallel batches.
+    // Stats mutations inside processPair (e.g. stats.scored++)
+    // are synchronous increments that execute between await points in
+    // Node.js's single-threaded event loop — no two increments can
+    // interleave mid-operation. Do not refactor those increments to
+    // span an await without revisiting concurrency safety.
     const limit = pLimit(this.llmConcurrency);
     const tasks = allPairs.map(({ pair, sourceId }) =>
       limit(() =>
@@ -267,7 +298,15 @@ export class ExternalPairProcessorService {
       const isAutoApproved = effectiveScore >= this.autoApproveThreshold;
       const isBelowReviewThreshold = effectiveScore < this.minReviewThreshold;
 
-      const originEnum = sourceId === 'predexon' ? 'PREDEXON' : 'ODDSPIPE';
+      const originEnum = ORIGIN_MAP[sourceId];
+      if (!originEnum) {
+        this.logger.error({
+          message: `Unknown source ID: ${sourceId} — cannot map to MatchOrigin`,
+          data: { sourceId, polymarketId: pair.polymarketId },
+        });
+        stats.scoringFailures++;
+        return;
+      }
 
       const match = await this.prisma.contractMatch.create({
         data: {
@@ -297,6 +336,12 @@ export class ExternalPairProcessorService {
       });
 
       stats.scored++;
+
+      // Accumulate newly-created description for intra-batch fuzzy dedup
+      existingDescriptions.push({
+        polymarketDescription: pair.polymarketTitle,
+        kalshiDescription: pair.kalshiTitle,
+      });
 
       // Cluster classification for non-rejected matches
       if (!isBelowReviewThreshold) {
@@ -355,6 +400,17 @@ export class ExternalPairProcessorService {
             result.escalated,
           ),
         );
+        if (!pair.polymarketClobTokenId) {
+          this.logger.warn({
+            message:
+              'Auto-approved external pair lacks polymarketClobTokenId — untradeable until operator supplies it',
+            data: {
+              matchId: match.matchId,
+              source: sourceId,
+              polymarketId: pair.polymarketId,
+            },
+          });
+        }
       } else if (isBelowReviewThreshold) {
         stats.autoRejected++;
       } else {

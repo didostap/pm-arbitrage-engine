@@ -156,6 +156,37 @@ describe('ExternalPairEnrichmentService', () => {
     expect(catalogSync.syncCatalogs).toHaveBeenCalledOnce();
   });
 
+  it('[P0] Predexon pair with IDs, catalog match found but clobTokenId is null, should pass through unchanged', async () => {
+    catalogSync.syncCatalogs.mockResolvedValue(
+      new Map([
+        [
+          PlatformId.POLYMARKET,
+          [
+            makeContract(PlatformId.POLYMARKET, {
+              contractId: '0xabc123',
+              clobTokenId: undefined,
+              outcomeLabel: 'Yes',
+            }),
+          ],
+        ],
+        [PlatformId.KALSHI, [makeContract(PlatformId.KALSHI)]],
+      ]),
+    );
+
+    const pairs = [
+      makePair({
+        polymarketId: '0xabc123',
+        kalshiId: 'KXBTC-24DEC31',
+        source: 'predexon',
+      }),
+    ];
+
+    const result = await service.enrichPairs(pairs);
+
+    expect(result[0]!.polymarketClobTokenId).toBeUndefined();
+    expect(result[0]!.polymarketId).toBe('0xabc123');
+  });
+
   it('[P0] Predexon pair with IDs but no catalog match should pass through with null clobTokenId', async () => {
     catalogSync.syncCatalogs.mockResolvedValue(
       new Map([

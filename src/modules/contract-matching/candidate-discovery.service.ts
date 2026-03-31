@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -52,6 +58,7 @@ function isWithinSettlementWindow(
 export class CandidateDiscoveryService implements OnModuleInit {
   private readonly logger = new Logger(CandidateDiscoveryService.name);
   private _isRunning = false;
+  private externalIngestion?: { isRunning: boolean };
   private readonly autoApproveThreshold: number;
   private readonly minReviewThreshold: number;
   private readonly preFilterThreshold: number;
@@ -71,7 +78,11 @@ export class CandidateDiscoveryService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
+    @Optional()
+    @Inject('ExternalPairIngestionService')
+    externalIngestionRef?: { isRunning: boolean },
   ) {
+    this.externalIngestion = externalIngestionRef;
     this.autoApproveThreshold = Number(
       this.configService.get<number>('LLM_AUTO_APPROVE_THRESHOLD', 85),
     );
@@ -179,6 +190,13 @@ export class CandidateDiscoveryService implements OnModuleInit {
   }
 
   async runDiscovery(): Promise<void> {
+    if (this.externalIngestion?.isRunning) {
+      this.logger.debug({
+        message: 'Discovery skipped — ExternalPairIngestionService is running',
+      });
+      return;
+    }
+
     await withCorrelationId(async () => {
       this._isRunning = true;
       const startTime = Date.now();
