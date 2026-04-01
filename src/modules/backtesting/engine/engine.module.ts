@@ -6,6 +6,7 @@ import { BacktestStateMachineService } from './backtest-state-machine.service';
 import { BacktestPortfolioService } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
+import { BacktestDataLoaderService } from './backtest-data-loader.service';
 import { ReportingModule } from '../reporting/reporting.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { ReportingModule } from '../reporting/reporting.module';
     BacktestPortfolioService,
     FillModelService,
     ExitEvaluatorService,
+    BacktestDataLoaderService,
   ],
   exports: [
     BACKTEST_ENGINE_TOKEN,
@@ -28,6 +30,7 @@ import { ReportingModule } from '../reporting/reporting.module';
     BacktestPortfolioService,
     FillModelService,
     ExitEvaluatorService,
+    BacktestDataLoaderService,
   ],
 })
 export class EngineModule {}

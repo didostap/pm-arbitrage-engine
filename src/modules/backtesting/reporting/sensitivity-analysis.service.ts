@@ -21,6 +21,7 @@ import type {
 } from '../types/calibration-report.types';
 import type { IBacktestConfig } from '../../../common/interfaces/backtest-engine.interface';
 import { BacktestEngineService } from '../engine/backtest-engine.service';
+import { BacktestDataLoaderService } from '../engine/backtest-data-loader.service';
 
 const MAX_SWEEP_POINTS = 500;
 const PROGRESS_INTERVAL = 10;
@@ -43,6 +44,7 @@ export class SensitivityAnalysisService {
     private readonly eventEmitter: EventEmitter2,
     @Inject(BacktestEngineService)
     private readonly engineService: BacktestEngineService,
+    private readonly dataLoader: BacktestDataLoaderService,
   ) {}
 
   isInProgress(runId: string): boolean {
@@ -122,8 +124,12 @@ export class SensitivityAnalysisService {
     }
 
     // Load data ONCE and reuse across all sweeps
-    const pairs = await this.engineService.loadPairs(baseConfig);
-    const prices = await this.engineService.loadPrices(baseConfig);
+    const pairs = await this.dataLoader.loadPairs(baseConfig);
+    const prices = await this.dataLoader.loadPricesForChunk(
+      new Date(baseConfig.dateRangeStart),
+      new Date(baseConfig.dateRangeEnd),
+      true,
+    );
     const timeSteps = this.engineService.alignPrices(prices, pairs);
 
     // Build sweep ranges

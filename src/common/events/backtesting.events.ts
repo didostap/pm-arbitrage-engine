@@ -280,6 +280,43 @@ export class BacktestWalkForwardCompletedEvent extends BaseEvent {
 }
 
 // ============================================================
+// Story 10-9-3a: Chunked Pipeline Progress Events
+// ============================================================
+
+export class BacktestPipelineChunkCompletedEvent extends BaseEvent {
+  public readonly runId: string;
+  public readonly chunkIndex: number;
+  public readonly totalChunks: number;
+  public readonly chunkDateStart: Date;
+  public readonly chunkDateEnd: Date;
+  public readonly elapsedMs: number;
+  public readonly positionsOpenedInChunk: number;
+  public readonly positionsClosedInChunk: number;
+
+  constructor(payload: {
+    runId: string;
+    chunkIndex: number;
+    totalChunks: number;
+    chunkDateStart: Date;
+    chunkDateEnd: Date;
+    elapsedMs: number;
+    positionsOpenedInChunk: number;
+    positionsClosedInChunk: number;
+    correlationId?: string;
+  }) {
+    super(payload.correlationId);
+    this.runId = payload.runId;
+    this.chunkIndex = payload.chunkIndex;
+    this.totalChunks = payload.totalChunks;
+    this.chunkDateStart = payload.chunkDateStart;
+    this.chunkDateEnd = payload.chunkDateEnd;
+    this.elapsedMs = payload.elapsedMs;
+    this.positionsOpenedInChunk = payload.positionsOpenedInChunk;
+    this.positionsClosedInChunk = payload.positionsClosedInChunk;
+  }
+}
+
+// ============================================================
 // Story 10-9-6: Incremental Ingestion Freshness Events
 // ============================================================
 

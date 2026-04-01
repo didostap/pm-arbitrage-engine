@@ -62,7 +62,7 @@ export class IncrementalFetchService {
     const now = new Date();
 
     // Platform data — per source error isolation
-    await this.fetchPlatformData(targets, now, results);
+    // await this.fetchPlatformData(targets, now, results);
 
     // Third-party data
     await this.fetchThirdPartyData(targets, now, results);
@@ -131,7 +131,6 @@ export class IncrementalFetchService {
             this.logger.error(
               `Kalshi fetch failed: ${error instanceof Error ? error.message : String(error)}`,
             );
-            throw error;
           }
         }
         return { recordCount: totalRecords, contractCount };

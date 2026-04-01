@@ -24,9 +24,14 @@ function createMockPrisma() {
 function createMockEngine() {
   return {
     runHeadlessSimulation: vi.fn(),
-    loadPairs: vi.fn().mockResolvedValue([]),
-    loadPrices: vi.fn().mockResolvedValue([]),
     alignPrices: vi.fn().mockReturnValue([]),
+  };
+}
+
+function createMockDataLoader() {
+  return {
+    loadPairs: vi.fn().mockResolvedValue([]),
+    loadPricesForChunk: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -51,6 +56,7 @@ function createCompletedRun(overrides: Record<string, unknown> = {}) {
       minConfidenceScore: 0.8,
       walkForwardEnabled: false,
       walkForwardTrainPct: 0.7,
+      chunkWindowDays: 1,
     },
     dateRangeStart: new Date('2025-01-01'),
     dateRangeEnd: new Date('2025-03-01'),
@@ -76,17 +82,20 @@ describe('SensitivityAnalysisService', () => {
   let service: SensitivityAnalysisService;
   let prisma: ReturnType<typeof createMockPrisma>;
   let engine: ReturnType<typeof createMockEngine>;
+  let dataLoader: ReturnType<typeof createMockDataLoader>;
   let eventEmitter: EventEmitter2;
 
   beforeEach(() => {
     prisma = createMockPrisma();
     engine = createMockEngine();
+    dataLoader = createMockDataLoader();
     eventEmitter = new EventEmitter2();
     vi.spyOn(eventEmitter, 'emit');
     service = new SensitivityAnalysisService(
       prisma as any,
       eventEmitter,
       engine as any,
+      dataLoader as any,
     );
   });
 
@@ -128,9 +137,9 @@ describe('SensitivityAnalysisService', () => {
 
     it('[P0] should load data ONCE and reuse across all sweep iterations', async () => {
       await service.runSweep('run-1');
-      // loadPairs and loadPrices called once each via engine service
-      expect(engine.loadPairs).toHaveBeenCalledTimes(1);
-      expect(engine.loadPrices).toHaveBeenCalledTimes(1);
+      // loadPairs and loadPricesForChunk called once each via data loader
+      expect(dataLoader.loadPairs).toHaveBeenCalledTimes(1);
+      expect(dataLoader.loadPricesForChunk).toHaveBeenCalledTimes(1);
       expect(engine.alignPrices).toHaveBeenCalledTimes(1);
     });
 

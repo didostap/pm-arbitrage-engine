@@ -84,4 +84,9 @@ export class BacktestConfigDto implements IBacktestConfig {
   @Min(60)
   @Max(3600)
   timeoutSeconds: number = 300;
+
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  chunkWindowDays: number = 1;
 }

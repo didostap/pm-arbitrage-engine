@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import Decimal from 'decimal.js';
@@ -7,152 +8,235 @@ import { BacktestStateMachineService } from './backtest-state-machine.service';
 import { BacktestPortfolioService } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
+import { BacktestDataLoaderService } from './backtest-data-loader.service';
 import { WalkForwardService } from '../reporting/walk-forward.service';
 import { CalibrationReportService } from '../reporting/calibration-report.service';
+import { BacktestEngineService } from './backtest-engine.service';
+import type { BacktestTimeStep } from '../types/simulation.types';
+
+/** Helper: build aligned BacktestTimeStep[] for pipeline tests */
+function makeTimeSteps(
+  ...entries: Array<{
+    ts: string;
+    pairs: Array<{
+      k: string;
+      p: string;
+      kClose: string;
+      pClose: string;
+      resolution?: Date | null;
+    }>;
+  }>
+): BacktestTimeStep[] {
+  return entries.map((e) => ({
+    timestamp: new Date(e.ts),
+    pairs: e.pairs.map((pair) => ({
+      pairId: `${pair.k}:${pair.p}`,
+      kalshiContractId: pair.k,
+      polymarketContractId: pair.p,
+      kalshiClose: new Decimal(pair.kClose),
+      polymarketClose: new Decimal(pair.pClose),
+      resolutionTimestamp: pair.resolution ?? null,
+    })),
+  }));
+}
+
+const RUN_ID = 'run-1';
+
+const mockConfig = {
+  dateRangeStart: '2025-01-01T00:00:00Z',
+  dateRangeEnd: '2025-03-01T00:00:00Z',
+  edgeThresholdPct: 0.008,
+  positionSizePct: 0.03,
+  maxConcurrentPairs: 10,
+  bankrollUsd: '10000',
+  tradingWindowStartHour: 14,
+  tradingWindowEndHour: 23,
+  gasEstimateUsd: '0.50',
+  exitEdgeEvaporationPct: 0.002,
+  exitTimeLimitHours: 72,
+  exitProfitCapturePct: 0.8,
+  timeoutSeconds: 300,
+  minConfidenceScore: 0.8,
+  walkForwardEnabled: false,
+  walkForwardTrainPct: 0.7,
+  chunkWindowDays: 1,
+};
+
+function createMockPrisma() {
+  return {
+    backtestRun: {
+      create: vi.fn().mockResolvedValue({ id: RUN_ID, status: 'IDLE' }),
+      update: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    backtestPosition: {
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    historicalPrice: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    contractMatch: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+  };
+}
+
+function createMockStateMachine() {
+  return {
+    createRun: vi.fn().mockResolvedValue(RUN_ID),
+    cancelRun: vi.fn().mockResolvedValue(undefined),
+    getRunStatus: vi
+      .fn()
+      .mockReturnValue({ runId: RUN_ID, status: 'CONFIGURING' }),
+    transitionRun: vi.fn(),
+    failRun: vi.fn().mockResolvedValue(undefined),
+    isCancelled: vi.fn().mockReturnValue(false),
+    cleanupRun: vi.fn(),
+    maxConcurrentRuns: 2,
+    onModuleInit: vi.fn().mockResolvedValue(undefined),
+    onModuleDestroy: vi.fn(),
+  };
+}
+
+function createMockPortfolio() {
+  return {
+    initialize: vi.fn(),
+    openPosition: vi.fn().mockReturnValue(true),
+    closePosition: vi.fn(),
+    updateEquity: vi.fn(),
+    getState: vi.fn().mockReturnValue({
+      openPositions: new Map(),
+      closedPositions: [],
+      availableCapital: new Decimal('10000'),
+      deployedCapital: new Decimal('0'),
+      peakEquity: new Decimal('10000'),
+      currentEquity: new Decimal('10000'),
+      realizedPnl: new Decimal('0'),
+      maxDrawdown: new Decimal('0'),
+    }),
+    getAggregateMetrics: vi.fn().mockReturnValue({
+      totalPositions: 0,
+      winCount: 0,
+      lossCount: 0,
+      totalPnl: new Decimal('0'),
+      maxDrawdown: new Decimal('0'),
+      sharpeRatio: null,
+      profitFactor: null,
+      avgHoldingHours: new Decimal('0'),
+      capitalUtilization: new Decimal('0'),
+    }),
+    destroyRun: vi.fn(),
+  };
+}
+
+function createMockFillModel() {
+  return {
+    modelFill: vi.fn().mockResolvedValue(null),
+    findNearestDepth: vi.fn().mockResolvedValue(null),
+    adaptDepthToOrderBook: vi.fn(),
+  };
+}
+
+function createMockExitEvaluator() {
+  return {
+    evaluateExits: vi.fn().mockReturnValue(null),
+  };
+}
+
+function createMockWalkForward() {
+  return {
+    splitTimeSteps: vi.fn().mockReturnValue({ train: [], test: [] }),
+    compareMetrics: vi
+      .fn()
+      .mockReturnValue({ degradation: {}, overfitFlags: [] }),
+    buildWalkForwardResults: vi.fn().mockReturnValue({
+      trainPct: 0.7,
+      testPct: 0.3,
+      trainDateRange: { start: '', end: '' },
+      testDateRange: { start: '', end: '' },
+      trainMetrics: {},
+      testMetrics: {},
+      degradation: {},
+      overfitFlags: [],
+    }),
+  };
+}
+
+function createMockCalibrationReport() {
+  return {
+    generateReport: vi.fn().mockResolvedValue({}),
+  };
+}
+
+function createMockDataLoader() {
+  return {
+    loadPairs: vi.fn().mockResolvedValue([]),
+    generateChunkRanges: vi.fn().mockReturnValue([
+      {
+        start: new Date(mockConfig.dateRangeStart),
+        end: new Date(mockConfig.dateRangeEnd),
+      },
+    ]),
+    loadPricesForChunk: vi.fn().mockResolvedValue([]),
+    loadAlignedPricesForChunk: vi.fn().mockResolvedValue([]),
+    preloadDepthsForChunk: vi.fn().mockResolvedValue(new Map()),
+    checkDataCoverage: vi
+      .fn()
+      .mockResolvedValue({ hasData: true, coveragePct: 1.0 }),
+  };
+}
 
 describe('BacktestEngineService', () => {
-  let service: any;
-  let prismaService: any;
+  let service: BacktestEngineService;
+  let prismaService: ReturnType<typeof createMockPrisma>;
   let eventEmitter: EventEmitter2;
-  let stateMachineService: any;
-  let portfolioService: any;
-  let fillModelService: any;
-  let exitEvaluatorService: any;
-  let walkForwardService: any;
-  let calibrationReportService: any;
-
-  const RUN_ID = 'run-1';
-
-  const mockConfig = {
-    dateRangeStart: '2025-01-01T00:00:00Z',
-    dateRangeEnd: '2025-03-01T00:00:00Z',
-    edgeThresholdPct: 0.008,
-    positionSizePct: 0.03,
-    maxConcurrentPairs: 10,
-    bankrollUsd: '10000',
-    tradingWindowStartHour: 14,
-    tradingWindowEndHour: 23,
-    gasEstimateUsd: '0.50',
-    exitEdgeEvaporationPct: 0.002,
-    exitTimeLimitHours: 72,
-    exitProfitCapturePct: 0.8,
-    timeoutSeconds: 300,
-    minConfidenceScore: 0.8,
-    walkForwardEnabled: false,
-    walkForwardTrainPct: 0.7,
-  };
+  let stateMachineService: ReturnType<typeof createMockStateMachine>;
+  let portfolioService: ReturnType<typeof createMockPortfolio>;
+  let fillModelService: ReturnType<typeof createMockFillModel>;
+  let exitEvaluatorService: ReturnType<typeof createMockExitEvaluator>;
+  let dataLoaderService: ReturnType<typeof createMockDataLoader>;
+  let walkForwardService: ReturnType<typeof createMockWalkForward>;
+  let calibrationReportService: ReturnType<typeof createMockCalibrationReport>;
 
   beforeEach(async () => {
-    prismaService = {
-      backtestRun: {
-        create: vi.fn().mockResolvedValue({ id: RUN_ID, status: 'IDLE' }),
-        update: vi.fn().mockResolvedValue({}),
-        findMany: vi.fn().mockResolvedValue([]),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-      backtestPosition: {
-        createMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      historicalPrice: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      contractMatch: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-    };
-
+    prismaService = createMockPrisma();
     eventEmitter = new EventEmitter2();
     vi.spyOn(eventEmitter, 'emit');
+    stateMachineService = createMockStateMachine();
+    portfolioService = createMockPortfolio();
+    fillModelService = createMockFillModel();
+    exitEvaluatorService = createMockExitEvaluator();
+    walkForwardService = createMockWalkForward();
+    calibrationReportService = createMockCalibrationReport();
+    dataLoaderService = createMockDataLoader();
 
-    stateMachineService = {
-      createRun: vi.fn().mockResolvedValue(RUN_ID),
-      cancelRun: vi.fn().mockResolvedValue(undefined),
-      getRunStatus: vi
-        .fn()
-        .mockReturnValue({ runId: RUN_ID, status: 'CONFIGURING' }),
-      transitionRun: vi.fn(),
-      failRun: vi.fn().mockResolvedValue(undefined),
-      isCancelled: vi.fn().mockReturnValue(false),
-      cleanupRun: vi.fn(),
-      maxConcurrentRuns: 2,
-      onModuleInit: vi.fn().mockResolvedValue(undefined),
-      onModuleDestroy: vi.fn(),
-    };
-
-    portfolioService = {
-      initialize: vi.fn(),
-      openPosition: vi.fn().mockReturnValue(true),
-      closePosition: vi.fn(),
-      updateEquity: vi.fn(),
-      getState: vi.fn().mockReturnValue({
-        openPositions: new Map(),
-        closedPositions: [],
-        availableCapital: new Decimal('10000'),
-        deployedCapital: new Decimal('0'),
-        peakEquity: new Decimal('10000'),
-        currentEquity: new Decimal('10000'),
-        realizedPnl: new Decimal('0'),
-        maxDrawdown: new Decimal('0'),
-      }),
-      getAggregateMetrics: vi.fn().mockReturnValue({
-        totalPositions: 0,
-        winCount: 0,
-        lossCount: 0,
-        totalPnl: new Decimal('0'),
-        maxDrawdown: new Decimal('0'),
-        sharpeRatio: null,
-        profitFactor: null,
-        avgHoldingHours: new Decimal('0'),
-        capitalUtilization: new Decimal('0'),
-      }),
-      destroyRun: vi.fn(),
-    };
-
-    fillModelService = {
-      modelFill: vi.fn().mockResolvedValue(null),
-      findNearestDepth: vi.fn().mockResolvedValue(null),
-      adaptDepthToOrderBook: vi.fn(),
-    };
-
-    exitEvaluatorService = {
-      evaluateExits: vi.fn().mockReturnValue(null),
-    };
-
-    walkForwardService = {
-      splitTimeSteps: vi.fn().mockReturnValue({ train: [], test: [] }),
-      compareMetrics: vi
-        .fn()
-        .mockReturnValue({ degradation: {}, overfitFlags: [] }),
-      buildWalkForwardResults: vi.fn().mockReturnValue({
-        trainPct: 0.7,
-        testPct: 0.3,
-        trainDateRange: { start: '', end: '' },
-        testDateRange: { start: '', end: '' },
-        trainMetrics: {},
-        testMetrics: {},
-        degradation: {},
-        overfitFlags: [],
-      }),
-    };
-
-    calibrationReportService = {
-      generateReport: vi.fn().mockResolvedValue({}),
-    };
-
-    const { BacktestEngineService } = await import('./backtest-engine.service');
     const module = await Test.createTestingModule({
       providers: [
         BacktestEngineService,
-        { provide: PrismaService, useValue: prismaService },
-        { provide: EventEmitter2, useValue: eventEmitter },
-        { provide: BacktestStateMachineService, useValue: stateMachineService },
-        { provide: BacktestPortfolioService, useValue: portfolioService },
-        { provide: FillModelService, useValue: fillModelService },
-        { provide: ExitEvaluatorService, useValue: exitEvaluatorService },
-        { provide: WalkForwardService, useValue: walkForwardService },
+        { provide: PrismaService, useFactory: () => prismaService },
+        { provide: EventEmitter2, useFactory: () => eventEmitter },
+        {
+          provide: BacktestStateMachineService,
+          useFactory: () => stateMachineService,
+        },
+        {
+          provide: BacktestPortfolioService,
+          useFactory: () => portfolioService,
+        },
+        { provide: FillModelService, useFactory: () => fillModelService },
+        {
+          provide: ExitEvaluatorService,
+          useFactory: () => exitEvaluatorService,
+        },
+        {
+          provide: BacktestDataLoaderService,
+          useFactory: () => dataLoaderService,
+        },
+        { provide: WalkForwardService, useFactory: () => walkForwardService },
         {
           provide: CalibrationReportService,
-          useValue: calibrationReportService,
+          useFactory: () => calibrationReportService,
         },
       ],
     }).compile();
@@ -192,24 +276,16 @@ describe('BacktestEngineService', () => {
   // ============================================================
 
   describe('Data loading', () => {
-    it('[P0] should load HistoricalPrice and target pairs for configured date range', async () => {
-      const runId = await service.startRun(mockConfig);
+    it('[P0] should load aligned prices via dataLoader for configured date range', async () => {
+      await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
 
-      expect(prismaService.historicalPrice.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            timestamp: expect.objectContaining({
-              gte: new Date('2025-01-01T00:00:00Z'),
-              lte: new Date('2025-03-01T00:00:00Z'),
-            }),
-          }),
-        }),
-      );
+      expect(dataLoaderService.loadAlignedPricesForChunk).toHaveBeenCalled();
+      expect(dataLoaderService.loadPairs).toHaveBeenCalledWith(mockConfig);
     });
 
     it('[P0] should fail with 4211 when data coverage < 50%', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -217,20 +293,10 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-01T14:00:00Z'),
-          close: '0.45',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-01T14:00:00Z'),
-          close: '0.52',
-        },
-      ]);
+      dataLoaderService.checkDataCoverage.mockResolvedValue({
+        hasData: true,
+        coveragePct: 0.3,
+      });
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
@@ -242,17 +308,11 @@ describe('BacktestEngineService', () => {
       );
     });
 
-    it('[P1] should filter pairs by minConfidenceScore (P-13)', async () => {
+    it('[P1] should delegate pair loading to dataLoaderService (P-13)', async () => {
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
 
-      expect(prismaService.contractMatch.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            confidenceScore: { gte: 0.8 },
-          }),
-        }),
-      );
+      expect(dataLoaderService.loadPairs).toHaveBeenCalledWith(mockConfig);
     });
 
     it('[P0] should fail with BACKTEST_INVALID_CONFIGURATION when dateRange is zero (P-27)', async () => {
@@ -261,7 +321,7 @@ describe('BacktestEngineService', () => {
         dateRangeStart: '2025-01-01T00:00:00Z',
         dateRangeEnd: '2025-01-01T00:00:00Z',
       };
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -269,8 +329,6 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([]);
-
       await service.startRun(zeroRangeConfig);
       await new Promise((r) => setTimeout(r, 200));
 
@@ -288,7 +346,7 @@ describe('BacktestEngineService', () => {
 
   describe('Detection model', () => {
     const setupPricesAndPairs = () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           id: 1,
           kalshiContractId: 'K-1',
@@ -299,32 +357,18 @@ describe('BacktestEngineService', () => {
         },
       ]);
       // K=0.35, P=0.58 → grossEdge = (1-0.58) - 0.35 = 0.07 (7%) — well above threshold after fees
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.35',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.58',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.35',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.58',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.35', pClose: '0.58' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.35', pClose: '0.58' }],
+          },
+        ),
+      );
     };
 
     it('[P0] should calculate gross edge for both scenarios and pick positive edge', async () => {
@@ -357,7 +401,7 @@ describe('BacktestEngineService', () => {
       // Verify fill model was called with correct position size
       const calls = fillModelService.modelFill.mock.calls;
       if (calls.length > 0) {
-        const positionSize = calls[0][5];
+        const positionSize = calls[0]![5] as Decimal;
         // positionSizePct (0.03) * bankroll (10000) = 300
         expect(positionSize.toNumber()).toBeCloseTo(300, 0);
       }
@@ -385,13 +429,8 @@ describe('BacktestEngineService', () => {
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 300));
 
-      // The detection model uses close prices from HistoricalPrice
-      // Verify Prisma was queried for historical prices (close-based candles)
-      expect(prismaService.historicalPrice.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          orderBy: { timestamp: 'asc' },
-        }),
-      );
+      // The detection model uses close prices from HistoricalPrice loaded via dataLoader
+      expect(dataLoaderService.loadAlignedPricesForChunk).toHaveBeenCalled();
     });
   });
 
@@ -401,7 +440,7 @@ describe('BacktestEngineService', () => {
 
   describe('Fill modeling flow', () => {
     const setupDataWithEdge = () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           id: 1,
           kalshiContractId: 'K-1',
@@ -412,32 +451,18 @@ describe('BacktestEngineService', () => {
         },
       ]);
       // Kalshi 0.40, Poly 0.55 → gross edge = |1-0.55-0.40| = 0.05 (5%)
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.55',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.55',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+        ),
+      );
     };
 
     it('[P0] should abort position when either leg returns null from FillModelService', async () => {
@@ -543,7 +568,7 @@ describe('BacktestEngineService', () => {
         deployedCapital: new Decimal('300'),
       });
 
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -552,32 +577,18 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.45',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.52',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.47',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.50',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.45', pClose: '0.52' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.47', pClose: '0.50' }],
+          },
+        ),
+      );
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 300));
@@ -626,7 +637,7 @@ describe('BacktestEngineService', () => {
       });
 
       // Kalshi price 0.97 → resolution price 1.00
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -635,32 +646,34 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.97',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.98',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.97',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.98',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [
+              {
+                k: 'K-1',
+                p: 'P-1',
+                kClose: '0.97',
+                pClose: '0.98',
+                resolution: new Date('2025-02-10T00:00:00Z'),
+              },
+            ],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [
+              {
+                k: 'K-1',
+                p: 'P-1',
+                kClose: '0.97',
+                pClose: '0.98',
+                resolution: new Date('2025-02-10T00:00:00Z'),
+              },
+            ],
+          },
+        ),
+      );
 
       fillModelService.findNearestDepth.mockResolvedValue({
         bids: [],
@@ -673,16 +686,16 @@ describe('BacktestEngineService', () => {
 
       if (portfolioService.closePosition.mock.calls.length > 0) {
         const closeCall = portfolioService.closePosition.mock.calls[0];
-        expect(closeCall[0]).toBe(RUN_ID);
-        expect(closeCall[1]).toBe('pos-1');
-        expect(closeCall[2]).toEqual(
+        expect(closeCall![0]).toBe(RUN_ID);
+        expect(closeCall![1]).toBe('pos-1');
+        expect(closeCall![2]).toEqual(
           expect.objectContaining({
             exitReason: 'RESOLUTION_FORCE_CLOSE',
             kalshiExitPrice: expect.any(Decimal),
           }),
         );
         // Resolution price should be 1.00 (since kalshi 0.97 >= 0.95)
-        expect(closeCall[2].kalshiExitPrice.toNumber()).toBe(1);
+        expect(closeCall![2]!.kalshiExitPrice.toNumber()).toBe(1);
       }
     });
 
@@ -713,7 +726,7 @@ describe('BacktestEngineService', () => {
         deployedCapital: new Decimal('300'),
       });
 
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -722,41 +735,29 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.45',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.52',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.47',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.50',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.45', pClose: '0.52' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.47', pClose: '0.50' }],
+          },
+        ),
+      );
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 300));
 
-      // findNearestDepth should be called for BOTH KALSHI and POLYMARKET
-      const depthCalls = fillModelService.findNearestDepth.mock.calls;
-      const platforms = depthCalls.map((c: any[]) => c[0]);
-      expect(platforms).toContain('KALSHI');
-      expect(platforms).toContain('POLYMARKET');
+      // Depth data for both platforms is pre-loaded via depthCache per chunk
+      expect(dataLoaderService.preloadDepthsForChunk).toHaveBeenCalledWith(
+        expect.arrayContaining(['K-1', 'P-1']),
+        expect.any(Date),
+        expect.any(Date),
+        expect.any(Boolean),
+      );
     });
   });
 
@@ -768,7 +769,7 @@ describe('BacktestEngineService', () => {
     it('[P1] should transition to FAILED with 4210 when elapsed time exceeds timeoutSeconds', async () => {
       // Use timeoutSeconds=60 and mock Date.now to jump forward
       const timeoutConfig = { ...mockConfig, timeoutSeconds: 60 };
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -777,32 +778,18 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.35',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.58',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.35',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.58',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.35', pClose: '0.58' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.35', pClose: '0.58' }],
+          },
+        ),
+      );
 
       // Make Date.now return a time far in the future after the first call
       const realDateNow = Date.now;
@@ -831,7 +818,7 @@ describe('BacktestEngineService', () => {
 
   describe('Trading window filter', () => {
     it('[P1] should skip timestamps outside trading window', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -841,32 +828,18 @@ describe('BacktestEngineService', () => {
         },
       ]);
       // Price at 05:00 UTC — outside default window (14-23)
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T05:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T05:00:00Z'),
-          close: '0.55',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T05:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T05:00:00Z'),
-          close: '0.55',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T05:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+          {
+            ts: '2025-02-15T05:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+        ),
+      );
 
       fillModelService.modelFill.mockResolvedValue({
         vwapPrice: new Decimal('0.40'),
@@ -887,7 +860,7 @@ describe('BacktestEngineService', () => {
         tradingWindowStartHour: 22,
         tradingWindowEndHour: 6,
       };
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -897,32 +870,18 @@ describe('BacktestEngineService', () => {
         },
       ]);
       // 23:00 UTC should be IN the window for wrap-around 22-06
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T23:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T23:00:00Z'),
-          close: '0.55',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T23:00:00Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T23:00:00Z'),
-          close: '0.55',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T23:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+          {
+            ts: '2025-02-15T23:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+        ),
+      );
 
       fillModelService.modelFill.mockResolvedValue({
         vwapPrice: new Decimal('0.40'),
@@ -944,7 +903,7 @@ describe('BacktestEngineService', () => {
 
   describe('Price alignment', () => {
     it('[P1] should skip time steps where either platform has no price data', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -953,24 +912,19 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      // Only Kalshi has data, no Polymarket → should produce zero time steps
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.45',
-        },
-      ]);
+      // Only Kalshi has data, no Polymarket → DB-side alignment returns empty (JOIN requires both)
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
 
-      expect(portfolioService.initialize).not.toHaveBeenCalled();
+      // Portfolio IS initialized (coverage check passes via checkDataCoverage mock),
+      // but no positions are opened because alignment produces empty time steps
+      expect(portfolioService.openPosition).not.toHaveBeenCalled();
     });
 
     it('[P1] should truncate timestamps to minute for cross-platform alignment (P-31)', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -979,33 +933,19 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      // Same minute, different seconds → should align
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:01.123Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:59.999Z'),
-          close: '0.55',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:30.000Z'),
-          close: '0.40',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:45.000Z'),
-          close: '0.55',
-        },
-      ]);
+      // Same minute, different seconds → DB-side alignment handles truncation
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+          },
+        ),
+      );
 
       fillModelService.modelFill.mockResolvedValue({
         vwapPrice: new Decimal('0.40'),
@@ -1027,8 +967,8 @@ describe('BacktestEngineService', () => {
 
   describe('Result persistence', () => {
     it('[P0] should persist BacktestRun with aggregate metrics on completion', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([]);
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
@@ -1046,8 +986,8 @@ describe('BacktestEngineService', () => {
     });
 
     it('[P0] should persist all BacktestPositions with FK to BacktestRun', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([]);
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
       portfolioService.getState.mockReturnValue({
         openPositions: new Map(),
         closedPositions: [
@@ -1097,7 +1037,7 @@ describe('BacktestEngineService', () => {
 
   describe('Cancellation flow (P-12)', () => {
     it('[P1] should check cancellation after simulation loop before closing remaining positions', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -1106,38 +1046,25 @@ describe('BacktestEngineService', () => {
           confidenceScore: 0.9,
         },
       ]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.45',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.52',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.45',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.52',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.45', pClose: '0.52' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.45', pClose: '0.52' }],
+          },
+        ),
+      );
 
-      // Cancel after simulation loop starts
+      // Cancel after simulation loop completes
       stateMachineService.isCancelled
-        .mockReturnValueOnce(false) // First check in loop
-        .mockReturnValueOnce(false) // Second check in loop
-        .mockReturnValueOnce(true); // Check after loop — should abort
+        .mockReturnValueOnce(false) // Chunk loop start check
+        .mockReturnValueOnce(false) // First step in simulation loop
+        .mockReturnValueOnce(false) // Second step in simulation loop
+        .mockReturnValueOnce(true); // Check after chunk loop — should abort
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 300));
@@ -1156,8 +1083,8 @@ describe('BacktestEngineService', () => {
 
   describe('Pipeline cleanup', () => {
     it('[P1] should call cleanupRun and destroyRun in finally block', async () => {
-      prismaService.contractMatch.findMany.mockResolvedValue([]);
-      prismaService.historicalPrice.findMany.mockResolvedValue([]);
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
 
       await service.startRun(mockConfig);
       await new Promise((r) => setTimeout(r, 200));
@@ -1187,7 +1114,7 @@ describe('BacktestEngineService', () => {
       // Access the default fee schedule through the service
       // The fee schedule is used internally by calculateNetEdge
       // We verify it's correct by checking that the engine imports and uses it
-      prismaService.contractMatch.findMany.mockResolvedValue([
+      dataLoaderService.loadPairs.mockResolvedValue([
         {
           kalshiContractId: 'K-1',
           polymarketClobTokenId: 'P-1',
@@ -1197,32 +1124,18 @@ describe('BacktestEngineService', () => {
         },
       ]);
       // Large edge to ensure net edge passes threshold after fees
-      prismaService.historicalPrice.findMany.mockResolvedValue([
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.30',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-01-15T14:00:00Z'),
-          close: '0.60',
-        },
-        {
-          platform: 'KALSHI',
-          contractId: 'K-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.30',
-        },
-        {
-          platform: 'POLYMARKET',
-          contractId: 'P-1',
-          timestamp: new Date('2025-02-15T14:00:00Z'),
-          close: '0.60',
-        },
-      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps(
+          {
+            ts: '2025-01-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.30', pClose: '0.60' }],
+          },
+          {
+            ts: '2025-02-15T14:00:00Z',
+            pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.30', pClose: '0.60' }],
+          },
+        ),
+      );
       fillModelService.modelFill.mockResolvedValue({
         vwapPrice: new Decimal('0.30'),
         filledQuantity: new Decimal('300'),
@@ -1330,6 +1243,331 @@ describe('BacktestEngineService', () => {
       await service.runHeadlessSimulation(mockConfig, []);
       expect(prismaService.backtestRun.update).not.toHaveBeenCalled();
       expect(prismaService.backtestPosition.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // 10-9-3a: 90-day chunked backtest integration (Task 8)
+  // ============================================================
+
+  describe('90-day chunked backtest', () => {
+    // 10-9-3a ATDD: INT-048
+    it('[P0] 90-day date range with chunkWindowDays: 1 → pipeline completes, 90 chunk progress events emitted', async () => {
+      const config90day = {
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-04-01T00:00:00Z',
+        chunkWindowDays: 1,
+      };
+
+      // Generate 90 chunk ranges
+      const chunkRanges: Array<{ start: Date; end: Date }> = [];
+      const startMs = new Date('2025-01-01T00:00:00Z').getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 90; i++) {
+        chunkRanges.push({
+          start: new Date(startMs + i * dayMs),
+          end: new Date(startMs + (i + 1) * dayMs),
+        });
+      }
+
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.generateChunkRanges.mockReturnValue(chunkRanges);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun(config90day);
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Pipeline should complete
+      expect(stateMachineService.transitionRun).toHaveBeenCalledWith(
+        RUN_ID,
+        'COMPLETE',
+      );
+
+      // 90 chunk progress events emitted
+      const chunkEvents = (
+        eventEmitter.emit as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (call: any[]) => call[0] === 'backtesting.pipeline.chunk.completed',
+      );
+      expect(chunkEvents).toHaveLength(90);
+    });
+
+    // 10-9-3a ATDD: INT-049
+    it('[P0] loadAlignedPricesForChunk called 90 times, preloadDepthsForChunk called 90 times', async () => {
+      const chunkRanges: Array<{ start: Date; end: Date }> = [];
+      const startMs = new Date('2025-01-01T00:00:00Z').getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 90; i++) {
+        chunkRanges.push({
+          start: new Date(startMs + i * dayMs),
+          end: new Date(startMs + (i + 1) * dayMs),
+        });
+      }
+
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.generateChunkRanges.mockReturnValue(chunkRanges);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun({
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-04-01T00:00:00Z',
+        chunkWindowDays: 1,
+      });
+      await new Promise((r) => setTimeout(r, 500));
+
+      expect(dataLoaderService.loadAlignedPricesForChunk).toHaveBeenCalledTimes(
+        90,
+      );
+      expect(dataLoaderService.preloadDepthsForChunk).toHaveBeenCalledTimes(90);
+    });
+
+    // 10-9-3a ATDD: INT-051
+    it('[P1] timeout enforcement works across 90 chunks (short timeout triggers FAILED)', async () => {
+      const chunkRanges: Array<{ start: Date; end: Date }> = [];
+      const startMs = new Date('2025-01-01T00:00:00Z').getTime();
+      const dayMs = 24 * 60 * 60 * 1000;
+      for (let i = 0; i < 90; i++) {
+        chunkRanges.push({
+          start: new Date(startMs + i * dayMs),
+          end: new Date(startMs + (i + 1) * dayMs),
+        });
+      }
+
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.generateChunkRanges.mockReturnValue(chunkRanges);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      // Very short timeout — should trigger FAILED
+      const shortTimeoutConfig = {
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-04-01T00:00:00Z',
+        chunkWindowDays: 1,
+        timeoutSeconds: 0, // Immediate timeout
+      };
+
+      // Mock Date.now to advance past timeout
+      const originalNow = Date.now;
+      let callCount = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        callCount++;
+        if (callCount > 2) return originalNow() + 10000; // 10s past start
+        return originalNow();
+      });
+
+      await service.startRun(shortTimeoutConfig);
+      await new Promise((r) => setTimeout(r, 500));
+
+      expect(stateMachineService.failRun).toHaveBeenCalledWith(
+        RUN_ID,
+        4210,
+        expect.stringContaining('timeout'),
+      );
+
+      vi.spyOn(Date, 'now').mockRestore();
+    });
+  });
+
+  // ============================================================
+  // 10-9-3a: Walk-forward chunked routing (Task 7)
+  // ============================================================
+
+  describe('Walk-forward chunked routing', () => {
+    // 10-9-3a ATDD: INT-017
+    it('[P1] headless portfolios initialized at pipeline start with IDs ${mainRunId}-wf-train and ${mainRunId}-wf-test', async () => {
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun({
+        ...mockConfig,
+        walkForwardEnabled: true,
+        walkForwardTrainPct: 0.7,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Verify headless portfolios initialized
+      const initCalls = portfolioService.initialize.mock.calls;
+      const runIds = initCalls.map((c: unknown[]) => c[1] as string);
+      expect(runIds).toContain(`${RUN_ID}-wf-train`);
+      expect(runIds).toContain(`${RUN_ID}-wf-test`);
+    });
+
+    // 10-9-3a ATDD: INT-019
+    it('[P1] headless portfolios destroyed in finally block (even on error)', async () => {
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun({
+        ...mockConfig,
+        walkForwardEnabled: true,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      const destroyCalls = portfolioService.destroyRun.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      expect(destroyCalls).toContain(`${RUN_ID}-wf-train`);
+      expect(destroyCalls).toContain(`${RUN_ID}-wf-test`);
+    });
+
+    // 10-9-3a ATDD: INT-021
+    it('[P2] WalkForwardService.splitTimeSteps() still exists and is callable', () => {
+      expect(typeof walkForwardService.splitTimeSteps).toBe('function');
+    });
+  });
+
+  // ============================================================
+  // 10-9-3a: Cross-chunk portfolio continuity (Task 5)
+  // ============================================================
+
+  describe('Cross-chunk portfolio continuity', () => {
+    // 10-9-3a ATDD: INT-035
+    it('[P0] position opened in chunk N is correctly evaluated for exit in chunk N+1', async () => {
+      const day1Steps = makeTimeSteps({
+        ts: '2025-01-01T14:00:00Z',
+        pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.35', pClose: '0.58' }],
+      });
+      const day2Steps = makeTimeSteps({
+        ts: '2025-01-02T14:00:00Z',
+        pairs: [{ k: 'K-1', p: 'P-1', kClose: '0.40', pClose: '0.55' }],
+      });
+
+      dataLoaderService.loadPairs.mockResolvedValue([
+        {
+          kalshiContractId: 'K-1',
+          polymarketClobTokenId: 'P-1',
+          resolutionTimestamp: null,
+          operatorApproved: true,
+          confidenceScore: 0.9,
+        },
+      ]);
+      // 2 chunks: day 1 and day 2
+      dataLoaderService.generateChunkRanges.mockReturnValue([
+        {
+          start: new Date('2025-01-01T00:00:00Z'),
+          end: new Date('2025-01-02T00:00:00Z'),
+        },
+        {
+          start: new Date('2025-01-02T00:00:00Z'),
+          end: new Date('2025-01-03T00:00:00Z'),
+        },
+      ]);
+      dataLoaderService.loadAlignedPricesForChunk
+        .mockResolvedValueOnce(day1Steps)
+        .mockResolvedValueOnce(day2Steps);
+
+      // Portfolio: initialize in pipeline, position opened after chunk 1
+      let callCount = 0;
+      portfolioService.getState.mockImplementation(() => {
+        callCount++;
+        // After chunk 1 simulation, show an open position
+        if (callCount >= 3) {
+          return {
+            openPositions: new Map([
+              [
+                'pos-1',
+                {
+                  positionId: 'pos-1',
+                  pairId: 'K-1:P-1',
+                  kalshiContractId: 'K-1',
+                  polymarketContractId: 'P-1',
+                  kalshiEntryPrice: new Decimal('0.35'),
+                  polymarketEntryPrice: new Decimal('0.58'),
+                  positionSizeUsd: new Decimal('300'),
+                  entryEdge: new Decimal('0.03'),
+                  entryTimestamp: new Date('2025-01-01T14:00:00Z'),
+                },
+              ],
+            ]),
+            closedPositions: [],
+            availableCapital: new Decimal('9700'),
+            deployedCapital: new Decimal('300'),
+          };
+        }
+        return {
+          openPositions: new Map(),
+          closedPositions: [],
+          availableCapital: new Decimal('10000'),
+          deployedCapital: new Decimal('0'),
+        };
+      });
+
+      await service.startRun({
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-01-03T00:00:00Z',
+      });
+      await new Promise((r) => setTimeout(r, 400));
+
+      // Verify exit evaluation was called (position from chunk 1 evaluated in chunk 2)
+      expect(exitEvaluatorService.evaluateExits).toHaveBeenCalled();
+    });
+
+    // 10-9-3a ATDD: INT-036
+    it('[P0] equity curve and drawdown tracking are continuous across chunk boundaries', async () => {
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.generateChunkRanges.mockReturnValue([
+        {
+          start: new Date('2025-01-01T00:00:00Z'),
+          end: new Date('2025-01-02T00:00:00Z'),
+        },
+        {
+          start: new Date('2025-01-02T00:00:00Z'),
+          end: new Date('2025-01-03T00:00:00Z'),
+        },
+      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun({
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-01-03T00:00:00Z',
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Portfolio initialize called exactly once (not per chunk)
+      expect(portfolioService.initialize).toHaveBeenCalledTimes(1);
+    });
+
+    // 10-9-3a ATDD: INT-037
+    it('[P1] closeRemainingPositions called AFTER the chunk loop completes (not per-chunk)', async () => {
+      dataLoaderService.loadPairs.mockResolvedValue([]);
+      dataLoaderService.generateChunkRanges.mockReturnValue([
+        {
+          start: new Date('2025-01-01T00:00:00Z'),
+          end: new Date('2025-01-02T00:00:00Z'),
+        },
+        {
+          start: new Date('2025-01-02T00:00:00Z'),
+          end: new Date('2025-01-03T00:00:00Z'),
+        },
+      ]);
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      await service.startRun({
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-01-03T00:00:00Z',
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Pipeline should complete (GENERATING_REPORT then COMPLETE)
+      const transitionCalls = stateMachineService.transitionRun.mock.calls.map(
+        (c: unknown[]) => c[1] as string,
+      );
+      // LOADING_DATA → SIMULATING → GENERATING_REPORT → COMPLETE
+      expect(transitionCalls).toEqual(
+        expect.arrayContaining([
+          'LOADING_DATA',
+          'SIMULATING',
+          'GENERATING_REPORT',
+          'COMPLETE',
+        ]),
+      );
+      // destroyRun called once for main run (not per-chunk)
+      expect(portfolioService.destroyRun).toHaveBeenCalledWith(RUN_ID);
     });
   });
 });

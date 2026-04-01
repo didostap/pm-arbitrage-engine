@@ -17,6 +17,7 @@ export interface IBacktestConfig {
   walkForwardEnabled: boolean;
   walkForwardTrainPct: number;
   timeoutSeconds: number;
+  chunkWindowDays: number;
 }
 
 export interface BacktestRunStatus {

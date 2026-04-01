@@ -9,6 +9,10 @@ import type { NormalizedOrderBook } from '../../../common/types/normalized-order
 import type { ContractId } from '../../../common/types/branded.type';
 import { PlatformId } from '../../../common/types/platform.type';
 import type { NormalizedHistoricalDepth } from '../types/normalized-historical.types';
+import {
+  findNearestDepthFromCache,
+  type DepthCache,
+} from './backtest-data-loader.service';
 
 @Injectable()
 export class FillModelService {
@@ -79,8 +83,11 @@ export class FillModelService {
     timestamp: Date,
     side: 'buy' | 'sell',
     positionSize: Decimal,
+    depthCache?: DepthCache,
   ): Promise<VwapFillResult | null> {
-    const depth = await this.findNearestDepth(platform, contractId, timestamp);
+    const depth = depthCache
+      ? findNearestDepthFromCache(depthCache, platform, contractId, timestamp)
+      : await this.findNearestDepth(platform, contractId, timestamp);
     if (!depth) return null;
 
     const orderBook = this.adaptDepthToOrderBook(depth, platformId);

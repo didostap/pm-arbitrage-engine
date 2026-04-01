@@ -526,6 +526,8 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     'handleBacktestStateChanged',
     'handleBacktestSensitivityCompleted',
     'handleBacktestSensitivityProgress',
+    // Chunked pipeline progress (Story 10-9-3a)
+    'handleBacktestChunkProgress',
     // Incremental freshness (Story 10-9-6)
     'broadcastFreshnessUpdate',
     'broadcastStalenessWarning',
@@ -660,6 +662,11 @@ describe('Event Wiring Audit — DashboardGateway', () => {
     {
       method: 'broadcastStalenessWarning',
       event: EVENT_NAMES.INCREMENTAL_DATA_STALE,
+    },
+    // Chunked pipeline progress (Story 10-9-3a)
+    {
+      method: 'handleBacktestChunkProgress',
+      event: EVENT_NAMES.BACKTEST_PIPELINE_CHUNK_COMPLETED,
     },
     // External pair ingestion (Story 10-9-7)
     {

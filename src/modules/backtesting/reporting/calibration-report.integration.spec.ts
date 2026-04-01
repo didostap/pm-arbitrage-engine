@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Test, type TestingModule } from '@nestjs/testing';
 import Decimal from 'decimal.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../../common/prisma.service';
+import { BacktestEngineService } from '../engine/backtest-engine.service';
+import { BacktestDataLoaderService } from '../engine/backtest-data-loader.service';
 import { CalibrationReportService } from './calibration-report.service';
 import { WalkForwardService } from './walk-forward.service';
 import { SensitivityAnalysisService } from './sensitivity-analysis.service';
 import { KNOWN_LIMITATIONS } from '../types/calibration-report.types';
-import { EVENT_NAMES } from '../../../common/events/event-catalog';
 import type { AggregateMetrics } from '../engine/backtest-portfolio.service';
 
 // ============================================================
@@ -33,6 +36,7 @@ function createCompletedRun(overrides: Record<string, unknown> = {}) {
       minConfidenceScore: 0.8,
       walkForwardEnabled: false,
       walkForwardTrainPct: 0.7,
+      chunkWindowDays: 1,
     },
     dateRangeStart: new Date('2025-01-01'),
     dateRangeEnd: new Date('2025-03-01'),
@@ -58,7 +62,6 @@ function generatePositions(
   return Array.from({ length: count }, (_, i) => {
     const isWin = i < Math.round(count * winRate);
     const pnl = isWin ? Math.abs(avgPnl) : -Math.abs(avgPnl) * 0.5;
-    const dayOffset = Math.floor(i / 3) + 1;
     return {
       id: i + 1,
       runId: 'run-integ-1',
@@ -276,16 +279,11 @@ describe('WalkForward Integration', () => {
 describe('Sensitivity Integration', () => {
   let service: SensitivityAnalysisService;
   let prisma: ReturnType<typeof createMockPrisma>;
-  let eventEmitter: EventEmitter2;
-  let mockEngine: any;
+  let mockEngine: ReturnType<typeof createMockEngine>;
+  let module: TestingModule;
 
-  beforeEach(() => {
-    prisma = createMockPrisma();
-    eventEmitter = new EventEmitter2();
-    vi.spyOn(eventEmitter, 'emit');
-    mockEngine = {
-      loadPairs: vi.fn().mockResolvedValue([]),
-      loadPrices: vi.fn().mockResolvedValue([]),
+  function createMockEngine() {
+    return {
       alignPrices: vi.fn().mockReturnValue([]),
       runHeadlessSimulation: vi.fn().mockResolvedValue({
         totalPositions: 10,
@@ -299,11 +297,30 @@ describe('Sensitivity Integration', () => {
         capitalUtilization: new Decimal('0.4'),
       }),
     };
-    service = new SensitivityAnalysisService(
-      prisma as any,
-      eventEmitter,
-      mockEngine,
-    );
+  }
+
+  beforeEach(async () => {
+    prisma = createMockPrisma();
+    mockEngine = createMockEngine();
+
+    module = await Test.createTestingModule({
+      providers: [
+        SensitivityAnalysisService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: BacktestEngineService, useValue: mockEngine },
+        {
+          provide: BacktestDataLoaderService,
+          useValue: {
+            loadPairs: vi.fn().mockResolvedValue([]),
+            loadPricesForChunk: vi.fn().mockResolvedValue([]),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(SensitivityAnalysisService);
+    vi.spyOn(module.get(EventEmitter2), 'emit');
   });
 
   it('[P0] should trigger sweep and produce results with all 4 parameter dimensions', async () => {
@@ -319,7 +336,7 @@ describe('Sensitivity Integration', () => {
 
   it('[P0] should identify degradation boundaries where profitFactor drops below 1.0', async () => {
     let callIdx = 0;
-    mockEngine.runHeadlessSimulation.mockImplementation(async () => {
+    mockEngine.runHeadlessSimulation.mockImplementation(() => {
       callIdx++;
       const pf = Math.max(0.3, 2.5 - callIdx * 0.04);
       return {

@@ -10,6 +10,7 @@ import { EVENT_NAMES } from '../../../common/events/event-catalog';
 import {
   BacktestRunCompletedEvent,
   BacktestWalkForwardCompletedEvent,
+  BacktestPipelineChunkCompletedEvent,
 } from '../../../common/events/backtesting.events';
 import { FinancialMath } from '../../../common/utils/financial-math';
 import { PlatformId } from '../../../common/types/platform.type';
@@ -37,6 +38,11 @@ import {
 } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
+import {
+  BacktestDataLoaderService,
+  findNearestDepthFromCache,
+  type DepthCache,
+} from './backtest-data-loader.service';
 import { WalkForwardService } from '../reporting/walk-forward.service';
 import { CalibrationReportService } from '../reporting/calibration-report.service';
 import {
@@ -49,14 +55,16 @@ import {
 import { randomUUID } from 'crypto';
 
 const MINIMUM_DATA_COVERAGE_PCT = 0.5;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class BacktestEngineService implements IBacktestEngine {
   private readonly logger = new Logger(BacktestEngineService.name);
 
-  /** 8 deps rationale: facade/orchestrator coordinating state machine, portfolio,
-   *  fill model, exit evaluator, persistence, events, walk-forward analysis,
-   *  and calibration report auto-generation per AC #6 and AC #9 */
+  /** 9 deps rationale: BacktestDataLoaderService added for chunked data loading;
+   *  PrismaService still needed for persistResults. Extracting further would split
+   *  pipeline orchestration across 3 services, increasing coordination complexity
+   *  without reducing coupling */
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
@@ -64,6 +72,7 @@ export class BacktestEngineService implements IBacktestEngine {
     private readonly portfolioService: BacktestPortfolioService,
     private readonly fillModelService: FillModelService,
     private readonly exitEvaluatorService: ExitEvaluatorService,
+    private readonly dataLoader: BacktestDataLoaderService,
     @Inject(forwardRef(() => WalkForwardService))
     private readonly walkForwardService: WalkForwardService,
     @Inject(forwardRef(() => CalibrationReportService))
@@ -107,12 +116,19 @@ export class BacktestEngineService implements IBacktestEngine {
   async runHeadlessSimulation(
     config: IBacktestConfig,
     timeSteps: BacktestTimeStep[],
+    depthCache?: DepthCache,
   ): Promise<AggregateMetrics> {
     const tempRunId = `headless-${randomUUID()}`;
     const bankroll = new Decimal(config.bankrollUsd);
     this.portfolioService.initialize(bankroll, tempRunId);
     try {
-      await this.runSimulationLoop(tempRunId, config, timeSteps, Date.now());
+      await this.runSimulationLoop(
+        tempRunId,
+        config,
+        timeSteps,
+        Date.now(),
+        depthCache,
+      );
       this.closeRemainingPositions(tempRunId, timeSteps);
       return this.portfolioService.getAggregateMetrics(tempRunId);
     } finally {
@@ -124,18 +140,16 @@ export class BacktestEngineService implements IBacktestEngine {
     runId: string,
     config: IBacktestConfig,
   ): Promise<void> {
-    const startTime = Date.now();
+    const pipelineStartTime = Date.now();
 
     try {
       // CONFIGURING → LOADING_DATA
       this.stateMachine.transitionRun(runId, 'LOADING_DATA');
 
-      // Load data
-      const pairs = await this.loadPairs(config);
-      const prices = await this.loadPrices(config);
-      const timeSteps = this.alignPrices(prices, pairs);
+      // Load pairs (small, single query)
+      const pairs = await this.dataLoader.loadPairs(config);
 
-      // Check coverage
+      // Validate date range
       const dateRangeMs =
         new Date(config.dateRangeEnd).getTime() -
         new Date(config.dateRangeStart).getTime();
@@ -149,78 +163,332 @@ export class BacktestEngineService implements IBacktestEngine {
         return;
       }
 
-      if (pairs.length > 0 && timeSteps.length === 0) {
-        await this.stateMachine.failRun(
-          runId,
-          SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA,
-          'No price data found for any pairs in the date range',
+      // Coverage check across full date range (works for single-chunk and multi-chunk)
+      if (pairs.length > 0) {
+        const coverage = await this.dataLoader.checkDataCoverage(
+          new Date(config.dateRangeStart),
+          new Date(config.dateRangeEnd),
         );
-        return;
+        if (!coverage.hasData) {
+          await this.stateMachine.failRun(
+            runId,
+            SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA,
+            'No price data found for any pairs in the date range',
+          );
+          return;
+        }
+        if (coverage.coveragePct < MINIMUM_DATA_COVERAGE_PCT) {
+          await this.stateMachine.failRun(
+            runId,
+            SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA,
+            'Data coverage below 50% minimum threshold',
+          );
+          return;
+        }
       }
 
-      const coveredMs =
-        timeSteps.length > 0
-          ? timeSteps[timeSteps.length - 1]!.timestamp.getTime() -
-            timeSteps[0]!.timestamp.getTime()
-          : 0;
-      if (
-        pairs.length > 0 &&
-        coveredMs / dateRangeMs < MINIMUM_DATA_COVERAGE_PCT
-      ) {
-        await this.stateMachine.failRun(
-          runId,
-          SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INSUFFICIENT_DATA,
-          'Data coverage below 50% minimum threshold',
-        );
-        return;
-      }
+      // Generate chunk ranges
+      const chunkRanges = this.dataLoader.generateChunkRanges(
+        new Date(config.dateRangeStart),
+        new Date(config.dateRangeEnd),
+        config.chunkWindowDays,
+      );
+      const totalChunks = chunkRanges.length;
 
-      // Walk-forward analysis (AC #6): run before main simulation
+      // Derive contract IDs for depth pre-loading
+      const contractIds = [
+        ...new Set([
+          ...pairs.map((p) => p.kalshiContractId),
+          ...pairs
+            .filter((p) => p.polymarketClobTokenId)
+            .map((p) => p.polymarketClobTokenId!),
+        ]),
+      ];
+
+      // Walk-forward setup: compute boundary, initialize headless portfolios
       let walkForwardResults:
         | import('../types/calibration-report.types').WalkForwardResults
         | null = null;
+      let trainEndDate: Date | null = null;
+      let headlessTrainRunId: string | null = null;
+      let headlessTestRunId: string | null = null;
+
       if (config.walkForwardEnabled) {
         this.logger.log(
-          `Walk-forward enabled for run ${runId}: 3 simulation passes (~3x cost)`,
+          `Walk-forward enabled for run ${runId}: chunked routing to train/test`,
         );
         const trainPct = config.walkForwardTrainPct ?? 0.7;
-        const { train, test } = this.walkForwardService.splitTimeSteps(
-          timeSteps,
-          trainPct,
-        );
+        const rangeMs = dateRangeMs;
+        const trainEndMs =
+          new Date(config.dateRangeStart).getTime() + rangeMs * trainPct;
+        trainEndDate = new Date(trainEndMs);
+        trainEndDate.setUTCHours(0, 0, 0, 0);
 
-        // Headless train pass
-        const trainMetrics = await this.runHeadlessSimulation(config, train);
+        // Guard: truncation may collapse train window for short ranges
+        const rangeStartMs = new Date(config.dateRangeStart).getTime();
+        const rangeEndMs = new Date(config.dateRangeEnd).getTime();
+        if (trainEndDate.getTime() <= rangeStartMs) {
+          trainEndDate = new Date(rangeStartMs + ONE_DAY_MS);
+          trainEndDate.setUTCHours(0, 0, 0, 0);
+        }
+        if (trainEndDate.getTime() >= rangeEndMs) {
+          await this.stateMachine.failRun(
+            runId,
+            SYSTEM_HEALTH_ERROR_CODES.BACKTEST_INVALID_CONFIGURATION,
+            'Date range too short for walk-forward analysis (minimum 2 days required)',
+          );
+          return;
+        }
+
+        headlessTrainRunId = `${runId}-wf-train`;
+        headlessTestRunId = `${runId}-wf-test`;
+        const bankroll = new Decimal(config.bankrollUsd);
+        this.portfolioService.initialize(bankroll, headlessTrainRunId);
+        this.portfolioService.initialize(bankroll, headlessTestRunId);
+      }
+
+      // LOADING_DATA → SIMULATING
+      this.stateMachine.transitionRun(runId, 'SIMULATING');
+
+      // Initialize main portfolio
+      const bankroll = new Decimal(config.bankrollUsd);
+      this.portfolioService.initialize(bankroll, runId);
+
+      // Track last timeSteps per run for closeRemainingPositions
+      let lastTimeSteps: BacktestTimeStep[] = [];
+      let lastTrainTimeSteps: BacktestTimeStep[] = [];
+      let lastTestTimeSteps: BacktestTimeStep[] = [];
+
+      // Walk-forward metrics — extracted inside try, before finally destroys portfolios
+      let trainMetrics: AggregateMetrics | null = null;
+      let testMetrics: AggregateMetrics | null = null;
+
+      try {
+        // === CHUNK LOOP ===
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          try {
+            if (this.stateMachine.isCancelled(runId)) return;
+
+            const chunkRange = chunkRanges[chunkIndex]!;
+            const isLastChunk = chunkIndex === totalChunks - 1;
+
+            // Load aligned prices via database-side JOIN (bypasses Prisma napi bridge)
+            const chunkTimeSteps =
+              await this.dataLoader.loadAlignedPricesForChunk(
+                chunkRange.start,
+                chunkRange.end,
+                config.minConfidenceScore,
+                isLastChunk,
+              );
+
+            // Pre-load depth cache for this chunk
+            const depthCache = await this.dataLoader.preloadDepthsForChunk(
+              contractIds,
+              chunkRange.start,
+              chunkRange.end,
+              isLastChunk,
+            );
+
+            // Empty chunk: emit progress, check timeout, skip simulation
+            if (chunkTimeSteps.length === 0) {
+              this.eventEmitter.emit(
+                EVENT_NAMES.BACKTEST_PIPELINE_CHUNK_COMPLETED,
+                new BacktestPipelineChunkCompletedEvent({
+                  runId,
+                  chunkIndex,
+                  totalChunks,
+                  chunkDateStart: chunkRange.start,
+                  chunkDateEnd: chunkRange.end,
+                  elapsedMs: Date.now() - pipelineStartTime,
+                  positionsOpenedInChunk: 0,
+                  positionsClosedInChunk: 0,
+                }),
+              );
+              // Timeout check for empty chunks too
+              if (
+                Date.now() - pipelineStartTime >
+                config.timeoutSeconds * 1000
+              ) {
+                await this.stateMachine.failRun(
+                  runId,
+                  SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+                  `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
+                );
+                return;
+              }
+              continue;
+            }
+
+            lastTimeSteps = chunkTimeSteps;
+
+            // Snapshot position counts before simulation
+            const mainState = this.portfolioService.getState(runId);
+            const openBefore = mainState.openPositions.size;
+            const closedBefore = mainState.closedPositions.length;
+
+            // Run main simulation for this chunk
+            await this.runSimulationLoop(
+              runId,
+              config,
+              chunkTimeSteps,
+              pipelineStartTime,
+              depthCache,
+            );
+
+            // Walk-forward: route chunk to train or test headless sim
+            if (
+              config.walkForwardEnabled &&
+              trainEndDate &&
+              headlessTrainRunId &&
+              headlessTestRunId
+            ) {
+              if (chunkRange.end <= trainEndDate) {
+                await this.runSimulationLoop(
+                  headlessTrainRunId,
+                  config,
+                  chunkTimeSteps,
+                  pipelineStartTime,
+                  depthCache,
+                );
+                lastTrainTimeSteps = chunkTimeSteps;
+              } else if (chunkRange.start >= trainEndDate) {
+                await this.runSimulationLoop(
+                  headlessTestRunId,
+                  config,
+                  chunkTimeSteps,
+                  pipelineStartTime,
+                  depthCache,
+                );
+                lastTestTimeSteps = chunkTimeSteps;
+              } else {
+                // Chunk spans boundary — split timeSteps
+                const trainSteps = chunkTimeSteps.filter(
+                  (ts) => ts.timestamp < trainEndDate,
+                );
+                const testSteps = chunkTimeSteps.filter(
+                  (ts) => ts.timestamp >= trainEndDate,
+                );
+                if (trainSteps.length > 0) {
+                  await this.runSimulationLoop(
+                    headlessTrainRunId,
+                    config,
+                    trainSteps,
+                    pipelineStartTime,
+                    depthCache,
+                  );
+                  lastTrainTimeSteps = trainSteps;
+                }
+                if (testSteps.length > 0) {
+                  await this.runSimulationLoop(
+                    headlessTestRunId,
+                    config,
+                    testSteps,
+                    pipelineStartTime,
+                    depthCache,
+                  );
+                  lastTestTimeSteps = testSteps;
+                }
+              }
+            }
+
+            // Compute per-chunk position deltas
+            const mainStateAfter = this.portfolioService.getState(runId);
+            const positionsOpenedInChunk =
+              mainStateAfter.openPositions.size -
+              openBefore +
+              (mainStateAfter.closedPositions.length - closedBefore);
+            const positionsClosedInChunk =
+              mainStateAfter.closedPositions.length - closedBefore;
+
+            // Emit chunk progress event
+            this.eventEmitter.emit(
+              EVENT_NAMES.BACKTEST_PIPELINE_CHUNK_COMPLETED,
+              new BacktestPipelineChunkCompletedEvent({
+                runId,
+                chunkIndex,
+                totalChunks,
+                chunkDateStart: chunkRange.start,
+                chunkDateEnd: chunkRange.end,
+                elapsedMs: Date.now() - pipelineStartTime,
+                positionsOpenedInChunk,
+                positionsClosedInChunk,
+              }),
+            );
+
+            // Timeout check at end of each chunk (cumulative, not per-chunk)
+            if (Date.now() - pipelineStartTime > config.timeoutSeconds * 1000) {
+              await this.stateMachine.failRun(
+                runId,
+                SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+                `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
+              );
+              return;
+            }
+
+            // prices, depthCache, chunkTimeSteps go out of scope → GC
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            this.logger.error(
+              `Chunk ${chunkIndex + 1} failed: ${error.message}`,
+            );
+          }
+        }
+
+        // Check cancellation after chunk loop
         if (this.stateMachine.isCancelled(runId)) return;
 
-        // Headless test pass
-        const testMetrics = await this.runHeadlessSimulation(config, test);
-        if (this.stateMachine.isCancelled(runId)) return;
+        // Close remaining open positions (SIMULATION_END) — AFTER the chunk loop
+        this.closeRemainingPositions(runId, lastTimeSteps);
 
+        // Walk-forward: close remaining + extract metrics BEFORE finally destroys portfolios
+        if (
+          config.walkForwardEnabled &&
+          headlessTrainRunId &&
+          headlessTestRunId
+        ) {
+          this.closeRemainingPositions(headlessTrainRunId, lastTrainTimeSteps);
+          this.closeRemainingPositions(headlessTestRunId, lastTestTimeSteps);
+          trainMetrics =
+            this.portfolioService.getAggregateMetrics(headlessTrainRunId);
+          testMetrics =
+            this.portfolioService.getAggregateMetrics(headlessTestRunId);
+        }
+      } finally {
+        // Destroy headless portfolios in finally block (even on error)
+        if (headlessTrainRunId)
+          this.portfolioService.destroyRun(headlessTrainRunId);
+        if (headlessTestRunId)
+          this.portfolioService.destroyRun(headlessTestRunId);
+      }
+
+      // Build walk-forward results from extracted metrics
+      if (
+        config.walkForwardEnabled &&
+        trainMetrics &&
+        testMetrics &&
+        trainEndDate
+      ) {
+        const trainPct = config.walkForwardTrainPct ?? 0.7;
+
+        // Construct date-range placeholders from known boundaries
+        const rangeStart = new Date(config.dateRangeStart);
+        const rangeEnd = new Date(config.dateRangeEnd);
+        const trainPlaceholder: BacktestTimeStep[] = [
+          { timestamp: rangeStart, pairs: [] },
+          { timestamp: trainEndDate, pairs: [] },
+        ];
+        const testPlaceholder: BacktestTimeStep[] = [
+          { timestamp: trainEndDate, pairs: [] },
+          { timestamp: rangeEnd, pairs: [] },
+        ];
         walkForwardResults = this.walkForwardService.buildWalkForwardResults(
           trainPct,
-          train,
-          test,
+          trainPlaceholder,
+          testPlaceholder,
           trainMetrics,
           testMetrics,
         );
       }
-
-      // LOADING_DATA → SIMULATING (full range for canonical metrics)
-      this.stateMachine.transitionRun(runId, 'SIMULATING');
-
-      // Initialize portfolio
-      const bankroll = new Decimal(config.bankrollUsd);
-      this.portfolioService.initialize(bankroll, runId);
-
-      // Run simulation
-      await this.runSimulationLoop(runId, config, timeSteps, startTime);
-
-      // Check cancellation after loop
-      if (this.stateMachine.isCancelled(runId)) return;
-
-      // Close remaining open positions (SIMULATION_END)
-      this.closeRemainingPositions(runId, timeSteps);
 
       // Check cancellation before report generation
       if (this.stateMachine.isCancelled(runId)) return;
@@ -297,13 +565,17 @@ export class BacktestEngineService implements IBacktestEngine {
     config: IBacktestConfig,
     timeSteps: BacktestTimeStep[],
     startTime: number,
+    depthCache?: DepthCache,
   ): Promise<void> {
     const gasEstimate = new Decimal(config.gasEstimateUsd);
     const edgeThreshold = new Decimal(config.edgeThresholdPct);
     const positionSizePct = new Decimal(config.positionSizePct);
     const bankroll = new Decimal(config.bankrollUsd);
 
-    const isHeadless = runId.startsWith('headless-');
+    const isHeadless =
+      runId.startsWith('headless-') ||
+      runId.endsWith('-wf-train') ||
+      runId.endsWith('-wf-test');
 
     for (const step of timeSteps) {
       if (!isHeadless && this.stateMachine.isCancelled(runId)) return;
@@ -335,6 +607,7 @@ export class BacktestEngineService implements IBacktestEngine {
         config,
         gasEstimate,
         positionSizePct.mul(bankroll),
+        depthCache,
       );
 
       // 2. Detect new opportunities
@@ -346,6 +619,7 @@ export class BacktestEngineService implements IBacktestEngine {
         edgeThreshold,
         positionSizePct,
         bankroll,
+        depthCache,
       );
 
       // 3. Update equity (mark-to-market)
@@ -359,6 +633,7 @@ export class BacktestEngineService implements IBacktestEngine {
     config: IBacktestConfig,
     gasEstimate: Decimal,
     positionSizeUsd: Decimal,
+    depthCache?: DepthCache,
   ): Promise<void> {
     const state = this.portfolioService.getState(runId);
     for (const [positionId, position] of [...state.openPositions]) {
@@ -372,16 +647,31 @@ export class BacktestEngineService implements IBacktestEngine {
       );
 
       // Check depth on BOTH platforms (P-8 fix)
-      const kalshiDepth = await this.fillModelService.findNearestDepth(
-        'KALSHI',
-        position.kalshiContractId,
-        step.timestamp,
-      );
-      const polyDepth = await this.fillModelService.findNearestDepth(
-        'POLYMARKET',
-        position.polymarketContractId,
-        step.timestamp,
-      );
+      // When depthCache is provided, use cache lookup; otherwise fall back to DB
+      const kalshiDepth = depthCache
+        ? findNearestDepthFromCache(
+            depthCache,
+            'KALSHI',
+            position.kalshiContractId,
+            step.timestamp,
+          )
+        : await this.fillModelService.findNearestDepth(
+            'KALSHI',
+            position.kalshiContractId,
+            step.timestamp,
+          );
+      const polyDepth = depthCache
+        ? findNearestDepthFromCache(
+            depthCache,
+            'POLYMARKET',
+            position.polymarketContractId,
+            step.timestamp,
+          )
+        : await this.fillModelService.findNearestDepth(
+            'POLYMARKET',
+            position.polymarketContractId,
+            step.timestamp,
+          );
       const hasDepth = kalshiDepth !== null && polyDepth !== null;
 
       const exitResult = this.exitEvaluatorService.evaluateExits({
@@ -429,6 +719,7 @@ export class BacktestEngineService implements IBacktestEngine {
     edgeThreshold: Decimal,
     positionSizePct: Decimal,
     bankroll: Decimal,
+    depthCache?: DepthCache,
   ): Promise<void> {
     for (const pairData of step.pairs) {
       const currentState = this.portfolioService.getState(runId);
@@ -458,6 +749,7 @@ export class BacktestEngineService implements IBacktestEngine {
         step.timestamp,
         buySide === 'kalshi' ? 'buy' : 'sell',
         positionSizeUsd,
+        depthCache,
       );
       const polyFill = await this.fillModelService.modelFill(
         'POLYMARKET',
@@ -466,6 +758,7 @@ export class BacktestEngineService implements IBacktestEngine {
         step.timestamp,
         buySide === 'kalshi' ? 'sell' : 'buy',
         positionSizeUsd,
+        depthCache,
       );
 
       // Both legs must fill (AC#8)
@@ -578,27 +871,6 @@ export class BacktestEngineService implements IBacktestEngine {
         })),
       });
     }
-  }
-
-  async loadPairs(config: IBacktestConfig): Promise<ContractMatch[]> {
-    return this.prisma.contractMatch.findMany({
-      where: {
-        operatorApproved: true,
-        confidenceScore: { gte: config.minConfidenceScore },
-      },
-    });
-  }
-
-  async loadPrices(config: IBacktestConfig): Promise<HistoricalPrice[]> {
-    return this.prisma.historicalPrice.findMany({
-      where: {
-        timestamp: {
-          gte: new Date(config.dateRangeStart),
-          lte: new Date(config.dateRangeEnd),
-        },
-      },
-      orderBy: { timestamp: 'asc' },
-    });
   }
 
   alignPrices(

@@ -9,6 +9,7 @@ import { BacktestPortfolioService } from './backtest-portfolio.service';
 import { FillModelService } from './fill-model.service';
 import { ExitEvaluatorService } from './exit-evaluator.service';
 import { BacktestStateMachineService } from './backtest-state-machine.service';
+import { BacktestDataLoaderService } from './backtest-data-loader.service';
 import { WalkForwardService } from '../reporting/walk-forward.service';
 import { CalibrationReportService } from '../reporting/calibration-report.service';
 
@@ -23,6 +24,7 @@ describe('EngineModule', () => {
     BacktestPortfolioService,
     FillModelService,
     ExitEvaluatorService,
+    BacktestDataLoaderService,
     { provide: PrismaService, useValue: {} },
     { provide: EventEmitter2, useValue: new EventEmitter2() },
     {
@@ -36,7 +38,7 @@ describe('EngineModule', () => {
     },
   ];
 
-  it('[P1] should register all 5 engine providers', async () => {
+  it('[P1] should register all 6 engine providers', async () => {
     const module = await Test.createTestingModule({
       providers: sharedProviders,
     }).compile();
@@ -46,6 +48,7 @@ describe('EngineModule', () => {
     expect(module.get(BacktestPortfolioService)).toBeDefined();
     expect(module.get(FillModelService)).toBeDefined();
     expect(module.get(ExitEvaluatorService)).toBeDefined();
+    expect(module.get(BacktestDataLoaderService)).toBeDefined();
   });
 
   it('[P1] should be importable from BacktestingModule', async () => {

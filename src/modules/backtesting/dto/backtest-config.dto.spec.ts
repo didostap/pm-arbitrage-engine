@@ -186,4 +186,93 @@ describe('BacktestConfigDto', () => {
       true,
     );
   });
+
+  // 10-9-3a ATDD: UNIT-001
+  it('[P0] chunkWindowDays defaults to 1 when not provided', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    const dto = plainToInstance(BacktestConfigDto, validInput);
+    expect(dto.chunkWindowDays).toBe(1);
+  });
+
+  // 10-9-3a ATDD: UNIT-002
+  it('[P1] chunkWindowDays accepts valid integer values (1, 7, 15, 30)', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    for (const value of [1, 7, 15, 30]) {
+      const dto = plainToInstance(BacktestConfigDto, {
+        ...validInput,
+        chunkWindowDays: value,
+      });
+      const errors = await validate(dto);
+      expect(errors.some((e) => e.property === 'chunkWindowDays')).toBe(false);
+    }
+  });
+
+  // 10-9-3a ATDD: UNIT-003
+  it('[P1] chunkWindowDays rejects value 0 (below @Min(1))', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    const dto = plainToInstance(BacktestConfigDto, {
+      ...validInput,
+      chunkWindowDays: 0,
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'chunkWindowDays')).toBe(true);
+  });
+
+  // 10-9-3a ATDD: UNIT-004
+  it('[P1] chunkWindowDays rejects value 31 (above @Max(30))', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    const dto = plainToInstance(BacktestConfigDto, {
+      ...validInput,
+      chunkWindowDays: 31,
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'chunkWindowDays')).toBe(true);
+  });
+
+  // 10-9-3a ATDD: UNIT-005
+  it('[P1] chunkWindowDays rejects non-integer values (e.g., 1.5)', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    const dto = plainToInstance(BacktestConfigDto, {
+      ...validInput,
+      chunkWindowDays: 1.5,
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'chunkWindowDays')).toBe(true);
+  });
+
+  // 10-9-3a ATDD: UNIT-006
+  it('[P2] chunkWindowDays rejects negative values', async () => {
+    const { BacktestConfigDto } = await import('./backtest-config.dto');
+    const dto = plainToInstance(BacktestConfigDto, {
+      ...validInput,
+      chunkWindowDays: -5,
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'chunkWindowDays')).toBe(true);
+  });
+
+  // 10-9-3a ATDD: UNIT-007
+  it('[P0] IBacktestConfig interface includes chunkWindowDays: number', async () => {
+    const config: import('../../../common/interfaces/backtest-engine.interface').IBacktestConfig =
+      {
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-03-01T00:00:00Z',
+        edgeThresholdPct: 0.008,
+        minConfidenceScore: 0.8,
+        positionSizePct: 0.03,
+        maxConcurrentPairs: 10,
+        bankrollUsd: '10000',
+        tradingWindowStartHour: 14,
+        tradingWindowEndHour: 23,
+        gasEstimateUsd: '0.50',
+        exitEdgeEvaporationPct: 0.002,
+        exitTimeLimitHours: 72,
+        exitProfitCapturePct: 0.8,
+        walkForwardEnabled: false,
+        walkForwardTrainPct: 0.7,
+        timeoutSeconds: 300,
+        chunkWindowDays: 1,
+      };
+    expect(config.chunkWindowDays).toBe(1);
+  });
 });

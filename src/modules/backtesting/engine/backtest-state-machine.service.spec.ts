@@ -28,6 +28,7 @@ describe('BacktestStateMachineService', () => {
     minConfidenceScore: 0.8,
     walkForwardEnabled: false,
     walkForwardTrainPct: 0.7,
+    chunkWindowDays: 1,
   };
 
   beforeEach(async () => {

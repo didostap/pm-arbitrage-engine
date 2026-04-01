@@ -372,6 +372,91 @@ describe('FillModelService', () => {
       expect(result).toBeNull();
     });
 
+    // 10-9-3a ATDD: INT-010
+    it('[P0] when depthCache is provided, uses findNearestDepthFromCache — no prisma findFirst calls', async () => {
+      const { DepthCache } = await import('./backtest-data-loader.service');
+      const depthCache: Map<string, any[]> = new Map();
+      depthCache.set('KALSHI:K-1', [
+        {
+          platform: 'KALSHI',
+          contractId: 'K-1',
+          source: 'PMXT_ARCHIVE',
+          bids: [{ price: new Decimal('0.45'), size: new Decimal('500') }],
+          asks: [{ price: new Decimal('0.46'), size: new Decimal('500') }],
+          timestamp: new Date('2025-02-01T14:00:00Z'),
+          updateType: 'snapshot',
+        },
+      ]);
+
+      const result = await service.modelFill(
+        'KALSHI',
+        'K-1' as ContractId,
+        PlatformId.KALSHI,
+        new Date('2025-02-01T14:30:00Z'),
+        'buy',
+        new Decimal('100'),
+        depthCache,
+      );
+
+      expect(result).not.toBeNull();
+      expect(prismaService.historicalDepth.findFirst).not.toHaveBeenCalled();
+    });
+
+    // 10-9-3a ATDD: INT-011
+    it('[P0] when depthCache is NOT provided, falls back to existing findNearestDepth() DB query', async () => {
+      prismaService.historicalDepth.findFirst.mockResolvedValue({
+        id: 1,
+        platform: 'KALSHI',
+        contractId: 'K-1',
+        source: 'PMXT_ARCHIVE',
+        bids: [{ price: '0.45', size: '500' }],
+        asks: [{ price: '0.46', size: '500' }],
+        timestamp: new Date('2025-02-01T14:00:00Z'),
+        updateType: 'snapshot',
+      });
+
+      const result = await service.modelFill(
+        'KALSHI',
+        'K-1' as ContractId,
+        PlatformId.KALSHI,
+        new Date('2025-02-01T14:30:00Z'),
+        'buy',
+        new Decimal('100'),
+      );
+
+      expect(result).not.toBeNull();
+      expect(prismaService.historicalDepth.findFirst).toHaveBeenCalledTimes(1);
+    });
+
+    // 10-9-3a ATDD: INT-012
+    it('[P1] cache miss (no depth for contract) returns null gracefully', async () => {
+      const depthCache: Map<string, any[]> = new Map();
+
+      const result = await service.modelFill(
+        'KALSHI',
+        'K-UNKNOWN' as ContractId,
+        PlatformId.KALSHI,
+        new Date('2025-02-01T14:30:00Z'),
+        'buy',
+        new Decimal('100'),
+        depthCache,
+      );
+
+      expect(result).toBeNull();
+      expect(prismaService.historicalDepth.findFirst).not.toHaveBeenCalled();
+    });
+
+    // 10-9-3a ATDD: INT-013
+    it('[P1] FillModelService constructor dep count stays at 1 (PrismaService)', async () => {
+      const { FillModelService } = await import('./fill-model.service');
+      // Constructor takes only PrismaService (1 dep)
+      const paramTypes = Reflect.getMetadata(
+        'design:paramtypes',
+        FillModelService,
+      );
+      expect(paramTypes).toHaveLength(1);
+    });
+
     it('[P1] should correctly parse Prisma Json depth levels (string price/size → Decimal)', async () => {
       const depthRecord = {
         id: 1,

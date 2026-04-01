@@ -43,6 +43,7 @@ import type {
   BacktestEngineStateChangedEvent,
   BacktestSensitivityCompletedEvent,
   BacktestSensitivityProgressEvent,
+  BacktestPipelineChunkCompletedEvent,
   IncrementalDataFreshnessUpdatedEvent,
   IncrementalDataStaleEvent,
 } from '../common/events/backtesting.events';
@@ -350,6 +351,25 @@ export class DashboardGateway
         runId: event.runId,
         completedSweeps: event.completedSweeps,
         totalPlannedSweeps: event.totalPlannedSweeps,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // --- Chunked pipeline progress handler (Story 10-9-3a) ---
+
+  @OnEvent(EVENT_NAMES.BACKTEST_PIPELINE_CHUNK_COMPLETED)
+  handleBacktestChunkProgress(
+    event: BacktestPipelineChunkCompletedEvent,
+  ): void {
+    this.broadcast({
+      event: WS_EVENTS.BACKTEST_CHUNK_PROGRESS,
+      data: {
+        runId: event.runId,
+        chunkIndex: event.chunkIndex,
+        totalChunks: event.totalChunks,
+        chunkDateStart: event.chunkDateStart,
+        chunkDateEnd: event.chunkDateEnd,
       },
       timestamp: new Date().toISOString(),
     });

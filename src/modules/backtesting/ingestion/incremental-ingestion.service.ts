@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -22,7 +22,7 @@ import { getThresholdKey } from '../dto/data-source-freshness.dto';
  * staleness detection, event emission.
  */
 @Injectable()
-export class IncrementalIngestionService {
+export class IncrementalIngestionService implements OnModuleInit {
   private readonly logger = new Logger(IncrementalIngestionService.name);
   /** Cleanup: set true on handleCron entry, false in finally block */
   private _isRunning = false;
@@ -34,6 +34,12 @@ export class IncrementalIngestionService {
     private readonly fetchService: IncrementalFetchService,
     private readonly orchestrator: IngestionOrchestratorService,
   ) {}
+
+  onModuleInit(): void {
+    setTimeout(() => {
+      void this.runIncrementalRefresh();
+    }, 1000);
+  }
 
   @Cron(process.env.INCREMENTAL_INGESTION_CRON_EXPRESSION ?? '0 0 2 * * *', {
     timeZone: 'UTC',
