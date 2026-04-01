@@ -28,6 +28,7 @@ interface PmxtFileInfo {
 @Injectable()
 export class PmxtArchiveService implements OnModuleDestroy {
   private readonly logger = new Logger(PmxtArchiveService.name);
+  private readonly listingUrl: string;
   private readonly baseUrl: string;
   private readonly localDir: string;
 
@@ -36,9 +37,12 @@ export class PmxtArchiveService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.baseUrl =
+    const configUrl =
       this.configService.get<string>('PMXT_ARCHIVE_BASE_URL') ??
-      'https://archive.pmxt.dev/data/';
+      'https://archive.pmxt.dev';
+    // Listing page is at the site root; downloads are under /dumps/
+    this.listingUrl = configUrl.replace(/\/+$/, '') + '/dumps';
+    this.baseUrl = configUrl.replace(/\/+$/, '') + '/dumps/';
     this.localDir =
       this.configService.get<string>('PMXT_ARCHIVE_LOCAL_DIR') ??
       'data/pmxt-archive';
@@ -55,7 +59,7 @@ export class PmxtArchiveService implements OnModuleDestroy {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
     try {
-      const res = await fetch(this.baseUrl, { signal: controller.signal });
+      const res = await fetch(this.listingUrl, { signal: controller.signal });
       if (!res.ok) {
         throw new SystemHealthError(
           SYSTEM_HEALTH_ERROR_CODES.BACKTEST_DEPTH_INGESTION_FAILURE,
@@ -66,25 +70,40 @@ export class PmxtArchiveService implements OnModuleDestroy {
       }
 
       const html = await res.text();
-      const pattern =
-        /href="(polymarket_orderbook_(\d{4}-\d{2}-\d{2}T\d{2})\.parquet)"/g;
       const files: PmxtFileInfo[] = [];
 
-      let match: RegExpExecArray | null;
-      while ((match = pattern.exec(html)) !== null) {
-        const filename = match[1]!;
-        const hourStr = match[2]!;
-        const hourTimestamp = new Date(`${hourStr}:00:00Z`);
+      // PMXT Archive serves a Next.js app — filenames are in JSON inside <script> tags
+      // Match both classic HTML href="..." and React JSON "href":"/dumps/..." patterns
+      const patterns = [
+        // Classic HTML directory listing
+        /href="(polymarket_orderbook_(\d{4}-\d{2}-\d{2}T\d{2})\.parquet)"/g,
+        // Next.js React JSON payload (escaped quotes in <script> tags)
+        /(?:href|"href")(?:=|:)\\?"(?:\/dumps\/)?(polymarket_orderbook_(\d{4}-\d{2}-\d{2}T\d{2})\.parquet)\\?"/g,
+      ];
 
-        if (
-          hourTimestamp >= dateRange.start &&
-          hourTimestamp <= dateRange.end
-        ) {
-          files.push({
-            url: `${this.baseUrl}${filename}`,
-            filename,
-            hourTimestamp,
-          });
+      /** Cleanup: rebuilt per discoverFiles call */
+      const seen = new Set<string>();
+
+      for (const pattern of patterns) {
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(html)) !== null) {
+          const filename = match[1]!;
+          if (seen.has(filename)) continue;
+          seen.add(filename);
+
+          const hourStr = match[2]!;
+          const hourTimestamp = new Date(`${hourStr}:00:00Z`);
+
+          if (
+            hourTimestamp >= dateRange.start &&
+            hourTimestamp <= dateRange.end
+          ) {
+            files.push({
+              url: `${this.baseUrl}${filename}`,
+              filename,
+              hourTimestamp,
+            });
+          }
         }
       }
 

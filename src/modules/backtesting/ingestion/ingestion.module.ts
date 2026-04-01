@@ -10,6 +10,7 @@ import { IngestionQualityAssessorService } from './ingestion-quality-assessor.se
 import { IngestionOrchestratorService } from './ingestion-orchestrator.service';
 import { IncrementalIngestionService } from './incremental-ingestion.service';
 import { IncrementalFetchService } from './incremental-fetch.service';
+import { PredexonHistoricalService } from './predexon-historical.service';
 import { ValidationModule } from '../validation/validation.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { ValidationModule } from '../validation/validation.module';
     IngestionOrchestratorService,
     IncrementalIngestionService,
     IncrementalFetchService,
+    PredexonHistoricalService,
     { provide: ODDSPIPE_PAIR_PROVIDER_TOKEN, useExisting: OddsPipeService },
   ],
   exports: [
