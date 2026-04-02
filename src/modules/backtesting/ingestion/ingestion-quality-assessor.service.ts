@@ -237,13 +237,13 @@ export class IngestionQualityAssessorService {
           platform: String(d.platform),
           contractId: String(d.contractId),
           source: d.source,
-          bids: this.parseJsonDepthLevels(d.bids).map((b) => ({
-            price: new Decimal(b.price),
-            size: new Decimal(b.size),
+          bids: this.parseJsonDepthLevels(d.bids).map((l) => ({
+            price: Number(l.price),
+            size: Number(l.size),
           })),
-          asks: this.parseJsonDepthLevels(d.asks).map((a) => ({
-            price: new Decimal(a.price),
-            size: new Decimal(a.size),
+          asks: this.parseJsonDepthLevels(d.asks).map((l) => ({
+            price: Number(l.price),
+            size: Number(l.size),
           })),
           timestamp: d.timestamp,
           updateType: toDepthUpdateType(d.updateType),

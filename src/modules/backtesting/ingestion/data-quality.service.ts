@@ -17,8 +17,8 @@ const JUMP_THRESHOLD = new Decimal('0.2'); // >20%
 const STALE_HOURS = 24;
 const LOW_TRADE_THRESHOLD = 5; // per hour
 const DEPTH_GAP_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
-const WIDE_SPREAD_THRESHOLD = new Decimal('0.05'); // 5% relative spread
-const IMBALANCE_THRESHOLD = new Decimal('0.1'); // 10%
+const WIDE_SPREAD_THRESHOLD = 0.05; // 5% relative spread
+const IMBALANCE_THRESHOLD = 0.1; // 10%
 const FRESHNESS_STALE_HOURS = 48;
 const MAX_DETAIL_ENTRIES = 50;
 const CROSS_SOURCE_SAMPLE_LIMIT = 10_000;
@@ -250,51 +250,39 @@ export class DataQualityService {
       }
 
       // P-10: Find actual best bid (max) and best ask (min) — order not guaranteed
-      const bestBid = depth.bids.reduce(
-        (max, b) => Decimal.max(max, b.price),
-        depth.bids[0]!.price,
-      );
-      const bestAsk = depth.asks.reduce(
-        (min, a) => Decimal.min(min, a.price),
-        depth.asks[0]!.price,
-      );
+      const bestBid = Math.max(...depth.bids.map((b) => b.price));
+      const bestAsk = Math.min(...depth.asks.map((a) => a.price));
 
       // P-11: Crossed book detection (best bid >= best ask)
-      const spread = bestAsk.minus(bestBid);
-      if (spread.isNegative() || spread.isZero()) {
+      const spread = bestAsk - bestBid;
+      if (spread <= 0) {
         flags.hasCrossedBooks = true;
       }
 
       // BS-1: Relative spread detection (spread / midpoint > 5%)
-      const midpoint = bestBid.plus(bestAsk).div(2);
-      const relativeSpread = midpoint.isZero() ? spread : spread.div(midpoint);
-      if (relativeSpread.greaterThan(WIDE_SPREAD_THRESHOLD)) {
+      const midpoint = (bestBid + bestAsk) / 2;
+      const relativeSpread = midpoint === 0 ? spread : spread / midpoint;
+      if (relativeSpread > WIDE_SPREAD_THRESHOLD) {
         flags.hasWideSpreads = true;
         flags.spreadDetails!.push({
           timestamp: depth.timestamp,
-          spreadBps: relativeSpread.mul(10000).toNumber(),
+          spreadBps: relativeSpread * 10000,
         });
       }
 
       // Imbalance detection: total bid size < 10% of total ask size (or vice versa)
-      const totalBidSize = depth.bids.reduce(
-        (sum, b) => sum.plus(b.size),
-        new Decimal(0),
-      );
-      const totalAskSize = depth.asks.reduce(
-        (sum, a) => sum.plus(a.size),
-        new Decimal(0),
-      );
+      const totalBidSize = depth.bids.reduce((sum, b) => sum + b.size, 0);
+      const totalAskSize = depth.asks.reduce((sum, a) => sum + a.size, 0);
 
       if (
-        !totalAskSize.isZero() &&
-        totalBidSize.div(totalAskSize).lessThan(IMBALANCE_THRESHOLD)
+        totalAskSize !== 0 &&
+        totalBidSize / totalAskSize < IMBALANCE_THRESHOLD
       ) {
         flags.hasLowVolume = true;
       }
       if (
-        !totalBidSize.isZero() &&
-        totalAskSize.div(totalBidSize).lessThan(IMBALANCE_THRESHOLD)
+        totalBidSize !== 0 &&
+        totalAskSize / totalBidSize < IMBALANCE_THRESHOLD
       ) {
         flags.hasLowVolume = true;
       }

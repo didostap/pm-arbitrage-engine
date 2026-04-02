@@ -1,5 +1,6 @@
 import { BaseEvent } from './base.event';
 import type { DataQualityFlags } from '../types/historical-data.types';
+import type { RecommendedParameters } from '../../modules/backtesting/types/calibration-report.types';
 
 export class BacktestDataIngestedEvent extends BaseEvent {
   public readonly source: string;
@@ -225,12 +226,12 @@ export class BacktestReportGeneratedEvent extends BaseEvent {
 export class BacktestSensitivityCompletedEvent extends BaseEvent {
   public readonly runId: string;
   public readonly sweepCount: number;
-  public readonly recommendedParams: Record<string, unknown>;
+  public readonly recommendedParams: RecommendedParameters;
 
   constructor(payload: {
     runId: string;
     sweepCount: number;
-    recommendedParams: Record<string, unknown>;
+    recommendedParams: RecommendedParameters;
     correlationId?: string;
   }) {
     super(payload.correlationId);

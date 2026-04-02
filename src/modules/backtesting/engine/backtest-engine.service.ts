@@ -130,6 +130,11 @@ export class BacktestEngineService implements IBacktestEngine {
         depthCache,
       );
       this.closeRemainingPositions(tempRunId, timeSteps);
+      const lastTs =
+        timeSteps.length > 0
+          ? timeSteps[timeSteps.length - 1]!.timestamp
+          : new Date();
+      this.portfolioService.addFinalSnapshot(tempRunId, lastTs);
       return this.portfolioService.getAggregateMetrics(tempRunId);
     } finally {
       this.portfolioService.destroyRun(tempRunId);
@@ -194,16 +199,6 @@ export class BacktestEngineService implements IBacktestEngine {
         config.chunkWindowDays,
       );
       const totalChunks = chunkRanges.length;
-
-      // Derive contract IDs for depth pre-loading
-      const contractIds = [
-        ...new Set([
-          ...pairs.map((p) => p.kalshiContractId),
-          ...pairs
-            .filter((p) => p.polymarketClobTokenId)
-            .map((p) => p.polymarketClobTokenId!),
-        ]),
-      ];
 
       // Walk-forward setup: compute boundary, initialize headless portfolios
       let walkForwardResults:
@@ -281,9 +276,23 @@ export class BacktestEngineService implements IBacktestEngine {
                 isLastChunk,
               );
 
+            // Derive contract IDs from chunk-active data only (not all approved pairs)
+            const chunkContractIds = [
+              ...new Set(
+                chunkTimeSteps.flatMap((ts) =>
+                  ts.pairs
+                    .flatMap((p) => [
+                      p.kalshiContractId,
+                      p.polymarketContractId,
+                    ])
+                    .filter((id): id is string => !!id),
+                ),
+              ),
+            ];
+
             // Pre-load depth cache for this chunk
             const depthCache = await this.dataLoader.preloadDepthsForChunk(
-              contractIds,
+              chunkContractIds,
               chunkRange.start,
               chunkRange.end,
               isLastChunk,
@@ -415,6 +424,25 @@ export class BacktestEngineService implements IBacktestEngine {
               }),
             );
 
+            // Flush closed positions to DB at chunk boundaries to bound memory
+            // Isolated try/catch: DB failure retains positions for next chunk's flush
+            const flushedPositions =
+              this.portfolioService.flushClosedPositions(runId);
+            if (flushedPositions.length > 0) {
+              try {
+                await this.batchWritePositions(runId, flushedPositions);
+                this.portfolioService.clearFlushedPositions(runId);
+              } catch (flushErr: unknown) {
+                const msg =
+                  flushErr instanceof Error
+                    ? flushErr.message
+                    : String(flushErr);
+                this.logger.error(
+                  `Chunk ${chunkIndex + 1}: position flush failed (${flushedPositions.length} positions retained for next flush): ${msg}`,
+                );
+              }
+            }
+
             // Timeout check at end of each chunk (cumulative, not per-chunk)
             // if (Date.now() - pipelineStartTime > config.timeoutSeconds * 1000) {
             //   await this.stateMachine.failRun(
@@ -440,6 +468,13 @@ export class BacktestEngineService implements IBacktestEngine {
         // Close remaining open positions (SIMULATION_END) — AFTER the chunk loop
         this.closeRemainingPositions(runId, lastTimeSteps);
 
+        // Push final capital snapshot to close the last utilization period
+        const mainLastTs =
+          lastTimeSteps.length > 0
+            ? lastTimeSteps[lastTimeSteps.length - 1]!.timestamp
+            : new Date();
+        this.portfolioService.addFinalSnapshot(runId, mainLastTs);
+
         // Walk-forward: close remaining + extract metrics BEFORE finally destroys portfolios
         if (
           config.walkForwardEnabled &&
@@ -448,6 +483,19 @@ export class BacktestEngineService implements IBacktestEngine {
         ) {
           this.closeRemainingPositions(headlessTrainRunId, lastTrainTimeSteps);
           this.closeRemainingPositions(headlessTestRunId, lastTestTimeSteps);
+          const trainLastTs =
+            lastTrainTimeSteps.length > 0
+              ? lastTrainTimeSteps[lastTrainTimeSteps.length - 1]!.timestamp
+              : new Date();
+          const testLastTs =
+            lastTestTimeSteps.length > 0
+              ? lastTestTimeSteps[lastTestTimeSteps.length - 1]!.timestamp
+              : new Date();
+          this.portfolioService.addFinalSnapshot(
+            headlessTrainRunId,
+            trainLastTs,
+          );
+          this.portfolioService.addFinalSnapshot(headlessTestRunId, testLastTs);
           trainMetrics =
             this.portfolioService.getAggregateMetrics(headlessTrainRunId);
           testMetrics =
@@ -580,7 +628,7 @@ export class BacktestEngineService implements IBacktestEngine {
     for (const step of timeSteps) {
       if (!isHeadless && this.stateMachine.isCancelled(runId)) return;
 
-      // // Timeout check
+      // Timeout check
       // if (Date.now() - startTime > config.timeoutSeconds * 1000) {
       //   if (isHeadless) {
       //     throw new SystemHealthError(
@@ -649,7 +697,7 @@ export class BacktestEngineService implements IBacktestEngine {
       // Check depth on BOTH platforms (P-8 fix)
       // When depthCache is provided, use cache lookup; otherwise fall back to DB
       const kalshiDepth = depthCache
-        ? findNearestDepthFromCache(
+        ? await findNearestDepthFromCache(
             depthCache,
             'KALSHI',
             position.kalshiContractId,
@@ -661,7 +709,7 @@ export class BacktestEngineService implements IBacktestEngine {
             step.timestamp,
           );
       const polyDepth = depthCache
-        ? findNearestDepthFromCache(
+        ? await findNearestDepthFromCache(
             depthCache,
             'POLYMARKET',
             position.polymarketContractId,
@@ -828,8 +876,6 @@ export class BacktestEngineService implements IBacktestEngine {
 
   private async persistResults(runId: string): Promise<void> {
     const metrics = this.portfolioService.getAggregateMetrics(runId);
-    const closedPositions =
-      this.portfolioService.getState(runId).closedPositions;
 
     await this.prisma.backtestRun.update({
       where: { id: runId },
@@ -848,31 +894,41 @@ export class BacktestEngineService implements IBacktestEngine {
       },
     });
 
-    if (closedPositions.length > 0) {
-      await this.prisma.backtestPosition.createMany({
-        data: closedPositions.map((p: SimulatedPosition) => ({
-          runId,
-          pairId: p.pairId,
-          kalshiContractId: p.kalshiContractId,
-          polymarketContractId: p.polymarketContractId,
-          kalshiSide: p.kalshiSide,
-          polymarketSide: p.polymarketSide,
-          entryTimestamp: p.entryTimestamp,
-          exitTimestamp: p.exitTimestamp,
-          kalshiEntryPrice: p.kalshiEntryPrice.toFixed(10),
-          polymarketEntryPrice: p.polymarketEntryPrice.toFixed(10),
-          kalshiExitPrice: p.kalshiExitPrice?.toFixed(10) ?? null,
-          polymarketExitPrice: p.polymarketExitPrice?.toFixed(10) ?? null,
-          positionSizeUsd: p.positionSizeUsd.toFixed(6),
-          entryEdge: p.entryEdge.toFixed(10),
-          exitEdge: p.exitEdge?.toFixed(10) ?? null,
-          realizedPnl: p.realizedPnl?.toFixed(10) ?? null,
-          fees: p.fees?.toFixed(6) ?? null,
-          exitReason: p.exitReason,
-          holdingHours: p.holdingHours?.toFixed(6) ?? null,
-        })),
-      });
+    // Write any remaining unflushed positions (positions closed after last chunk boundary)
+    const remainingPositions =
+      this.portfolioService.getState(runId).closedPositions;
+    if (remainingPositions.length > 0) {
+      await this.batchWritePositions(runId, remainingPositions);
     }
+  }
+
+  private async batchWritePositions(
+    runId: string,
+    positions: SimulatedPosition[],
+  ): Promise<void> {
+    await this.prisma.backtestPosition.createMany({
+      data: positions.map((p) => ({
+        runId,
+        pairId: p.pairId,
+        kalshiContractId: p.kalshiContractId,
+        polymarketContractId: p.polymarketContractId,
+        kalshiSide: p.kalshiSide,
+        polymarketSide: p.polymarketSide,
+        entryTimestamp: p.entryTimestamp,
+        exitTimestamp: p.exitTimestamp,
+        kalshiEntryPrice: p.kalshiEntryPrice.toFixed(10),
+        polymarketEntryPrice: p.polymarketEntryPrice.toFixed(10),
+        kalshiExitPrice: p.kalshiExitPrice?.toFixed(10) ?? null,
+        polymarketExitPrice: p.polymarketExitPrice?.toFixed(10) ?? null,
+        positionSizeUsd: p.positionSizeUsd.toFixed(6),
+        entryEdge: p.entryEdge.toFixed(10),
+        exitEdge: p.exitEdge?.toFixed(10) ?? null,
+        realizedPnl: p.realizedPnl?.toFixed(10) ?? null,
+        fees: p.fees?.toFixed(6) ?? null,
+        exitReason: p.exitReason,
+        holdingHours: p.holdingHours?.toFixed(6) ?? null,
+      })),
+    });
   }
 
   alignPrices(

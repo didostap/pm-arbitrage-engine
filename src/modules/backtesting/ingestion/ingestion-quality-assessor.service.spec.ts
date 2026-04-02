@@ -1,3 +1,5 @@
+// eslint-disable -- dynamic imports + `any`-typed mocks require broad unsafe-* suppression
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/require-await */
 import { describe, it, expect, vi } from 'vitest';
 import { IngestionQualityAssessorService } from './ingestion-quality-assessor.service';
 
@@ -284,7 +286,7 @@ describe('IngestionQualityAssessorService', () => {
 
       const callArg = dataQuality.assessDepthQuality.mock.calls[0]![0];
       expect(callArg[0].bids[0]).toEqual(
-        expect.objectContaining({ price: expect.any(Object) }),
+        expect.objectContaining({ price: expect.any(Number) }),
       );
     });
   });

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { LRUCache } from 'lru-cache';
 import {
+  Platform,
   Prisma,
   type ContractMatch,
   type HistoricalDataSource,
@@ -15,8 +17,32 @@ import type {
 } from '../types/simulation.types';
 import { parseJsonDepthLevels } from '../utils/depth-parsing.utils';
 
-/** Map key: `${platform}:${contractId}`, value: depths sorted timestamp DESC */
-export type DepthCache = Map<string, NormalizedHistoricalDepth[]>;
+/** Eager cache — current Map-based approach (for bounded chunks) */
+export interface EagerDepthCache {
+  kind: 'eager';
+  /** Map key: `${platform}:${contractId}`, value: depths sorted timestamp DESC */
+  data: Map<string, NormalizedHistoricalDepth[]>;
+}
+
+/** Sentinel value representing a confirmed cache miss (contract has no depth data) */
+const DEPTH_CACHE_MISS = Symbol('DEPTH_CACHE_MISS');
+
+/** Lazy cache — LRU-backed, loads on demand (for large chunks exceeding MAX_DEPTH_RECORDS_PER_CHUNK) */
+export interface LazyDepthCache {
+  kind: 'lazy';
+  /** Cleanup: bounded by LRU max (500 entries), auto-evicts oldest on insert */
+  cache: LRUCache<string, NormalizedHistoricalDepth | typeof DEPTH_CACHE_MISS>;
+  loader: (
+    platform: string,
+    contractId: string,
+    timestamp: Date,
+  ) => Promise<NormalizedHistoricalDepth | null>;
+}
+
+export type DepthCache = EagerDepthCache | LazyDepthCache;
+
+export const MAX_DEPTH_RECORDS_PER_CHUNK = 100_000;
+const LRU_CACHE_MAX_ENTRIES = 2_000;
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -80,16 +106,49 @@ export class BacktestDataLoaderService {
     chunkStart: Date,
     chunkEnd: Date,
     endInclusive = false,
+    maxRecords = MAX_DEPTH_RECORDS_PER_CHUNK,
   ): Promise<DepthCache> {
     /** Cleanup: depthCache created per-chunk iteration, goes out of scope at end of each loop iteration → GC. No explicit .clear() needed. */
     const dedupedIds = [...new Set(contractIds)];
-    const cache: DepthCache = new Map();
 
-    if (dedupedIds.length === 0) return cache;
+    if (dedupedIds.length === 0) {
+      return { kind: 'eager', data: new Map() };
+    }
 
     try {
-      // Batch contract IDs to avoid Prisma napi bridge serialization limits.
-      // $queryRaw still marshals parameters through the Rust engine; large arrays crash it.
+      // Short-circuit count: only scan up to maxRecords+1 rows instead of full COUNT(*)
+      const endConditionCount = endInclusive
+        ? Prisma.sql`AND "timestamp" <= ${chunkEnd}`
+        : Prisma.sql`AND "timestamp" < ${chunkEnd}`;
+
+      const limitBound = maxRecords + 1;
+      const [countResult] = await this.prisma.$queryRaw<
+        [{ count: bigint }]
+      >(Prisma.sql`
+        SELECT COUNT(*) AS count FROM (
+          SELECT 1
+          FROM historical_depths
+          WHERE contract_id = ANY(${dedupedIds}::text[])
+            AND "timestamp" >= ${chunkStart}
+            ${endConditionCount}
+            AND update_type = 'snapshot'
+          LIMIT ${limitBound}
+        ) sub
+      `);
+
+      const depthCount = Number(countResult?.count ?? 0);
+
+      if (depthCount > maxRecords) {
+        // Lazy LRU fallback — too many records for eager pre-load
+        this.logger.warn(
+          `Depth count >${maxRecords} (capped probe) for ${dedupedIds.length} contracts — using lazy LRU cache`,
+        );
+        return this.createLazyDepthCache();
+      }
+
+      // Eager pre-load (bounded)
+      const data = new Map<string, NormalizedHistoricalDepth[]>();
+
       for (
         let i = 0;
         i < dedupedIds.length;
@@ -104,23 +163,73 @@ export class BacktestDataLoaderService {
           chunkStart,
           chunkEnd,
           endInclusive,
-          cache,
+          data,
         );
       }
 
       // Ensure DESC sort per key (defensive — batch order may interleave)
-      for (const entries of cache.values()) {
+      for (const entries of data.values()) {
         entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       }
 
-      return cache;
+      return { kind: 'eager', data };
     } catch (error) {
-      // Graceful degradation: modelFill falls back to close-price when depth cache is empty
+      // Only degrade gracefully for DB/Prisma errors. Re-throw programming errors (TypeError, etc.)
+      const isPrismaError =
+        error instanceof Error &&
+        error.constructor.name.startsWith('PrismaClient');
+      if (!isPrismaError) throw error;
+
       this.logger.warn(
-        `Depth pre-loading failed, falling back to close-price fills: ${error instanceof Error ? error.message : String(error)}`,
+        `Depth pre-loading failed, falling back to close-price fills: ${error.message}`,
       );
-      return cache;
+      return { kind: 'eager', data: new Map() };
     }
+  }
+
+  private createLazyDepthCache(): LazyDepthCache {
+    const prisma = this.prisma;
+    /** Cleanup: LRU bounded by max entries (500), auto-evicts oldest on insert */
+    const lruCache = new LRUCache<
+      string,
+      NormalizedHistoricalDepth | typeof DEPTH_CACHE_MISS
+    >({
+      max: LRU_CACHE_MAX_ENTRIES,
+    });
+
+    const loader = async (
+      platform: string,
+      contractId: string,
+      timestamp: Date,
+    ): Promise<NormalizedHistoricalDepth | null> => {
+      const record = await prisma.historicalDepth.findFirst({
+        where: {
+          platform: platform as Platform,
+          contractId,
+          timestamp: { lte: timestamp },
+          updateType: 'snapshot',
+        },
+        orderBy: { timestamp: 'desc' },
+      });
+
+      if (!record) return null;
+
+      const bidsJson = record.bids as unknown;
+      const asksJson = record.asks as unknown;
+      if (!Array.isArray(bidsJson) || !Array.isArray(asksJson)) return null;
+
+      return {
+        platform: record.platform,
+        contractId: record.contractId,
+        source: record.source,
+        bids: parseJsonDepthLevels(bidsJson as Array<Record<string, unknown>>),
+        asks: parseJsonDepthLevels(asksJson as Array<Record<string, unknown>>),
+        timestamp: record.timestamp,
+        updateType: record.updateType as 'snapshot' | 'price_change' | null,
+      };
+    };
+
+    return { kind: 'lazy', cache: lruCache, loader };
   }
 
   private async loadDepthBatch(
@@ -128,7 +237,7 @@ export class BacktestDataLoaderService {
     chunkStart: Date,
     chunkEnd: Date,
     endInclusive: boolean,
-    cache: DepthCache,
+    cache: Map<string, NormalizedHistoricalDepth[]>,
   ): Promise<void> {
     const endCondition = endInclusive
       ? Prisma.sql`AND "timestamp" <= ${chunkEnd}`
@@ -288,24 +397,43 @@ export class BacktestDataLoaderService {
 }
 
 /**
- * Pure standalone function for nearest-depth lookup from pre-loaded cache.
- * Binary search on timestamp-sorted (descending) array for the first entry
- * where depth.timestamp <= queryTimestamp.
- * Returns null if cache has no entry for the key or no depth <= query timestamp.
+ * Standalone function for nearest-depth lookup from pre-loaded or lazy cache.
+ * Dispatches on `depthCache.kind`:
+ * - 'eager': binary search on timestamp-sorted (descending) array
+ * - 'lazy': LRU cache lookup with DB fallback on miss
+ * Returns null if no depth <= query timestamp.
  */
-export function findNearestDepthFromCache(
+export async function findNearestDepthFromCache(
   depthCache: DepthCache,
   platform: string,
   contractId: string,
   timestamp: Date,
-): NormalizedHistoricalDepth | null {
-  const key = `${platform}:${contractId}`;
-  const entries = depthCache.get(key);
+): Promise<NormalizedHistoricalDepth | null> {
+  if (depthCache.kind === 'lazy') {
+    // Key includes minute-truncated timestamp to avoid returning stale depth
+    // when a newer snapshot exists between the cached depth and query time.
+    // Within the same minute, cache hits still prevent duplicate DB calls
+    // (evaluateExits + detectOpportunities query same contracts per step).
+    const timeKey = timestamp.toISOString().slice(0, 16);
+    const key = `${platform}:${contractId}:${timeKey}`;
+    const cached = depthCache.cache.get(key);
+    if (cached !== undefined) {
+      if (cached === DEPTH_CACHE_MISS) return null;
+      return cached;
+    }
+
+    const result = await depthCache.loader(platform, contractId, timestamp);
+    depthCache.cache.set(key, result ?? DEPTH_CACHE_MISS);
+    return result;
+  }
+
+  // Eager path — binary search on timestamp-sorted (descending) array
+  const mapKey = `${platform}:${contractId}`;
+  const entries = depthCache.data.get(mapKey);
   if (!entries || entries.length === 0) return null;
 
   const queryMs = timestamp.getTime();
 
-  // entries sorted DESC by timestamp — binary search for first entry <= queryTimestamp
   let lo = 0;
   let hi = entries.length - 1;
   let result: NormalizedHistoricalDepth | null = null;

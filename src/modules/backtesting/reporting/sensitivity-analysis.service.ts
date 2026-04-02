@@ -22,6 +22,7 @@ import type {
 import type { IBacktestConfig } from '../../../common/interfaces/backtest-engine.interface';
 import { BacktestEngineService } from '../engine/backtest-engine.service';
 import { BacktestDataLoaderService } from '../engine/backtest-data-loader.service';
+import { Prisma } from '@prisma/client';
 
 const MAX_SWEEP_POINTS = 500;
 const PROGRESS_INTERVAL = 10;
@@ -269,7 +270,7 @@ export class SensitivityAnalysisService {
 
     await this.prisma.backtestRun.update({
       where: { id: runId },
-      data: { sensitivityResults: result as any },
+      data: { sensitivityResults: result as unknown as Prisma.InputJsonValue },
     });
 
     this.eventEmitter.emit(
@@ -277,7 +278,7 @@ export class SensitivityAnalysisService {
       new BacktestSensitivityCompletedEvent({
         runId,
         sweepCount: completedSweeps,
-        recommendedParams: recommendedParameters as any,
+        recommendedParams: recommendedParameters,
       }),
     );
 

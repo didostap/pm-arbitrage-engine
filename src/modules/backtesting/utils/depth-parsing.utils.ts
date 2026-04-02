@@ -1,14 +1,15 @@
-import Decimal from 'decimal.js';
-
 export interface DepthLevel {
-  price: Decimal;
-  size: Decimal;
+  price: number;
+  size: number;
 }
 
 /**
- * Parses JSON depth levels from Prisma Json columns into typed Decimal values.
+ * Parses JSON depth levels from Prisma Json columns into native numbers.
  * Input: Array<{ price: string; size: string }> (as stored in HistoricalDepth.bids/asks)
- * Output: Array<{ price: Decimal; size: Decimal }>
+ * Output: Array<{ price: number; size: number }>
+ *
+ * Native number is used because depth levels feed VWAP fill estimation,
+ * not financial settlement — Decimal precision is unnecessary here.
  */
 export function parseJsonDepthLevels(
   levels: Array<Record<string, unknown>>,
@@ -27,19 +28,12 @@ export function parseJsonDepthLevels(
         isNumericValue(l.size),
     )
     .map((l) => ({
-      price: new Decimal(String(l.price)),
-      size: new Decimal(String(l.size)),
+      price: Number(l.price),
+      size: Number(l.size),
     }));
 }
 
 function isNumericValue(v: string | number): boolean {
-  const s = String(v);
-  if (s === '' || s === 'NaN' || s === 'Infinity' || s === '-Infinity')
-    return false;
-  try {
-    new Decimal(s);
-    return true;
-  } catch {
-    return false;
-  }
+  const n = Number(v);
+  return Number.isFinite(n);
 }

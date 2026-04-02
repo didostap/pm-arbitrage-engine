@@ -36,8 +36,8 @@ export interface NormalizedHistoricalDepth {
   platform: string;
   contractId: string;
   source: HistoricalDataSource;
-  bids: Array<{ price: Decimal; size: Decimal }>;
-  asks: Array<{ price: Decimal; size: Decimal }>;
+  bids: Array<{ price: number; size: number }>;
+  asks: Array<{ price: number; size: number }>;
   timestamp: Date;
   updateType: 'snapshot' | 'price_change' | null;
 }

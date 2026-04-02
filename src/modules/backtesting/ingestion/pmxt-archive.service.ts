@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Decimal from 'decimal.js';
 import { createHash } from 'crypto';
 import { createWriteStream, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { pipeline } from 'stream/promises';
@@ -418,18 +417,18 @@ export class PmxtArchiveService implements OnModuleDestroy {
 
   private parseOrderLevels(
     raw: unknown,
-  ): Array<{ price: Decimal; size: Decimal }> {
+  ): Array<{ price: number; size: number }> {
     if (!Array.isArray(raw)) return [];
     return (raw as Array<Record<string, unknown>>).map((level) => {
       const rawPrice = level.price ?? level.p ?? '0';
       const rawSize = level.size ?? level.s ?? level.quantity ?? '0';
       return {
-        price: new Decimal(
+        price: Number(
           typeof rawPrice === 'string' || typeof rawPrice === 'number'
             ? rawPrice
             : 0,
         ),
-        size: new Decimal(
+        size: Number(
           typeof rawSize === 'string' || typeof rawSize === 'number'
             ? rawSize
             : 0,

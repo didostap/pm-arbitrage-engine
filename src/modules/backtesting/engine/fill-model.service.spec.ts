@@ -1,3 +1,5 @@
+// eslint-disable -- dynamic imports + `any`-typed mocks require broad unsafe-* suppression
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/unbound-method */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import Decimal from 'decimal.js';
@@ -7,7 +9,7 @@ import { PrismaService } from '../../../common/prisma.service';
 
 describe('FillModelService', () => {
   let service: any;
-  let prismaService: any;
+  let prismaService: PrismaService;
 
   beforeEach(async () => {
     prismaService = {
@@ -38,12 +40,12 @@ describe('FillModelService', () => {
         contractId: 'KXBTC-24DEC31',
         source: 'PMXT_ARCHIVE',
         bids: [
-          { price: new Decimal('0.45'), size: new Decimal('100') },
-          { price: new Decimal('0.44'), size: new Decimal('200') },
+          { price: 0.45, size: 100 },
+          { price: 0.44, size: 200 },
         ],
         asks: [
-          { price: new Decimal('0.46'), size: new Decimal('150') },
-          { price: new Decimal('0.47'), size: new Decimal('250') },
+          { price: 0.46, size: 150 },
+          { price: 0.47, size: 250 },
         ],
         timestamp: new Date('2025-02-01T14:00:00Z'),
         updateType: 'snapshot' as const,
@@ -67,14 +69,14 @@ describe('FillModelService', () => {
         contractId: 'KXBTC-24DEC31',
         source: 'PMXT_ARCHIVE',
         bids: [
-          { price: new Decimal('0.40'), size: new Decimal('100') },
-          { price: new Decimal('0.45'), size: new Decimal('200') },
-          { price: new Decimal('0.42'), size: new Decimal('150') },
+          { price: 0.4, size: 100 },
+          { price: 0.45, size: 200 },
+          { price: 0.42, size: 150 },
         ],
         asks: [
-          { price: new Decimal('0.50'), size: new Decimal('100') },
-          { price: new Decimal('0.46'), size: new Decimal('200') },
-          { price: new Decimal('0.48'), size: new Decimal('150') },
+          { price: 0.5, size: 100 },
+          { price: 0.46, size: 200 },
+          { price: 0.48, size: 150 },
         ],
         timestamp: new Date(),
         updateType: 'snapshot' as const,
@@ -97,8 +99,8 @@ describe('FillModelService', () => {
         platform: 'polymarket',
         contractId: '0xABC123',
         source: 'PMXT_ARCHIVE',
-        bids: [{ price: new Decimal('0.50'), size: new Decimal('100') }],
-        asks: [{ price: new Decimal('0.51'), size: new Decimal('100') }],
+        bids: [{ price: 0.5, size: 100 }],
+        asks: [{ price: 0.51, size: 100 }],
         timestamp: new Date(),
         updateType: 'snapshot' as const,
       };
@@ -158,7 +160,8 @@ describe('FillModelService', () => {
       expect(result).not.toBeNull();
       expect(result!.contractId).toBe('KXBTC-24DEC31');
       expect(result!.bids).toHaveLength(1);
-      expect(result!.bids[0].price).toBeInstanceOf(Decimal);
+      expect(typeof result!.bids[0].price).toBe('number');
+      expect(result!.bids[0].price).toBe(0.45);
 
       expect(prismaService.historicalDepth.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -374,19 +377,19 @@ describe('FillModelService', () => {
 
     // 10-9-3a ATDD: INT-010
     it('[P0] when depthCache is provided, uses findNearestDepthFromCache — no prisma findFirst calls', async () => {
-      const { DepthCache } = await import('./backtest-data-loader.service');
-      const depthCache: Map<string, any[]> = new Map();
-      depthCache.set('KALSHI:K-1', [
+      const data = new Map<string, any[]>();
+      data.set('KALSHI:K-1', [
         {
           platform: 'KALSHI',
           contractId: 'K-1',
           source: 'PMXT_ARCHIVE',
-          bids: [{ price: new Decimal('0.45'), size: new Decimal('500') }],
-          asks: [{ price: new Decimal('0.46'), size: new Decimal('500') }],
+          bids: [{ price: 0.45, size: 500 }],
+          asks: [{ price: 0.46, size: 500 }],
           timestamp: new Date('2025-02-01T14:00:00Z'),
           updateType: 'snapshot',
         },
       ]);
+      const depthCache = { kind: 'eager' as const, data };
 
       const result = await service.modelFill(
         'KALSHI',
@@ -430,7 +433,10 @@ describe('FillModelService', () => {
 
     // 10-9-3a ATDD: INT-012
     it('[P1] cache miss (no depth for contract) returns null gracefully', async () => {
-      const depthCache: Map<string, any[]> = new Map();
+      const depthCache = {
+        kind: 'eager' as const,
+        data: new Map<string, any[]>(),
+      };
 
       const result = await service.modelFill(
         'KALSHI',

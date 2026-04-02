@@ -38,12 +38,27 @@ export interface AggregateMetrics {
   capitalUtilization: Decimal;
 }
 
+interface RunningAccumulators {
+  totalPositions: number;
+  winCount: number;
+  lossCount: number;
+  grossWin: Decimal;
+  grossLoss: Decimal;
+  totalHoldingHours: Decimal;
+  /** Cleanup: keyed by ISO date string, accumulates daily P&L for Sharpe ratio. Bounded by backtest date range (max ~365 entries/year). */
+  dailyPnl: Map<string, Decimal>;
+}
+
 interface RunContext {
   state: BacktestPortfolioState;
   bankroll: Decimal;
   /** Cleanup: entry created on openPosition/closePosition, cleared on destroyRun. Bounded by position count per run. */
   capitalSnapshots: Array<{ timestamp: Date; deployed: Decimal }>;
+  /** Running accumulators — updated on every closePosition, survive flushClosedPositions */
+  accumulators: RunningAccumulators;
 }
+
+const CAPITAL_SNAPSHOT_INTERVAL_MS = 3_600_000; // 1 hour
 
 @Injectable()
 export class BacktestPortfolioService {
@@ -51,6 +66,24 @@ export class BacktestPortfolioService {
   private readonly runs = new Map<string, RunContext>();
 
   constructor(private readonly eventEmitter: EventEmitter2) {}
+
+  private maybeAddSnapshot(
+    ctx: RunContext,
+    timestamp: Date,
+    deployed: Decimal,
+  ): void {
+    if (ctx.capitalSnapshots.length === 0) {
+      ctx.capitalSnapshots.push({ timestamp, deployed });
+      return;
+    }
+    const last = ctx.capitalSnapshots[ctx.capitalSnapshots.length - 1]!;
+    if (
+      timestamp.getTime() - last.timestamp.getTime() >=
+      CAPITAL_SNAPSHOT_INTERVAL_MS
+    ) {
+      ctx.capitalSnapshots.push({ timestamp, deployed });
+    }
+  }
 
   private getRunContext(runId: string): RunContext {
     const ctx = this.runs.get(runId);
@@ -80,6 +113,15 @@ export class BacktestPortfolioService {
       },
       bankroll,
       capitalSnapshots: [],
+      accumulators: {
+        totalPositions: 0,
+        winCount: 0,
+        lossCount: 0,
+        grossWin: new Decimal(0),
+        grossLoss: new Decimal(0),
+        totalHoldingHours: new Decimal(0),
+        dailyPnl: new Map(),
+      },
     });
   }
 
@@ -97,10 +139,11 @@ export class BacktestPortfolioService {
     );
     ctx.state.openPositions.set(position.positionId, position);
 
-    ctx.capitalSnapshots.push({
-      timestamp: position.entryTimestamp,
-      deployed: ctx.state.deployedCapital,
-    });
+    this.maybeAddSnapshot(
+      ctx,
+      position.entryTimestamp,
+      ctx.state.deployedCapital,
+    );
 
     this.eventEmitter.emit(
       EVENT_NAMES.BACKTEST_POSITION_OPENED,
@@ -170,10 +213,25 @@ export class BacktestPortfolioService {
     ctx.state.realizedPnl = ctx.state.realizedPnl.plus(realizedPnl);
     ctx.state.closedPositions.push(closedPosition);
 
-    ctx.capitalSnapshots.push({
-      timestamp: params.exitTimestamp,
-      deployed: ctx.state.deployedCapital,
-    });
+    // Update running accumulators (survive flush)
+    ctx.accumulators.totalPositions++;
+    if (realizedPnl.gt(0)) {
+      ctx.accumulators.winCount++;
+      ctx.accumulators.grossWin = ctx.accumulators.grossWin.plus(realizedPnl);
+    } else if (realizedPnl.lt(0)) {
+      ctx.accumulators.lossCount++;
+      ctx.accumulators.grossLoss = ctx.accumulators.grossLoss.plus(
+        realizedPnl.abs(),
+      );
+    }
+    ctx.accumulators.totalHoldingHours =
+      ctx.accumulators.totalHoldingHours.plus(holdingHours);
+    // Track daily P&L for Sharpe ratio (survives flush)
+    const exitDay = params.exitTimestamp.toISOString().slice(0, 10);
+    const existing = ctx.accumulators.dailyPnl.get(exitDay) ?? new Decimal(0);
+    ctx.accumulators.dailyPnl.set(exitDay, existing.plus(realizedPnl));
+
+    this.maybeAddSnapshot(ctx, params.exitTimestamp, ctx.state.deployedCapital);
 
     // Update equity and drawdown
     this.updateDrawdown(ctx);
@@ -234,28 +292,28 @@ export class BacktestPortfolioService {
     }
   }
 
+  /**
+   * Force-push a final capital snapshot (ignores interval check).
+   * Must be called before getAggregateMetrics to close the last utilization period.
+   */
+  addFinalSnapshot(runId: string, endTimestamp: Date): void {
+    const ctx = this.getRunContext(runId);
+    ctx.capitalSnapshots.push({
+      timestamp: endTimestamp,
+      deployed: ctx.state.deployedCapital,
+    });
+  }
+
   getAggregateMetrics(runId: string): AggregateMetrics {
     const ctx = this.getRunContext(runId);
-    const closed = ctx.state.closedPositions;
-    const totalPositions = closed.length;
-    let winCount = 0;
-    let lossCount = 0;
-    let grossWin = new Decimal(0);
-    let grossLoss = new Decimal(0);
-    let totalHoldingHours = new Decimal(0);
-
-    for (const pos of closed) {
-      if (pos.realizedPnl && pos.realizedPnl.gt(0)) {
-        winCount++;
-        grossWin = grossWin.plus(pos.realizedPnl);
-      } else if (pos.realizedPnl && pos.realizedPnl.lt(0)) {
-        lossCount++;
-        grossLoss = grossLoss.plus(pos.realizedPnl.abs());
-      }
-      if (pos.holdingHours) {
-        totalHoldingHours = totalHoldingHours.plus(pos.holdingHours);
-      }
-    }
+    const {
+      totalPositions,
+      winCount,
+      lossCount,
+      grossWin,
+      grossLoss,
+      totalHoldingHours,
+    } = ctx.accumulators;
 
     const totalPnl = grossWin.minus(grossLoss);
     const avgHoldingHours =
@@ -267,7 +325,7 @@ export class BacktestPortfolioService {
     const profitFactor = grossLoss.gt(0) ? grossWin.div(grossLoss) : null;
 
     // Sharpe ratio: mean(dailyReturns) / stddev(dailyReturns) * sqrt(252)
-    const sharpeRatio = this.calculateSharpeRatio(ctx.bankroll, closed);
+    const sharpeRatio = this.calculateSharpeRatioFromAccumulators(ctx);
 
     // Capital utilization: time-weighted average deployed / bankroll
     const capitalUtilization = this.calculateCapitalUtilization(ctx);
@@ -283,6 +341,25 @@ export class BacktestPortfolioService {
       avgHoldingHours,
       capitalUtilization,
     };
+  }
+
+  /**
+   * Returns a shallow copy of closedPositions for batch DB persistence at chunk boundaries.
+   * Does NOT clear — call clearFlushedPositions after successful DB write.
+   * Running accumulators (winCount, lossCount, etc.) are NOT affected.
+   */
+  flushClosedPositions(runId: string): SimulatedPosition[] {
+    const ctx = this.getRunContext(runId);
+    return [...ctx.state.closedPositions];
+  }
+
+  /**
+   * Clears closedPositions after successful DB persistence.
+   * Must be called after batchWritePositions succeeds.
+   */
+  clearFlushedPositions(runId: string): void {
+    const ctx = this.getRunContext(runId);
+    ctx.state.closedPositions = [];
   }
 
   getState(runId: string): BacktestPortfolioState {
@@ -304,6 +381,15 @@ export class BacktestPortfolioService {
     ctx.state.realizedPnl = new Decimal(0);
     ctx.state.maxDrawdown = new Decimal(0);
     ctx.capitalSnapshots = [];
+    ctx.accumulators = {
+      totalPositions: 0,
+      winCount: 0,
+      lossCount: 0,
+      grossWin: new Decimal(0),
+      grossLoss: new Decimal(0),
+      totalHoldingHours: new Decimal(0),
+      dailyPnl: new Map(),
+    };
   }
 
   private updateDrawdown(ctx: RunContext): void {
@@ -323,22 +409,15 @@ export class BacktestPortfolioService {
     }
   }
 
-  private calculateSharpeRatio(
-    bankroll: Decimal,
-    closed: SimulatedPosition[],
+  private calculateSharpeRatioFromAccumulators(
+    ctx: RunContext,
   ): Decimal | null {
-    if (closed.length === 0 || bankroll.isZero()) return null;
+    if (ctx.accumulators.totalPositions === 0 || ctx.bankroll.isZero())
+      return null;
 
-    // Group P&L by day
-    const dailyReturns = new Map<string, Decimal>();
-    for (const pos of closed) {
-      if (!pos.exitTimestamp || !pos.realizedPnl) continue;
-      const day = pos.exitTimestamp.toISOString().slice(0, 10);
-      const existing = dailyReturns.get(day) ?? new Decimal(0);
-      dailyReturns.set(day, existing.plus(pos.realizedPnl));
-    }
-
-    const returns = [...dailyReturns.values()].map((r) => r.div(bankroll));
+    const returns = [...ctx.accumulators.dailyPnl.values()].map((r) =>
+      r.div(ctx.bankroll),
+    );
     if (returns.length <= 1) return null;
 
     const mean = returns

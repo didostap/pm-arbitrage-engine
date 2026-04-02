@@ -1,3 +1,5 @@
+// eslint-disable -- dynamic imports + `any`-typed mocks require broad unsafe-* suppression
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/unbound-method */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Decimal from 'decimal.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -545,6 +547,148 @@ describe('BacktestPortfolioService', () => {
       service.reset(RUN_ID);
 
       expect(service.getState(RUN_ID).openPositions.size).toBe(0);
+    });
+  });
+
+  // ============================================================
+  // flushClosedPositions() — AC#6 (10-9-3b)
+  // ============================================================
+
+  describe('flushClosedPositions()', () => {
+    it('[P0] should return closed positions and clear the array', () => {
+      const position = createSimulatedPosition({
+        positionId: 'pos-flush-1',
+        pairId: 'pair-1',
+        kalshiContractId: 'K-1',
+        polymarketContractId: 'P-1',
+        kalshiSide: 'BUY',
+        polymarketSide: 'SELL',
+        kalshiEntryPrice: new Decimal('0.45'),
+        polymarketEntryPrice: new Decimal('0.52'),
+        positionSizeUsd: new Decimal('300'),
+        entryEdge: new Decimal('0.015'),
+        entryTimestamp: new Date('2025-02-01T14:00:00Z'),
+      });
+      service.openPosition(RUN_ID, position);
+      service.closePosition(RUN_ID, 'pos-flush-1', {
+        exitTimestamp: new Date('2025-02-01T16:00:00Z'),
+        exitReason: 'TIME_LIMIT',
+        kalshiExitPrice: new Decimal('0.50'),
+        polymarketExitPrice: new Decimal('0.48'),
+        exitEdge: new Decimal('0.005'),
+      });
+
+      const flushed = service.flushClosedPositions(RUN_ID);
+
+      expect(flushed).toHaveLength(1);
+      expect(flushed[0].positionId).toBe('pos-flush-1');
+      // Array NOT cleared until clearFlushedPositions is called (write-first pattern)
+      expect(service.getState(RUN_ID).closedPositions).toHaveLength(1);
+      service.clearFlushedPositions(RUN_ID);
+      expect(service.getState(RUN_ID).closedPositions).toHaveLength(0);
+    });
+
+    it('[P0] should NOT reset aggregate metrics on flush', () => {
+      const position = createSimulatedPosition({
+        positionId: 'pos-flush-2',
+        pairId: 'pair-1',
+        kalshiContractId: 'K-1',
+        polymarketContractId: 'P-1',
+        kalshiSide: 'BUY',
+        polymarketSide: 'SELL',
+        kalshiEntryPrice: new Decimal('0.45'),
+        polymarketEntryPrice: new Decimal('0.52'),
+        positionSizeUsd: new Decimal('300'),
+        entryEdge: new Decimal('0.015'),
+        entryTimestamp: new Date('2025-02-01T14:00:00Z'),
+      });
+      service.openPosition(RUN_ID, position);
+      service.closePosition(RUN_ID, 'pos-flush-2', {
+        exitTimestamp: new Date('2025-02-01T16:00:00Z'),
+        exitReason: 'TIME_LIMIT',
+        kalshiExitPrice: new Decimal('0.50'),
+        polymarketExitPrice: new Decimal('0.48'),
+        exitEdge: new Decimal('0.005'),
+      });
+
+      service.flushClosedPositions(RUN_ID);
+      service.clearFlushedPositions(RUN_ID);
+
+      // Aggregate metrics should still reflect the closed position (from accumulators)
+      const metrics = service.getAggregateMetrics(RUN_ID);
+      expect(metrics.totalPositions).toBe(1);
+    });
+
+    it('[P1] should return empty array when no positions have been closed', () => {
+      const flushed = service.flushClosedPositions(RUN_ID);
+      expect(flushed).toEqual([]);
+    });
+  });
+
+  // ============================================================
+  // capitalSnapshots downsampling — AC#7 (10-9-3b)
+  // ============================================================
+
+  describe('capitalSnapshots downsampling', () => {
+    it('[P0] should NOT add snapshot when time delta < 1 hour from last snapshot', () => {
+      const pos1 = createSimulatedPosition({
+        positionId: 'pos-snap-1',
+        pairId: 'pair-1',
+        kalshiContractId: 'K-1',
+        polymarketContractId: 'P-1',
+        kalshiSide: 'BUY',
+        polymarketSide: 'SELL',
+        kalshiEntryPrice: new Decimal('0.45'),
+        polymarketEntryPrice: new Decimal('0.52'),
+        positionSizeUsd: new Decimal('300'),
+        entryEdge: new Decimal('0.015'),
+        entryTimestamp: new Date('2025-02-01T14:00:00Z'),
+      });
+      service.openPosition(RUN_ID, pos1);
+
+      // Close 10 minutes later — should NOT add another snapshot
+      service.closePosition(RUN_ID, 'pos-snap-1', {
+        exitTimestamp: new Date('2025-02-01T14:10:00Z'),
+        exitReason: 'TIME_LIMIT',
+        kalshiExitPrice: new Decimal('0.50'),
+        polymarketExitPrice: new Decimal('0.48'),
+        exitEdge: new Decimal('0.005'),
+      });
+
+      // Access internal capitalSnapshots via getState to check count
+      // Only the first snapshot from openPosition should exist
+      // (closePosition within 1 hour should not add another)
+      const ctx = service.runs.get(RUN_ID)!;
+      expect(ctx.capitalSnapshots.length).toBe(1);
+    });
+
+    it('[P0] should add snapshot when time delta >= 1 hour from last snapshot', () => {
+      const pos1 = createSimulatedPosition({
+        positionId: 'pos-snap-2',
+        pairId: 'pair-1',
+        kalshiContractId: 'K-1',
+        polymarketContractId: 'P-1',
+        kalshiSide: 'BUY',
+        polymarketSide: 'SELL',
+        kalshiEntryPrice: new Decimal('0.45'),
+        polymarketEntryPrice: new Decimal('0.52'),
+        positionSizeUsd: new Decimal('300'),
+        entryEdge: new Decimal('0.015'),
+        entryTimestamp: new Date('2025-02-01T14:00:00Z'),
+      });
+      service.openPosition(RUN_ID, pos1);
+
+      // Close 2 hours later — SHOULD add another snapshot
+      service.closePosition(RUN_ID, 'pos-snap-2', {
+        exitTimestamp: new Date('2025-02-01T16:00:00Z'),
+        exitReason: 'TIME_LIMIT',
+        kalshiExitPrice: new Decimal('0.50'),
+        polymarketExitPrice: new Decimal('0.48'),
+        exitEdge: new Decimal('0.005'),
+      });
+
+      const ctx = service.runs.get(RUN_ID)!;
+      expect(ctx.capitalSnapshots.length).toBe(2);
     });
   });
 });

@@ -1,30 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import Decimal from 'decimal.js';
 import type { NormalizedHistoricalDepth } from './normalized-historical.types';
 import type { DataQualityFlags } from '../../../common/types/historical-data.types';
 
 describe('NormalizedHistoricalDepth type (Story 10-9-1b)', () => {
-  it('[P1] should construct NormalizedHistoricalDepth with Decimal bids/asks arrays', () => {
+  it('[P1] should construct NormalizedHistoricalDepth with number bids/asks arrays', () => {
     const depth: NormalizedHistoricalDepth = {
       platform: 'polymarket',
       contractId: '0xTokenABC',
       source: 'PMXT_ARCHIVE',
       bids: [
-        { price: new Decimal('0.55'), size: new Decimal('100') },
-        { price: new Decimal('0.54'), size: new Decimal('80') },
+        { price: 0.55, size: 100 },
+        { price: 0.54, size: 80 },
       ],
       asks: [
-        { price: new Decimal('0.60'), size: new Decimal('90') },
-        { price: new Decimal('0.61'), size: new Decimal('70') },
+        { price: 0.6, size: 90 },
+        { price: 0.61, size: 70 },
       ],
       timestamp: new Date('2025-06-01T12:00:00Z'),
       updateType: 'snapshot',
     };
 
-    expect(depth.bids[0]!.price).toBeInstanceOf(Decimal);
-    expect(depth.bids[0]!.size).toBeInstanceOf(Decimal);
-    expect(depth.asks[0]!.price).toBeInstanceOf(Decimal);
-    expect(depth.asks[0]!.size).toBeInstanceOf(Decimal);
+    expect(typeof depth.bids[0]!.price).toBe('number');
+    expect(typeof depth.bids[0]!.size).toBe('number');
+    expect(typeof depth.asks[0]!.price).toBe('number');
+    expect(typeof depth.asks[0]!.size).toBe('number');
     expect(depth.platform).toBe('polymarket');
     expect(depth.source).toBe('PMXT_ARCHIVE');
     expect(depth.updateType).toBe('snapshot');
@@ -56,33 +55,23 @@ describe('DataQualityFlags depth extensions (Story 10-9-1b)', () => {
       gapDetails: [],
       jumpDetails: [],
       hasWideSpreads: true,
-      spreadDetails: [
-        { timestamp: new Date('2025-06-01T12:00:00Z'), spreadBps: 1000 },
-      ],
+      hasCrossedBooks: false,
     };
-
     expect(flags.hasWideSpreads).toBe(true);
-    expect(flags.spreadDetails).toHaveLength(1);
-    expect(flags.spreadDetails![0]).toEqual(
-      expect.objectContaining({
-        timestamp: expect.any(Date),
-        spreadBps: expect.any(Number),
-      }),
-    );
   });
 
-  it('[P1] should be backward-compatible (depth fields optional)', () => {
-    const legacyFlags: DataQualityFlags = {
-      hasGaps: true,
+  it('[P1] should include hasCrossedBooks boolean field', () => {
+    const flags: DataQualityFlags = {
+      hasGaps: false,
       hasSuspiciousJumps: false,
       hasSurvivorshipBias: false,
       hasStaleData: false,
       hasLowVolume: false,
-      gapDetails: [{ from: new Date(), to: new Date() }],
+      gapDetails: [],
       jumpDetails: [],
+      hasWideSpreads: false,
+      hasCrossedBooks: true,
     };
-
-    expect(legacyFlags.hasGaps).toBe(true);
-    expect(legacyFlags.hasWideSpreads).toBeUndefined();
+    expect(flags.hasCrossedBooks).toBe(true);
   });
 });

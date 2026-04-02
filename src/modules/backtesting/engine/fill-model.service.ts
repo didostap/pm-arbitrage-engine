@@ -9,10 +9,12 @@ import type { NormalizedOrderBook } from '../../../common/types/normalized-order
 import type { ContractId } from '../../../common/types/branded.type';
 import { PlatformId } from '../../../common/types/platform.type';
 import type { NormalizedHistoricalDepth } from '../types/normalized-historical.types';
+import { parseJsonDepthLevels } from '../utils/depth-parsing.utils';
 import {
   findNearestDepthFromCache,
   type DepthCache,
 } from './backtest-data-loader.service';
+import { Platform } from '@prisma/client';
 
 @Injectable()
 export class FillModelService {
@@ -23,11 +25,11 @@ export class FillModelService {
     platformId: PlatformId,
   ): NormalizedOrderBook {
     const bids = depth.bids
-      .map((l) => ({ price: l.price.toNumber(), quantity: l.size.toNumber() }))
+      .map((l) => ({ price: l.price, quantity: l.size }))
       .sort((a, b) => b.price - a.price);
 
     const asks = depth.asks
-      .map((l) => ({ price: l.price.toNumber(), quantity: l.size.toNumber() }))
+      .map((l) => ({ price: l.price, quantity: l.size }))
       .sort((a, b) => a.price - b.price);
 
     return {
@@ -46,7 +48,7 @@ export class FillModelService {
   ): Promise<NormalizedHistoricalDepth | null> {
     const record = await this.prisma.historicalDepth.findFirst({
       where: {
-        platform: platform as any,
+        platform: platform as Platform,
         contractId,
         timestamp: { lte: timestamp },
       },
@@ -60,17 +62,12 @@ export class FillModelService {
 
     if (!Array.isArray(bidsJson) || !Array.isArray(asksJson)) return null;
 
-    const parseLevel = (l: Record<string, unknown>) => ({
-      price: new Decimal(String(l.price)),
-      size: new Decimal(String(l.size)),
-    });
-
     return {
       platform: record.platform,
       contractId: record.contractId,
       source: record.source,
-      bids: (bidsJson as Array<Record<string, unknown>>).map(parseLevel),
-      asks: (asksJson as Array<Record<string, unknown>>).map(parseLevel),
+      bids: parseJsonDepthLevels(bidsJson as Array<Record<string, unknown>>),
+      asks: parseJsonDepthLevels(asksJson as Array<Record<string, unknown>>),
       timestamp: record.timestamp,
       updateType: record.updateType as 'snapshot' | 'price_change' | null,
     };
@@ -87,7 +84,12 @@ export class FillModelService {
     closePrice?: Decimal,
   ): Promise<VwapFillResult | null> {
     const depth = depthCache
-      ? findNearestDepthFromCache(depthCache, platform, contractId, timestamp)
+      ? await findNearestDepthFromCache(
+          depthCache,
+          platform,
+          contractId,
+          timestamp,
+        )
       : await this.findNearestDepth(platform, contractId, timestamp);
     if (!depth) {
       // No depth data — use close price as flat fill (conservative assumption).

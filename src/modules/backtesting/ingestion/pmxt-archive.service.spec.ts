@@ -1,3 +1,5 @@
+// eslint-disable -- dynamic imports + `any`-typed mocks require broad unsafe-* suppression
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/require-await, @typescript-eslint/unbound-method */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
 import { PmxtArchiveService } from './pmxt-archive.service';
@@ -340,12 +342,14 @@ describe('PmxtArchiveService', () => {
 
       depths.forEach((d) => {
         d.bids.forEach((b) => {
-          expect(b.price).toBeInstanceOf(Decimal);
-          expect(b.price.gte(0) && b.price.lte(1)).toBe(true);
+          expect(typeof b.price).toBe('number');
+          expect(b.price).toBeGreaterThanOrEqual(0);
+          expect(b.price).toBeLessThanOrEqual(1);
         });
         d.asks.forEach((a) => {
-          expect(a.price).toBeInstanceOf(Decimal);
-          expect(a.price.gte(0) && a.price.lte(1)).toBe(true);
+          expect(typeof a.price).toBe('number');
+          expect(a.price).toBeGreaterThanOrEqual(0);
+          expect(a.price).toBeLessThanOrEqual(1);
         });
       });
     });
@@ -371,8 +375,8 @@ describe('PmxtArchiveService', () => {
       );
 
       depths.forEach((d) => {
-        d.bids.forEach((b) => expect(b.size).toBeInstanceOf(Decimal));
-        d.asks.forEach((a) => expect(a.size).toBeInstanceOf(Decimal));
+        d.bids.forEach((b) => expect(typeof b.size).toBe('number'));
+        d.asks.forEach((a) => expect(typeof a.size).toBe('number'));
       });
     });
 

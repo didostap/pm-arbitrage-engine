@@ -1,3 +1,4 @@
+// eslint-disable -- dynamic imports + `any`-typed mocks require broad unsafe-* suppression
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { Test } from '@nestjs/testing';
@@ -126,6 +127,9 @@ function createMockPortfolio() {
       avgHoldingHours: new Decimal('0'),
       capitalUtilization: new Decimal('0'),
     }),
+    flushClosedPositions: vi.fn().mockReturnValue([]),
+    clearFlushedPositions: vi.fn(),
+    addFinalSnapshot: vi.fn(),
     destroyRun: vi.fn(),
   };
 }
@@ -180,7 +184,9 @@ function createMockDataLoader() {
     ]),
     loadPricesForChunk: vi.fn().mockResolvedValue([]),
     loadAlignedPricesForChunk: vi.fn().mockResolvedValue([]),
-    preloadDepthsForChunk: vi.fn().mockResolvedValue(new Map()),
+    preloadDepthsForChunk: vi
+      .fn()
+      .mockResolvedValue({ kind: 'eager', data: new Map() }),
     checkDataCoverage: vi
       .fn()
       .mockResolvedValue({ hasData: true, coveragePct: 1.0 }),
@@ -313,6 +319,50 @@ describe('BacktestEngineService', () => {
       await new Promise((r) => setTimeout(r, 200));
 
       expect(dataLoaderService.loadPairs).toHaveBeenCalledWith(mockConfig);
+    });
+
+    it('[P0] should pass only chunk-active contract IDs to preloadDepthsForChunk (AC#1)', async () => {
+      // Setup: 3 approved pairs, but chunk only has 2 active contracts
+      dataLoaderService.loadPairs.mockResolvedValue([
+        {
+          kalshiContractId: 'K-1',
+          polymarketClobTokenId: 'P-1',
+          operatorApproved: true,
+          confidenceScore: 0.9,
+        },
+        {
+          kalshiContractId: 'K-2',
+          polymarketClobTokenId: 'P-2',
+          operatorApproved: true,
+          confidenceScore: 0.9,
+        },
+        {
+          kalshiContractId: 'K-3',
+          polymarketClobTokenId: 'P-3',
+          operatorApproved: true,
+          confidenceScore: 0.9,
+        },
+      ]);
+
+      // Chunk only returns data for K-1/P-1 and K-2/P-2 (NOT K-3/P-3)
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps({
+          ts: '2025-01-01T14:00:00Z',
+          pairs: [
+            { k: 'K-1', p: 'P-1', kClose: '0.50', pClose: '0.55' },
+            { k: 'K-2', p: 'P-2', kClose: '0.40', pClose: '0.45' },
+          ],
+        }),
+      );
+
+      await service.startRun(mockConfig);
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(dataLoaderService.preloadDepthsForChunk).toHaveBeenCalled();
+      const passedIds = dataLoaderService.preloadDepthsForChunk.mock
+        .calls[0]![0] as string[];
+      // Should only contain K-1, P-1, K-2, P-2 — NOT K-3 or P-3
+      expect(passedIds.sort()).toEqual(['K-1', 'K-2', 'P-1', 'P-2']);
     });
 
     it('[P0] should fail with BACKTEST_INVALID_CONFIGURATION when dateRange is zero (P-27)', async () => {
@@ -1568,6 +1618,150 @@ describe('BacktestEngineService', () => {
       );
       // destroyRun called once for main run (not per-chunk)
       expect(portfolioService.destroyRun).toHaveBeenCalledWith(RUN_ID);
+    });
+  });
+
+  // ============================================================
+  // 10-9-3b: Timeout paths (AC#5)
+  // ============================================================
+
+  describe('Timeout paths (10-9-3b)', () => {
+    it('[P1] empty chunk timeout — failRun called when timeout exceeded during empty chunk', async () => {
+      dataLoaderService.loadPairs.mockResolvedValue([
+        {
+          kalshiContractId: 'K-1',
+          polymarketClobTokenId: 'P-1',
+          operatorApproved: true,
+          confidenceScore: 0.9,
+        },
+      ]);
+      dataLoaderService.generateChunkRanges.mockReturnValue([
+        {
+          start: new Date('2025-01-01T00:00:00Z'),
+          end: new Date('2025-01-02T00:00:00Z'),
+        },
+      ]);
+      // Empty chunk — no aligned prices
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue([]);
+
+      const realDateNow = Date.now;
+      let callCount = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        callCount++;
+        if (callCount <= 1) return realDateNow();
+        return realDateNow() + 120000; // 2 minutes past timeout
+      });
+
+      await service.startRun({ ...mockConfig, timeoutSeconds: 60 });
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(stateMachineService.failRun).toHaveBeenCalledWith(
+        RUN_ID,
+        4210,
+        expect.stringContaining('timeout'),
+      );
+    });
+  });
+
+  // ============================================================
+  // 10-9-3b: Memory bounds — 7-day backtest (AC#9)
+  // ============================================================
+
+  describe('7-day backtest memory bounds', () => {
+    it('[P0] 7-day backtest with 100 pairs: flushClosedPositions called per chunk, positions batch-written', async () => {
+      // 100 pairs
+      const pairs = Array.from({ length: 100 }, (_, i) => ({
+        kalshiContractId: `K-${i}`,
+        polymarketClobTokenId: `P-${i}`,
+        resolutionTimestamp: null,
+        operatorApproved: true,
+        confidenceScore: 0.9,
+      }));
+      dataLoaderService.loadPairs.mockResolvedValue(pairs);
+
+      // 7 chunk ranges (1 day each)
+      const chunkRanges = Array.from({ length: 7 }, (_, i) => ({
+        start: new Date(`2025-01-0${i + 1}T00:00:00Z`),
+        end: new Date(`2025-01-0${i + 2}T00:00:00Z`),
+      }));
+      dataLoaderService.generateChunkRanges.mockReturnValue(chunkRanges);
+
+      // Each chunk returns 10 pairs with aligned prices
+      dataLoaderService.loadAlignedPricesForChunk.mockImplementation(() =>
+        Promise.resolve(
+          makeTimeSteps({
+            ts: '2025-01-01T14:00:00Z',
+            pairs: Array.from({ length: 10 }, (_, i) => ({
+              k: `K-${i}`,
+              p: `P-${i}`,
+              kClose: '0.45',
+              pClose: '0.50',
+            })),
+          }),
+        ),
+      );
+
+      // Mock: flush returns some positions each time
+      portfolioService.flushClosedPositions.mockReturnValue([]);
+
+      const sevenDayConfig = {
+        ...mockConfig,
+        dateRangeStart: '2025-01-01T00:00:00Z',
+        dateRangeEnd: '2025-01-08T00:00:00Z',
+        chunkWindowDays: 1,
+      };
+
+      await service.startRun(sevenDayConfig);
+      await new Promise((r) => setTimeout(r, 500));
+
+      // flushClosedPositions called once per chunk (7 chunks)
+      expect(portfolioService.flushClosedPositions).toHaveBeenCalledTimes(7);
+
+      // All 7 chunk progress events emitted
+      const chunkEvents = (eventEmitter.emit as any).mock.calls.filter(
+        (c: any[]) => c[0] === 'backtesting.pipeline.chunk.completed',
+      );
+      expect(chunkEvents).toHaveLength(7);
+    });
+
+    it('[P0] contract filtering reduces IDs per chunk to chunk-active only', async () => {
+      // 100 pairs total, but each chunk only has 5 active
+      const pairs = Array.from({ length: 100 }, (_, i) => ({
+        kalshiContractId: `K-${i}`,
+        polymarketClobTokenId: `P-${i}`,
+        resolutionTimestamp: null,
+        operatorApproved: true,
+        confidenceScore: 0.9,
+      }));
+      dataLoaderService.loadPairs.mockResolvedValue(pairs);
+
+      dataLoaderService.generateChunkRanges.mockReturnValue([
+        {
+          start: new Date('2025-01-01T00:00:00Z'),
+          end: new Date('2025-01-02T00:00:00Z'),
+        },
+      ]);
+
+      // Only 5 pairs active in this chunk
+      dataLoaderService.loadAlignedPricesForChunk.mockResolvedValue(
+        makeTimeSteps({
+          ts: '2025-01-01T14:00:00Z',
+          pairs: Array.from({ length: 5 }, (_, i) => ({
+            k: `K-${i}`,
+            p: `P-${i}`,
+            kClose: '0.45',
+            pClose: '0.50',
+          })),
+        }),
+      );
+
+      await service.startRun(mockConfig);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const passedIds = dataLoaderService.preloadDepthsForChunk.mock
+        .calls[0]![0] as string[];
+      // Should only have 10 IDs (5 K + 5 P), not 200 (100 K + 100 P)
+      expect(passedIds.length).toBe(10);
     });
   });
 });
