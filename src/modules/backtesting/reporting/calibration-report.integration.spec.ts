@@ -314,6 +314,7 @@ describe('Sensitivity Integration', () => {
           useValue: {
             loadPairs: vi.fn().mockResolvedValue([]),
             loadPricesForChunk: vi.fn().mockResolvedValue([]),
+            loadAlignedPricesForRange: vi.fn().mockResolvedValue([]),
           },
         },
       ],

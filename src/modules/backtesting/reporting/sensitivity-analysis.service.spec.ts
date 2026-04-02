@@ -24,14 +24,12 @@ function createMockPrisma() {
 function createMockEngine() {
   return {
     runHeadlessSimulation: vi.fn(),
-    alignPrices: vi.fn().mockReturnValue([]),
   };
 }
 
 function createMockDataLoader() {
   return {
-    loadPairs: vi.fn().mockResolvedValue([]),
-    loadPricesForChunk: vi.fn().mockResolvedValue([]),
+    loadAlignedPricesForRange: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -137,10 +135,7 @@ describe('SensitivityAnalysisService', () => {
 
     it('[P0] should load data ONCE and reuse across all sweep iterations', async () => {
       await service.runSweep('run-1');
-      // loadPairs and loadPricesForChunk called once each via data loader
-      expect(dataLoader.loadPairs).toHaveBeenCalledTimes(1);
-      expect(dataLoader.loadPricesForChunk).toHaveBeenCalledTimes(1);
-      expect(engine.alignPrices).toHaveBeenCalledTimes(1);
+      expect(dataLoader.loadAlignedPricesForRange).toHaveBeenCalledTimes(1);
     });
 
     it('[P0] should hold all other params at base config values during each sweep dimension', async () => {

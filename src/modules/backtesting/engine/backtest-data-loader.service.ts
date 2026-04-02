@@ -84,19 +84,27 @@ export class BacktestDataLoaderService {
     return chunks;
   }
 
+  /** @deprecated Use loadAlignedPricesForRange for large ranges. Prisma findMany fails on large datasets. */
   async loadPricesForChunk(
     chunkStart: Date,
     chunkEnd: Date,
     endInclusive = false,
   ): Promise<HistoricalPrice[]> {
-    return this.prisma.historicalPrice.findMany({
-      where: {
-        timestamp: endInclusive
-          ? { gte: chunkStart, lte: chunkEnd }
-          : { gte: chunkStart, lt: chunkEnd },
-      },
-      orderBy: { timestamp: 'asc' },
-    });
+    try {
+      return this.prisma.historicalPrice.findMany({
+        where: {
+          timestamp: endInclusive
+            ? { gte: chunkStart, lte: chunkEnd }
+            : { gte: chunkStart, lt: chunkEnd },
+        },
+        orderBy: { timestamp: 'asc' },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error loading prices for chunk: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   private static readonly DEPTH_BATCH_SIZE = 500;
@@ -363,6 +371,52 @@ export class BacktestDataLoaderService {
     }
     timeSteps.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     return timeSteps;
+  }
+
+  /**
+   * Load aligned prices for an entire date range by chunking internally.
+   * Uses loadAlignedPricesForChunk (raw SQL) per chunk to bypass Prisma napi limits.
+   */
+  async loadAlignedPricesForRange(
+    dateRangeStart: Date,
+    dateRangeEnd: Date,
+    minConfidenceScore: number,
+    chunkWindowDays = 1,
+  ): Promise<BacktestTimeStep[]> {
+    const chunkRanges = this.generateChunkRanges(
+      dateRangeStart,
+      dateRangeEnd,
+      chunkWindowDays,
+    );
+    const allSteps: BacktestTimeStep[] = [];
+
+    for (let i = 0; i < chunkRanges.length; i++) {
+      const range = chunkRanges[i]!;
+      const isLastChunk = i === chunkRanges.length - 1;
+      const chunkSteps = await this.loadAlignedPricesForChunk(
+        range.start,
+        range.end,
+        minConfidenceScore,
+        isLastChunk,
+      );
+      allSteps.push(...chunkSteps);
+    }
+
+    // Defensive merge: combine steps sharing the same timestamp (chunk boundary edge case)
+    const byTimestamp = new Map<number, BacktestTimeStep>();
+    for (const step of allSteps) {
+      const key = step.timestamp.getTime();
+      const existing = byTimestamp.get(key);
+      if (existing) {
+        existing.pairs.push(...step.pairs);
+      } else {
+        byTimestamp.set(key, step);
+      }
+    }
+
+    const merged = [...byTimestamp.values()];
+    merged.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    return merged;
   }
 
   /**

@@ -799,3 +799,175 @@ describe('BacktestDataLoaderService — loadPairs', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ============================================================
+// Unit Tests — loadAlignedPricesForRange()
+// ============================================================
+describe('BacktestDataLoaderService — loadAlignedPricesForRange', () => {
+  let service: any;
+  let loadAlignedChunkSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const prismaService = {
+      contractMatch: { findMany: vi.fn() },
+      historicalPrice: { findMany: vi.fn() },
+      historicalDepth: { findMany: vi.fn() },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    };
+    const { BacktestDataLoaderService } =
+      await import('./backtest-data-loader.service');
+    service = new BacktestDataLoaderService(prismaService);
+    loadAlignedChunkSpy = vi
+      .spyOn(service, 'loadAlignedPricesForChunk')
+      .mockResolvedValue([]);
+  });
+
+  it('[P0] single-day range produces 1 chunk call with endInclusive=true', async () => {
+    await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-02T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(loadAlignedChunkSpy).toHaveBeenCalledTimes(1);
+    expect(loadAlignedChunkSpy).toHaveBeenCalledWith(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-02T00:00:00Z'),
+      0.8,
+      true, // isLastChunk
+    );
+  });
+
+  it('[P0] multi-day range produces N sequential chunk calls, last with endInclusive=true', async () => {
+    await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-03T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(loadAlignedChunkSpy).toHaveBeenCalledTimes(2);
+    // First chunk: endInclusive=false
+    expect(loadAlignedChunkSpy).toHaveBeenNthCalledWith(
+      1,
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-02T00:00:00Z'),
+      0.8,
+      false,
+    );
+    // Last chunk: endInclusive=true
+    expect(loadAlignedChunkSpy).toHaveBeenNthCalledWith(
+      2,
+      new Date('2025-01-02T00:00:00Z'),
+      new Date('2025-01-03T00:00:00Z'),
+      0.8,
+      true,
+    );
+  });
+
+  it('[P0] results from multiple chunks are concatenated and sorted by timestamp', async () => {
+    const step1 = {
+      timestamp: new Date('2025-01-01T10:00:00Z'),
+      pairs: [{ pairId: 'p1' }],
+    };
+    const step2 = {
+      timestamp: new Date('2025-01-02T10:00:00Z'),
+      pairs: [{ pairId: 'p2' }],
+    };
+
+    loadAlignedChunkSpy
+      .mockResolvedValueOnce([step1])
+      .mockResolvedValueOnce([step2]);
+
+    const result = await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-03T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0].timestamp.getTime()).toBeLessThan(
+      result[1].timestamp.getTime(),
+    );
+    expect(result[0].pairs[0].pairId).toBe('p1');
+    expect(result[1].pairs[0].pairId).toBe('p2');
+  });
+
+  it('[P1] empty chunks in the middle do not break the merge', async () => {
+    const step1 = {
+      timestamp: new Date('2025-01-01T10:00:00Z'),
+      pairs: [{ pairId: 'p1' }],
+    };
+    const step3 = {
+      timestamp: new Date('2025-01-03T10:00:00Z'),
+      pairs: [{ pairId: 'p3' }],
+    };
+
+    loadAlignedChunkSpy
+      .mockResolvedValueOnce([step1])
+      .mockResolvedValueOnce([]) // empty chunk
+      .mockResolvedValueOnce([step3]);
+
+    const result = await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-04T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0].pairs[0].pairId).toBe('p1');
+    expect(result[1].pairs[0].pairId).toBe('p3');
+  });
+
+  it('[P1] defensive merge combines steps with same timestamp from different chunks', async () => {
+    const ts = new Date('2025-01-02T00:00:00Z');
+    const stepA = { timestamp: ts, pairs: [{ pairId: 'pA' }] };
+    const stepB = { timestamp: ts, pairs: [{ pairId: 'pB' }] };
+
+    loadAlignedChunkSpy
+      .mockResolvedValueOnce([stepA])
+      .mockResolvedValueOnce([stepB]);
+
+    const result = await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-03T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].pairs).toHaveLength(2);
+    expect(result[0].pairs.map((p: any) => p.pairId)).toEqual(
+      expect.arrayContaining(['pA', 'pB']),
+    );
+  });
+
+  it('[P1] forwards minConfidenceScore to each loadAlignedPricesForChunk call', async () => {
+    await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-03T00:00:00Z'),
+      0.95,
+      1,
+    );
+
+    for (const call of loadAlignedChunkSpy.mock.calls) {
+      expect(call[2]).toBe(0.95);
+    }
+  });
+
+  it('[P2] returns empty array when entire range has no data', async () => {
+    loadAlignedChunkSpy.mockResolvedValue([]);
+
+    const result = await service.loadAlignedPricesForRange(
+      new Date('2025-01-01T00:00:00Z'),
+      new Date('2025-01-05T00:00:00Z'),
+      0.8,
+      1,
+    );
+
+    expect(result).toEqual([]);
+  });
+});

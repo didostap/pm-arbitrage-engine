@@ -184,6 +184,7 @@ function createMockDataLoader() {
     ]),
     loadPricesForChunk: vi.fn().mockResolvedValue([]),
     loadAlignedPricesForChunk: vi.fn().mockResolvedValue([]),
+    loadAlignedPricesForRange: vi.fn().mockResolvedValue([]),
     preloadDepthsForChunk: vi
       .fn()
       .mockResolvedValue({ kind: 'eager', data: new Map() }),

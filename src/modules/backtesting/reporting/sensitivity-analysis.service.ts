@@ -125,13 +125,12 @@ export class SensitivityAnalysisService {
     }
 
     // Load data ONCE and reuse across all sweeps
-    const pairs = await this.dataLoader.loadPairs(baseConfig);
-    const prices = await this.dataLoader.loadPricesForChunk(
+    const timeSteps = await this.dataLoader.loadAlignedPricesForRange(
       new Date(baseConfig.dateRangeStart),
       new Date(baseConfig.dateRangeEnd),
-      true,
+      baseConfig.minConfidenceScore,
+      baseConfig.chunkWindowDays,
     );
-    const timeSteps = this.engineService.alignPrices(prices, pairs);
 
     // Build sweep ranges
     const edgeRange = sweepConfig?.edgeThresholdRange ?? {
