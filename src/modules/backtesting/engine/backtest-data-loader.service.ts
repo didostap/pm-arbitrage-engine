@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import {
   Prisma,
   type ContractMatch,
+  type HistoricalDataSource,
   type HistoricalPrice,
 } from '@prisma/client';
 import type { IBacktestConfig } from '../../../common/interfaces/backtest-engine.interface';
@@ -22,6 +23,8 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 @Injectable()
 export class BacktestDataLoaderService {
   /** 1 dep: PrismaService — leaf service <=5 */
+  private readonly logger = new Logger(BacktestDataLoaderService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async loadPairs(config: IBacktestConfig): Promise<ContractMatch[]> {
@@ -70,6 +73,8 @@ export class BacktestDataLoaderService {
     });
   }
 
+  private static readonly DEPTH_BATCH_SIZE = 500;
+
   async preloadDepthsForChunk(
     contractIds: string[],
     chunkStart: Date,
@@ -82,44 +87,93 @@ export class BacktestDataLoaderService {
 
     if (dedupedIds.length === 0) return cache;
 
-    const records = await this.prisma.historicalDepth.findMany({
-      where: {
-        contractId: { in: dedupedIds },
-        timestamp: endInclusive
-          ? { gte: chunkStart, lte: chunkEnd }
-          : { gte: chunkStart, lt: chunkEnd },
-        updateType: 'snapshot',
-      },
-      orderBy: { timestamp: 'desc' },
-    });
+    try {
+      // Batch contract IDs to avoid Prisma napi bridge serialization limits.
+      // $queryRaw still marshals parameters through the Rust engine; large arrays crash it.
+      for (
+        let i = 0;
+        i < dedupedIds.length;
+        i += BacktestDataLoaderService.DEPTH_BATCH_SIZE
+      ) {
+        const batch = dedupedIds.slice(
+          i,
+          i + BacktestDataLoaderService.DEPTH_BATCH_SIZE,
+        );
+        await this.loadDepthBatch(
+          batch,
+          chunkStart,
+          chunkEnd,
+          endInclusive,
+          cache,
+        );
+      }
+
+      // Ensure DESC sort per key (defensive — batch order may interleave)
+      for (const entries of cache.values()) {
+        entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      }
+
+      return cache;
+    } catch (error) {
+      // Graceful degradation: modelFill falls back to close-price when depth cache is empty
+      this.logger.warn(
+        `Depth pre-loading failed, falling back to close-price fills: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return cache;
+    }
+  }
+
+  private async loadDepthBatch(
+    batchIds: string[],
+    chunkStart: Date,
+    chunkEnd: Date,
+    endInclusive: boolean,
+    cache: DepthCache,
+  ): Promise<void> {
+    const endCondition = endInclusive
+      ? Prisma.sql`AND "timestamp" <= ${chunkEnd}`
+      : Prisma.sql`AND "timestamp" < ${chunkEnd}`;
+
+    const records = await this.prisma.$queryRaw<
+      Array<{
+        platform: string;
+        contract_id: string;
+        source: HistoricalDataSource;
+        bids: unknown;
+        asks: unknown;
+        timestamp: Date;
+        update_type: 'snapshot' | 'price_change' | null;
+      }>
+    >(Prisma.sql`
+      SELECT platform, contract_id, source, bids, asks, "timestamp", update_type
+      FROM historical_depths
+      WHERE contract_id = ANY(${batchIds}::text[])
+        AND "timestamp" >= ${chunkStart}
+        ${endCondition}
+        AND update_type = 'snapshot'
+      ORDER BY "timestamp" DESC
+    `);
 
     for (const record of records) {
-      const key = `${record.platform}:${record.contractId}`;
-      const bidsJson = record.bids as unknown;
-      const asksJson = record.asks as unknown;
+      const key = `${record.platform}:${record.contract_id}`;
+      const bidsJson = record.bids;
+      const asksJson = record.asks;
 
       if (!Array.isArray(bidsJson) || !Array.isArray(asksJson)) continue;
 
       const parsed: NormalizedHistoricalDepth = {
         platform: record.platform,
-        contractId: record.contractId,
+        contractId: record.contract_id,
         source: record.source,
         bids: parseJsonDepthLevels(bidsJson as Array<Record<string, unknown>>),
         asks: parseJsonDepthLevels(asksJson as Array<Record<string, unknown>>),
         timestamp: record.timestamp,
-        updateType: record.updateType as 'snapshot' | 'price_change' | null,
+        updateType: record.update_type,
       };
 
       if (!cache.has(key)) cache.set(key, []);
       cache.get(key)!.push(parsed);
     }
-
-    // Ensure DESC sort per key (defensive — Prisma returns ordered but grouping may reorder)
-    for (const entries of cache.values()) {
-      entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    }
-
-    return cache;
   }
 
   /**

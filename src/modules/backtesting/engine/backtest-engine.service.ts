@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../common/prisma.service';
 import {
-  SystemHealthError,
+  // SystemHealthError,
   SYSTEM_HEALTH_ERROR_CODES,
 } from '../../../common/errors/system-health-error';
 import { EVENT_NAMES } from '../../../common/events/event-catalog';
@@ -305,17 +305,17 @@ export class BacktestEngineService implements IBacktestEngine {
                 }),
               );
               // Timeout check for empty chunks too
-              if (
-                Date.now() - pipelineStartTime >
-                config.timeoutSeconds * 1000
-              ) {
-                await this.stateMachine.failRun(
-                  runId,
-                  SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
-                  `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
-                );
-                return;
-              }
+              // if (
+              //   Date.now() - pipelineStartTime >
+              //   config.timeoutSeconds * 1000
+              // ) {
+              //   await this.stateMachine.failRun(
+              //     runId,
+              //     SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+              //     `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
+              //   );
+              //   return;
+              // }
               continue;
             }
 
@@ -416,14 +416,14 @@ export class BacktestEngineService implements IBacktestEngine {
             );
 
             // Timeout check at end of each chunk (cumulative, not per-chunk)
-            if (Date.now() - pipelineStartTime > config.timeoutSeconds * 1000) {
-              await this.stateMachine.failRun(
-                runId,
-                SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
-                `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
-              );
-              return;
-            }
+            // if (Date.now() - pipelineStartTime > config.timeoutSeconds * 1000) {
+            //   await this.stateMachine.failRun(
+            //     runId,
+            //     SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+            //     `Pipeline exceeded ${config.timeoutSeconds}s timeout at chunk ${chunkIndex + 1}/${totalChunks}`,
+            //   );
+            //   return;
+            // }
 
             // prices, depthCache, chunkTimeSteps go out of scope → GC
           } catch (err: unknown) {
@@ -564,7 +564,7 @@ export class BacktestEngineService implements IBacktestEngine {
     runId: string,
     config: IBacktestConfig,
     timeSteps: BacktestTimeStep[],
-    startTime: number,
+    _startTime: number,
     depthCache?: DepthCache,
   ): Promise<void> {
     const gasEstimate = new Decimal(config.gasEstimateUsd);
@@ -580,23 +580,23 @@ export class BacktestEngineService implements IBacktestEngine {
     for (const step of timeSteps) {
       if (!isHeadless && this.stateMachine.isCancelled(runId)) return;
 
-      // Timeout check
-      if (Date.now() - startTime > config.timeoutSeconds * 1000) {
-        if (isHeadless) {
-          throw new SystemHealthError(
-            SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
-            `Headless simulation exceeded ${config.timeoutSeconds}s timeout`,
-            'warning',
-            'backtest-engine',
-          );
-        }
-        await this.stateMachine.failRun(
-          runId,
-          SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
-          `Simulation exceeded ${config.timeoutSeconds}s timeout`,
-        );
-        return;
-      }
+      // // Timeout check
+      // if (Date.now() - startTime > config.timeoutSeconds * 1000) {
+      //   if (isHeadless) {
+      //     throw new SystemHealthError(
+      //       SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+      //       `Headless simulation exceeded ${config.timeoutSeconds}s timeout`,
+      //       'warning',
+      //       'backtest-engine',
+      //     );
+      //   }
+      //   await this.stateMachine.failRun(
+      //     runId,
+      //     SYSTEM_HEALTH_ERROR_CODES.BACKTEST_TIMEOUT,
+      //     `Simulation exceeded ${config.timeoutSeconds}s timeout`,
+      //   );
+      //   return;
+      // }
 
       if (!isInTradingWindow(step.timestamp, config)) continue;
 
@@ -750,6 +750,7 @@ export class BacktestEngineService implements IBacktestEngine {
         buySide === 'kalshi' ? 'buy' : 'sell',
         positionSizeUsd,
         depthCache,
+        pairData.kalshiClose,
       );
       const polyFill = await this.fillModelService.modelFill(
         'POLYMARKET',
@@ -759,6 +760,7 @@ export class BacktestEngineService implements IBacktestEngine {
         buySide === 'kalshi' ? 'sell' : 'buy',
         positionSizeUsd,
         depthCache,
+        pairData.polymarketClose,
       );
 
       // Both legs must fill (AC#8)

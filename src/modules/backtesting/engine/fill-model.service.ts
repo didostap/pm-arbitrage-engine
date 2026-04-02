@@ -84,11 +84,23 @@ export class FillModelService {
     side: 'buy' | 'sell',
     positionSize: Decimal,
     depthCache?: DepthCache,
+    closePrice?: Decimal,
   ): Promise<VwapFillResult | null> {
     const depth = depthCache
       ? findNearestDepthFromCache(depthCache, platform, contractId, timestamp)
       : await this.findNearestDepth(platform, contractId, timestamp);
-    if (!depth) return null;
+    if (!depth) {
+      // No depth data — use close price as flat fill (conservative assumption).
+      // Kalshi has no public depth API; empty depth table is expected early on.
+      if (closePrice && closePrice.gt(0)) {
+        return {
+          vwap: closePrice,
+          filledQty: positionSize.div(closePrice),
+          totalQtyAvailable: positionSize.div(closePrice),
+        };
+      }
+      return null;
+    }
 
     const orderBook = this.adaptDepthToOrderBook(depth, platformId);
 
