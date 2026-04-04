@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16
+    image: timescale/timescaledb-ha:pg16.13-ts2.26.1-oss
     container_name: pm-arbitrage-postgres-dev
     command:
       - 'postgres'

@@ -514,7 +514,7 @@ model HistoricalPrice {
 
 // Historical trade data for backtesting (Story 10-9-1a)
 model HistoricalTrade {
-  id              Int                  @id @default(autoincrement())
+  id              Int                  @default(autoincrement())
   platform        Platform
   contractId      String               @map("contract_id")
   source          HistoricalDataSource
@@ -526,10 +526,9 @@ model HistoricalTrade {
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
-  @@unique([platform, contractId, source, externalTradeId])
-  @@index([platform, contractId, timestamp])
+  @@id([id, timestamp])
+  @@unique([platform, contractId, source, externalTradeId, timestamp])
   @@index([source, timestamp])
-  @@index([timestamp])
   @@map("historical_trades")
 }
 

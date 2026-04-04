@@ -122,7 +122,7 @@ export async function bulkInsertTrades(
   return prisma.$executeRawUnsafe(
     `INSERT INTO historical_trades (platform,contract_id,source,external_trade_id,price,size,side,timestamp)
      VALUES ${values}
-     ON CONFLICT (platform,contract_id,source,external_trade_id) DO NOTHING`,
+     ON CONFLICT (platform,contract_id,source,external_trade_id,timestamp) DO NOTHING`,
     ...params,
   );
 }

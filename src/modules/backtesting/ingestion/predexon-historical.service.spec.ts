@@ -225,6 +225,9 @@ describe('PredexonHistoricalService', () => {
       expect(prisma.$executeRawUnsafe).toHaveBeenCalled();
       const sql = prisma.$executeRawUnsafe.mock.calls[0]?.[0] as string;
       expect(sql).toContain('INSERT INTO historical_trades');
+      expect(sql).toContain(
+        'ON CONFLICT (platform,contract_id,source,external_trade_id,timestamp) DO NOTHING',
+      );
       const params = prisma.$executeRawUnsafe.mock.calls[0]?.slice(1);
       expect(params).toContain('PREDEXON');
       expect(params).toContain('trade-1');
