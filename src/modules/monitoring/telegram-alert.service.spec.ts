@@ -528,8 +528,8 @@ describe('TelegramAlertService', () => {
   });
 
   describe('TELEGRAM_ELIGIBLE_EVENTS constant', () => {
-    it('should contain exactly 25 events', () => {
-      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(25);
+    it('should contain exactly 26 events', () => {
+      expect(TELEGRAM_ELIGIBLE_EVENTS.size).toBe(26);
     });
 
     it('should contain all expected events', () => {
@@ -557,6 +557,7 @@ describe('TelegramAlertService', () => {
         EVENT_NAMES.AGGREGATE_CLUSTER_LIMIT_BREACHED,
         EVENT_NAMES.CONFIG_BANKROLL_UPDATED,
         EVENT_NAMES.DATA_DIVERGENCE,
+        EVENT_NAMES.TIMESCALE_RETENTION_COMPLETED,
       ];
       for (const eventName of expected) {
         expect(TELEGRAM_ELIGIBLE_EVENTS.has(eventName)).toBe(true);

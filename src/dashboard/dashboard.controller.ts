@@ -32,14 +32,19 @@ import {
   PositionsQueryDto,
   BankrollConfigResponseDto,
   UpdateBankrollDto,
+  StorageStatsResponseDto,
 } from './dto';
+import { DashboardStorageService } from './dashboard-storage.service';
 
 @Controller('dashboard')
 @UseGuards(AuthTokenGuard)
 @ApiTags('Dashboard')
 @ApiBearerAuth()
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly dashboardStorageService: DashboardStorageService,
+  ) {}
 
   @Get('overview')
   @ApiOperation({
@@ -161,6 +166,16 @@ export class DashboardController {
     @Body(new ValidationPipe({ whitelist: true })) dto: UpdateBankrollDto,
   ): Promise<BankrollConfigResponseDto> {
     const data = await this.dashboardService.updateBankroll(dto.bankrollUsd);
+    return { data, timestamp: new Date().toISOString() };
+  }
+
+  @Get('storage')
+  @ApiOperation({
+    summary: 'Get TimescaleDB storage and compression stats',
+  })
+  @ApiResponse({ status: 200, type: StorageStatsResponseDto })
+  async getStorageStats(): Promise<StorageStatsResponseDto> {
+    const data = await this.dashboardStorageService.getStorageStats();
     return { data, timestamp: new Date().toISOString() };
   }
 

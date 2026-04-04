@@ -11,3 +11,4 @@ export * from './position-detail.dto';
 export * from './bankroll-config.dto';
 export * from './update-settings.dto';
 export * from './reset-settings.dto';
+export * from './storage-stats.dto';

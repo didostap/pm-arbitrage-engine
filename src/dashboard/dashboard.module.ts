@@ -22,6 +22,7 @@ import { SettingsController } from './settings.controller';
 import { SettingsService } from './settings.service';
 import { MonitoringModule } from '../modules/monitoring/monitoring.module';
 import { ConfigAccessor } from '../common/config/config-accessor.service';
+import { DashboardStorageService } from './dashboard-storage.service';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ConfigAccessor } from '../common/config/config-accessor.service';
     EngineConfigRepository,
     SettingsService,
     ConfigAccessor,
+    DashboardStorageService,
   ],
   exports: [ConfigAccessor],
 })

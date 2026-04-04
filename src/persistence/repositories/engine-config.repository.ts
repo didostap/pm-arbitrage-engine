@@ -194,6 +194,16 @@ function buildEffectiveConfig(
     stalenessThresholdValidationMs: resolve(
       'stalenessThresholdValidationMs',
     ) as number,
+    // TimescaleDB Retention
+    retentionDaysHistoricalPrices: resolve(
+      'retentionDaysHistoricalPrices',
+    ) as number,
+    retentionDaysHistoricalTrades: resolve(
+      'retentionDaysHistoricalTrades',
+    ) as number,
+    retentionDaysHistoricalDepths: resolve(
+      'retentionDaysHistoricalDepths',
+    ) as number,
     // External Pair Ingestion
     externalPairIngestionCronExpression: resolve(
       'externalPairIngestionCronExpression',

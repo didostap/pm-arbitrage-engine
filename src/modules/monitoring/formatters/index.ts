@@ -7,3 +7,4 @@ export * from './platform-formatters.js';
 export * from './system-formatters.js';
 export * from './resolution-formatters.js';
 export * from './unwind-formatters.js';
+export * from './retention-formatters.js';

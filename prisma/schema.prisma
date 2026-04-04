@@ -116,6 +116,11 @@ model EngineConfig {
   // --- Audit Log (1) ---
   auditLogRetentionDays Int? @map("audit_log_retention_days")
 
+  // --- TimescaleDB Retention (3) ---
+  retentionDaysHistoricalPrices    Int?     @map("retention_days_historical_prices")
+  retentionDaysHistoricalTrades    Int?     @map("retention_days_historical_trades")
+  retentionDaysHistoricalDepths    Int?     @map("retention_days_historical_depths")
+
   // --- Stress Testing (3) ---
   stressTestScenarios       Int?     @map("stress_test_scenarios")
   stressTestDefaultDailyVol Decimal? @map("stress_test_default_daily_vol") @db.Decimal(20, 8)

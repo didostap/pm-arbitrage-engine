@@ -857,3 +857,179 @@ describe.runIf(DATABASE_URL)(
     });
   },
 );
+
+// --- Story 10-95-3: TimescaleDB Compression tests ---
+
+describe.runIf(DATABASE_URL)(
+  'TimescaleDB Compression — all hypertables',
+  () => {
+    let prisma: PrismaClient;
+
+    beforeAll(async () => {
+      prisma = new PrismaClient({
+        datasources: { db: { url: DATABASE_URL } },
+      });
+      await prisma.$connect();
+    });
+
+    afterAll(async () => {
+      await prisma.$disconnect();
+    });
+
+    // --- P0: Compression enabled verification ---
+
+    it('[P0] compression is enabled on historical_prices', async () => {
+      const result = await prisma.$queryRaw<
+        { compression_enabled: boolean }[]
+      >`SELECT compression_enabled FROM timescaledb_information.hypertables
+        WHERE hypertable_name = 'historical_prices'`;
+
+      expect(result).toHaveLength(1);
+      expect(result[0].compression_enabled).toBe(true);
+    });
+
+    it('[P0] compression is enabled on historical_depths', async () => {
+      const result = await prisma.$queryRaw<
+        { compression_enabled: boolean }[]
+      >`SELECT compression_enabled FROM timescaledb_information.hypertables
+        WHERE hypertable_name = 'historical_depths'`;
+
+      expect(result).toHaveLength(1);
+      expect(result[0].compression_enabled).toBe(true);
+    });
+
+    it('[P0] compression is enabled on historical_trades', async () => {
+      const result = await prisma.$queryRaw<
+        { compression_enabled: boolean }[]
+      >`SELECT compression_enabled FROM timescaledb_information.hypertables
+        WHERE hypertable_name = 'historical_trades'`;
+
+      expect(result).toHaveLength(1);
+      expect(result[0].compression_enabled).toBe(true);
+    });
+
+    // --- P0: Compression policy verification ---
+
+    it('[P0] compression policy exists for historical_prices', async () => {
+      const result = await prisma.$queryRaw<
+        { hypertable_name: string }[]
+      >`SELECT hypertable_name FROM timescaledb_information.jobs
+        WHERE hypertable_name = 'historical_prices'
+          AND proc_name = 'policy_compression'`;
+
+      expect(result).toHaveLength(1);
+    });
+
+    it('[P0] compression policy exists for historical_depths', async () => {
+      const result = await prisma.$queryRaw<
+        { hypertable_name: string }[]
+      >`SELECT hypertable_name FROM timescaledb_information.jobs
+        WHERE hypertable_name = 'historical_depths'
+          AND proc_name = 'policy_compression'`;
+
+      expect(result).toHaveLength(1);
+    });
+
+    it('[P0] compression policy exists for historical_trades', async () => {
+      const result = await prisma.$queryRaw<
+        { hypertable_name: string }[]
+      >`SELECT hypertable_name FROM timescaledb_information.jobs
+        WHERE hypertable_name = 'historical_trades'
+          AND proc_name = 'policy_compression'`;
+
+      expect(result).toHaveLength(1);
+    });
+
+    // --- P1: Storage stats query returns expected structure ---
+
+    it('[P1] hypertable_compression_stats returns expected columns', async () => {
+      const result = await prisma.$queryRaw<
+        {
+          hypertable_name: string;
+          total_chunks: number;
+          compressed_chunks: number;
+          before_compression: string;
+          after_compression: string;
+          compression_ratio_pct: number;
+        }[]
+      >`SELECT
+          'historical_prices' AS hypertable_name,
+          COALESCE(total_chunks, 0)::int AS total_chunks,
+          COALESCE(number_compressed_chunks, 0)::int AS compressed_chunks,
+          pg_size_pretty(COALESCE(before_compression_total_bytes, 0)) AS before_compression,
+          pg_size_pretty(COALESCE(after_compression_total_bytes, 0)) AS after_compression,
+          ROUND(
+            COALESCE(1 - after_compression_total_bytes::numeric
+              / NULLIF(before_compression_total_bytes, 0), 0) * 100, 1
+          )::float AS compression_ratio_pct
+        FROM hypertable_compression_stats('historical_prices')`;
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          hypertable_name: 'historical_prices',
+          total_chunks: expect.any(Number),
+          compressed_chunks: expect.any(Number),
+        }),
+      );
+    });
+
+    // --- P1: Compressed chunk remains queryable ---
+
+    it('[P1] data inserted into old chunk can be queried after compression', async () => {
+      const contractId = 'test-timescaledb-compression-001';
+      const oldTimestamp = new Date('2023-01-15T12:00:00Z');
+
+      // Clean up any previous test data
+      await prisma.historicalTrade.deleteMany({ where: { contractId } });
+
+      // Insert data with a very old timestamp (will land in an old chunk)
+      await prisma.historicalTrade.create({
+        data: {
+          platform: 'KALSHI',
+          contractId,
+          source: 'PREDEXON',
+          externalTradeId: 'compression-test-1',
+          price: 0.55,
+          size: 100,
+          side: 'BUY',
+          timestamp: oldTimestamp,
+        },
+      });
+
+      // Try to compress the chunk containing this data
+      const chunks = await prisma.$queryRaw<
+        { chunk_full_name: string }[]
+      >`SELECT format('%I.%I', chunk_schema, chunk_name) AS chunk_full_name
+        FROM timescaledb_information.chunks
+        WHERE hypertable_name = 'historical_trades'
+          AND NOT is_compressed
+          AND range_end < NOW() - INTERVAL '7 days'
+          AND range_start <= ${oldTimestamp}::timestamptz
+          AND range_end > ${oldTimestamp}::timestamptz
+        LIMIT 1`;
+
+      if (chunks.length > 0) {
+        // Compress the chunk
+        await prisma.$queryRawUnsafe(
+          `SELECT compress_chunk('${chunks[0].chunk_full_name}'::regclass)`,
+        );
+
+        // Verify data is still queryable after compression
+        const result = await prisma.historicalTrade.findMany({
+          where: { contractId },
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0].externalTradeId).toBe('compression-test-1');
+
+        // Decompress for cleanup
+        await prisma.$queryRawUnsafe(
+          `SELECT decompress_chunk('${chunks[0].chunk_full_name}'::regclass)`,
+        );
+      }
+
+      // Clean up
+      await prisma.historicalTrade.deleteMany({ where: { contractId } });
+    });
+  },
+);

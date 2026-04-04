@@ -36,6 +36,7 @@ import {
   formatDataDivergence,
   formatShadowDailySummary,
   formatAutoUnwind,
+  formatTimescaleRetentionCompleted,
 } from './formatters/index.js';
 import {
   type AlertSeverity,
@@ -81,9 +82,10 @@ import type { ResolutionDivergedEvent } from '../../common/events/resolution-div
 import type { ResolutionPollCompletedEvent } from '../../common/events/resolution-poll-completed.event.js';
 import type { CalibrationCompletedEvent } from '../../common/events/calibration-completed.event.js';
 import type { BankrollUpdatedEvent } from '../../common/events/config.events.js';
+import type { TimescaleRetentionCompletedEvent } from '../../common/events/timescale-retention-completed.event.js';
 
 /**
- * The 25 events that have dedicated Telegram formatters.
+ * The 26 events that have dedicated Telegram formatters.
  * Used by TelegramAlertService.sendEventAlert() for formatter dispatch.
  * NOTE: EventConsumerService uses its own hybrid routing logic (Critical/Warning → always,
  * Info → TELEGRAM_ELIGIBLE_INFO_EVENTS allowlist) rather than this set directly.
@@ -115,6 +117,7 @@ export const TELEGRAM_ELIGIBLE_EVENTS = new Set<string>([
   EVENT_NAMES.DATA_DIVERGENCE,
   EVENT_NAMES.SHADOW_DAILY_SUMMARY,
   EVENT_NAMES.AUTO_UNWIND,
+  EVENT_NAMES.TIMESCALE_RETENTION_COMPLETED,
 ]);
 
 /**
@@ -219,6 +222,11 @@ const FORMATTER_REGISTRY = new Map<string, (event: BaseEvent) => string>([
     (e) => formatShadowDailySummary(e as ShadowDailySummaryEvent),
   ],
   [EVENT_NAMES.AUTO_UNWIND, (e) => formatAutoUnwind(e as AutoUnwindEvent)],
+  [
+    EVENT_NAMES.TIMESCALE_RETENTION_COMPLETED,
+    (e) =>
+      formatTimescaleRetentionCompleted(e as TimescaleRetentionCompletedEvent),
+  ],
 ]);
 
 @Injectable()

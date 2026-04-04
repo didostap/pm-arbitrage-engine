@@ -283,6 +283,10 @@ export const EVENT_NAMES = {
   /** Emitted after each chunk completes in the chunked backtest pipeline */
   BACKTEST_PIPELINE_CHUNK_COMPLETED: 'backtesting.pipeline.chunk.completed',
 
+  // [Story 10-95-3] TimescaleDB Retention Events
+  /** Emitted when daily retention cron completes with per-table chunk drop counts */
+  TIMESCALE_RETENTION_COMPLETED: 'timescale.retention.completed',
+
   // [Story 10-9-7] External Pair Ingestion Events
   /** Emitted when external pair ingestion run completes with per-source stats */
   EXTERNAL_PAIR_INGESTION_RUN_COMPLETED:

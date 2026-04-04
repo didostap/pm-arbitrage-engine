@@ -349,6 +349,20 @@ export const CONFIG_DEFAULTS = {
     defaultValue: 259_200_000,
   },
 
+  // --- TimescaleDB Retention (Story 10-95-3) ---
+  retentionDaysHistoricalPrices: {
+    envKey: 'RETENTION_DAYS_HISTORICAL_PRICES',
+    defaultValue: 730,
+  },
+  retentionDaysHistoricalTrades: {
+    envKey: 'RETENTION_DAYS_HISTORICAL_TRADES',
+    defaultValue: 365,
+  },
+  retentionDaysHistoricalDepths: {
+    envKey: 'RETENTION_DAYS_HISTORICAL_DEPTHS',
+    defaultValue: 180,
+  },
+
   // --- External Pair Ingestion (Story 10-9-7) ---
   externalPairIngestionCronExpression: {
     envKey: 'EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION',

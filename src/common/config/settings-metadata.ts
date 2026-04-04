@@ -357,6 +357,39 @@ export const SETTINGS_METADATA: Record<
     max: 3650,
     unit: 'days',
   },
+  retentionDaysHistoricalPrices: {
+    group: SettingsGroup.LoggingCompliance,
+    label: 'Retention: Historical Prices',
+    description:
+      'Days to retain historical price data before chunk-level drop. Min 30.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.retentionDaysHistoricalPrices.defaultValue,
+    min: 30,
+    max: 3650,
+    unit: 'days',
+  },
+  retentionDaysHistoricalTrades: {
+    group: SettingsGroup.LoggingCompliance,
+    label: 'Retention: Historical Trades',
+    description:
+      'Days to retain historical trade data before chunk-level drop. Min 30.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.retentionDaysHistoricalTrades.defaultValue,
+    min: 30,
+    max: 3650,
+    unit: 'days',
+  },
+  retentionDaysHistoricalDepths: {
+    group: SettingsGroup.LoggingCompliance,
+    label: 'Retention: Historical Depths',
+    description:
+      'Days to retain historical depth data before chunk-level drop. Min 30.',
+    type: 'integer',
+    envDefault: CONFIG_DEFAULTS.retentionDaysHistoricalDepths.defaultValue,
+    min: 30,
+    max: 3650,
+    unit: 'days',
+  },
 
   // ── Telegram ──────────────────────────────────────────────────────────
   telegramTestAlertCron: {

@@ -133,6 +133,11 @@ export interface EffectiveConfig {
   stalenessThresholdOddspipeMs: number;
   stalenessThresholdValidationMs: number;
 
+  // --- TimescaleDB Retention ---
+  retentionDaysHistoricalPrices: number;
+  retentionDaysHistoricalTrades: number;
+  retentionDaysHistoricalDepths: number;
+
   // --- External Pair Ingestion ---
   externalPairIngestionCronExpression: string;
   externalPairIngestionEnabled: boolean;

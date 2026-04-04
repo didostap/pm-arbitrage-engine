@@ -312,6 +312,23 @@ export const envSchema = z.object({
     .positive()
     .default(259_200_000),
 
+  // TimescaleDB Retention (Story 10-95-3) — configurable retention periods per hypertable
+  RETENTION_DAYS_HISTORICAL_PRICES: z.coerce
+    .number()
+    .int()
+    .min(30)
+    .default(730),
+  RETENTION_DAYS_HISTORICAL_TRADES: z.coerce
+    .number()
+    .int()
+    .min(30)
+    .default(365),
+  RETENTION_DAYS_HISTORICAL_DEPTHS: z.coerce
+    .number()
+    .int()
+    .min(30)
+    .default(180),
+
   // External Pair Ingestion (Story 10-9-7) — cron schedule, enabled flag, dedup threshold, LLM concurrency
   EXTERNAL_PAIR_INGESTION_CRON_EXPRESSION: z.string().default('0 0 6,18 * * *'),
   EXTERNAL_PAIR_INGESTION_ENABLED: z

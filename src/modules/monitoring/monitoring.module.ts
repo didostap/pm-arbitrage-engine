@@ -13,6 +13,9 @@ import { AuditLogRepository } from '../../persistence/repositories/audit-log.rep
 import { OrderRepository } from '../../persistence/repositories/order.repository.js';
 import { PositionRepository } from '../../persistence/repositories/position.repository.js';
 import { MatchAprUpdaterService } from './match-apr-updater.service.js';
+import { TimescaleStorageService } from './timescale-storage.service.js';
+import { ConfigAccessor } from '../../common/config/config-accessor.service.js';
+import { EngineConfigRepository } from '../../persistence/repositories/engine-config.repository.js';
 
 @Module({
   imports: [ConfigModule, PersistenceModule],
@@ -29,12 +32,16 @@ import { MatchAprUpdaterService } from './match-apr-updater.service.js';
     OrderRepository,
     PositionRepository,
     MatchAprUpdaterService,
+    TimescaleStorageService,
+    ConfigAccessor,
+    EngineConfigRepository,
   ],
   exports: [
     TelegramAlertService,
     EventConsumerService,
     CsvTradeLogService,
     AuditLogService,
+    TimescaleStorageService,
   ],
 })
 export class MonitoringModule {}
