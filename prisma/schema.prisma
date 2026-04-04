@@ -489,7 +489,7 @@ enum HistoricalDataSource {
 
 // Historical OHLCV price data for backtesting (Story 10-9-1a)
 model HistoricalPrice {
-  id              Int                  @id @default(autoincrement())
+  id              Int                  @default(autoincrement())
   platform        Platform
   contractId      String               @map("contract_id")
   source          HistoricalDataSource
@@ -504,11 +504,10 @@ model HistoricalPrice {
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
+  @@id([id, timestamp])
   @@unique([platform, contractId, source, intervalMinutes, timestamp])
   @@index([platform, contractId, timestamp])
   @@index([source, timestamp])
-  @@index([timestamp])
-  @@index([contractId, source, timestamp])
   @@map("historical_prices")
 }
 
@@ -542,7 +541,7 @@ enum DataCatalogStatus {
 
 // Historical L2 orderbook depth data for backtesting (Story 10-9-1b)
 model HistoricalDepth {
-  id              Int                  @id @default(autoincrement())
+  id              Int                  @default(autoincrement())
   platform        Platform
   contractId      String               @map("contract_id")
   source          HistoricalDataSource
@@ -553,10 +552,10 @@ model HistoricalDepth {
   ingestionTs     DateTime             @default(now()) @map("ingestion_ts") @db.Timestamptz
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
 
+  @@id([id, timestamp])
   @@unique([platform, contractId, source, timestamp])
   @@index([platform, contractId, timestamp])
   @@index([source, timestamp])
-  @@index([timestamp])
   @@index([contractId, source, timestamp])
   @@map("historical_depths")
 }
